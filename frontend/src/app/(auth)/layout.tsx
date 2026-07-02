@@ -1,4 +1,5 @@
 import type { Metadata } from "next"
+import Link from "next/link"
 import { BrandLogo } from "@/components/layout/brand-logo"
 
 export const metadata: Metadata = {
@@ -16,9 +17,9 @@ export default function AuthLayout({
       <div className="flex flex-col items-center justify-center px-8 py-12">
         {/* Logo */}
         <div className="mb-12 w-full max-w-sm">
-          <a href="/" className="inline-flex items-center gap-2">
+          <Link href="/" className="inline-flex items-center gap-2">
             <BrandLogo />
-          </a>
+          </Link>
         </div>
         {children}
       </div>

@@ -41,7 +41,6 @@ function KpiCard({
   index: number
 }) {
   const value = insight.data?.value as number | undefined
-  const change = insight.data?.change as number | undefined
   const changePercent = insight.data?.change_percent as number | undefined
   const currency = insight.data?.is_currency as boolean | undefined
   const Icon = getKpiIcon(insight.title)
