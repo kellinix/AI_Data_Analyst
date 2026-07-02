@@ -17,6 +17,6 @@ async def health_check():
         db_status = "error"
 
     return {
-        "status": "ok" if db_status == "ok" else "degraded",
+        "status": "healthy" if db_status == "ok" else "degraded",
         "database": db_status,
     }

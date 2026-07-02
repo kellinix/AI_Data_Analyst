@@ -649,9 +649,7 @@ class FileProcessor:
 
             q1 = series.quantile(0.25)
             q3 = series.quantile(0.75)
-            lower_cap = series.quantile(0.01)
-            upper_cap = series.quantile(0.99)
-            if q1 is None or q3 is None or lower_cap is None or upper_cap is None:
+            if q1 is None or q3 is None:
                 continue
 
             iqr = q3 - q1
@@ -660,6 +658,18 @@ class FileProcessor:
 
             lower_fence = q1 - 1.5 * iqr
             upper_fence = q3 + 1.5 * iqr
+            lower_quantile = series.quantile(0.01)
+            upper_quantile = series.quantile(0.99)
+            lower_cap = (
+                max(float(lower_quantile), float(lower_fence))
+                if lower_quantile is not None
+                else float(lower_fence)
+            )
+            upper_cap = (
+                min(float(upper_quantile), float(upper_fence))
+                if upper_quantile is not None
+                else float(upper_fence)
+            )
             low_count = int(df.filter(pl.col(column) < lower_fence).height)
             high_count = int(df.filter(pl.col(column) > upper_fence).height)
             capped_count = low_count + high_count
@@ -1290,12 +1300,11 @@ def _to_datetime_mixed(values: pd.Series, *, dayfirst: bool) -> pd.Series:
 
 
 def _has_time_or_timezone(value: str) -> bool:
-    return bool(
-        re.search(r"\d{1,2}:\d{2}", value)
-        or re.search(r"(Z|[+-]\d{2}:?\d{2})$", value.strip(), re.IGNORECASE)
-        or "utc" in value.lower()
-        or "gmt" in value.lower()
-    )
+    stripped = value.strip()
+    has_time = bool(re.search(r"\d{1,2}:\d{2}", stripped))
+    has_timezone = bool(re.search(r"(Z|[+-]\d{2}:?\d{2})$", stripped, re.IGNORECASE))
+    has_timezone_word = "utc" in stripped.lower() or "gmt" in stripped.lower()
+    return has_time or ((has_timezone or has_timezone_word) and ("T" in stripped or has_time))
 
 
 def _row_text_signature(row: dict[str, Any], text_columns: list[str]) -> str:
