@@ -1,0 +1,89 @@
+# ============================================================
+# AI Dashboard Generator — Backend Dependencies
+# Python 3.12+
+# ============================================================
+
+# Web framework
+fastapi==0.115.12
+uvicorn[standard]==0.34.3
+gunicorn==23.0.0
+
+# Async
+anyio==4.9.0
+httpx==0.28.1
+aiofiles==24.1.0
+
+# Database — SQLAlchemy + PostgreSQL async driver
+sqlalchemy[asyncio]==2.0.41
+asyncpg==0.30.0
+alembic==1.15.2
+psycopg2-binary==2.9.10
+
+# Redis + Celery
+redis==5.2.1
+celery==5.5.3
+flower==2.0.1
+kombu==5.5.2
+
+# Data processing
+pandas==2.2.3
+polars==1.30.0
+fastexcel==0.14.0
+pyarrow==20.0.0
+openpyxl==3.1.5
+xlrd==2.0.1
+
+# In-memory analytics
+duckdb==1.2.2
+
+# AI
+openai==1.84.0
+
+# Vector search (for RAG)
+numpy==2.2.6
+scipy==1.15.3
+
+# Authentication / Security
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+python-multipart==0.0.20
+cryptography==44.0.3
+
+# Configuration
+pydantic==2.11.5
+pydantic-settings==2.9.1
+
+# File processing
+python-magic==0.4.27
+chardet==5.2.0
+
+# PDF generation for exports
+reportlab==4.3.0
+Pillow==11.2.1
+
+# Excel export
+xlsxwriter==3.2.2
+
+# Logging
+structlog==25.3.0
+python-json-logger==3.3.0
+
+# Validation
+email-validator==2.2.0
+
+# CORS / security
+slowapi==0.1.9
+
+# Cloud storage
+boto3==1.38.26
+supabase==2.15.3
+
+# Monitoring
+sentry-sdk[fastapi]==2.25.1
+
+# Testing
+pytest==8.3.5
+pytest-asyncio==0.26.0
+pytest-cov==6.1.0
+httpx==0.28.1
+factory-boy==3.3.3

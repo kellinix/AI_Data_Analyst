@@ -1,0 +1,135 @@
+# ============================================================
+# AI Dashboard Generator — .gitignore
+# ============================================================
+
+# ----- Environment & Secrets --------------------------------
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+.env.*.local
+*.pem
+*.key
+*.crt
+secrets/
+
+# ----- Node / Frontend --------------------------------------
+node_modules/
+.pnp
+.pnp.js
+.yarn/install-state.gz
+frontend/.next/
+frontend/out/
+frontend/dist/
+frontend/build/
+frontend/.turbo/
+frontend/coverage/
+frontend/*.tsbuildinfo
+frontend/.eslintcache
+
+# ----- Python / Backend -------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+backend/build/
+backend/dist/
+backend/*.egg-info/
+backend/.eggs/
+backend/.venv/
+.venv/
+venv/
+ENV/
+env/
+pip-log.txt
+pip-delete-this-directory.txt
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pytest_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+*.cover
+*.py,cover
+nosetests.xml
+test-results/
+backend/celerybeat-schedule
+backend/celerybeat.pid
+
+# ----- Alembic ----------------------------------------------
+backend/alembic/versions/__pycache__/
+
+# ----- Docker -----------------------------------------------
+docker/data/
+docker/logs/
+docker/postgres-data/
+docker/redis-data/
+
+# ----- IDE & Editors ----------------------------------------
+.vscode/settings.json
+.vscode/launch.json
+.idea/
+*.swp
+*.swo
+*.swn
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ----- OS ---------------------------------------------------
+.DS_Store
+.AppleDouble
+.LSOverride
+Icon
+._*
+.DocumentRevisions-V100
+.fseventsd
+.Spotlight-V100
+.TemporaryItems
+.Trashes
+.VolumeIcon.icns
+.com.apple.timemachine.donotpresent
+ehthumbs.db
+ehthumbs_vista.db
+[Dd]esktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# ----- Uploads / Data ---------------------------------------
+uploads/
+tmp/
+temp/
+*.csv
+*.xlsx
+*.xls
+*.parquet
+!scripts/*.csv
+!docs/examples/*.csv
+
+# ----- Logs -------------------------------------------------
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.pnpm-debug.log*
+
+# ----- Testing ----------------------------------------------
+coverage/
+.nyc_output/
+test-results/
+playwright-report/
+playwright/.cache/
+
+# ----- Misc -------------------------------------------------
+.cache/
+.parcel-cache/
+*.tgz
+*.zip
+*.tar.gz

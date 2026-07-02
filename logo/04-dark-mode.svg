@@ -1,0 +1,19 @@
+<svg width="480" height="120" viewBox="0 0 480 120" xmlns="http://www.w3.org/2000/svg" role="img">
+  <title>InsightFlow – Dark Mode</title>
+  <desc>InsightFlow full logo on dark background</desc>
+  <rect width="480" height="120" rx="12" fill="#0F172A"/>
+
+  <!-- Dark mode icon -->
+  <g transform="translate(40, 22)">
+    <rect x="0" y="28" width="14" height="28" rx="3" fill="#2DD4BF"/>
+    <rect x="22" y="14" width="14" height="42" rx="3" fill="#60A5FA"/>
+    <rect x="44" y="0" width="14" height="56" rx="3" fill="#FFFFFF"/>
+    <path d="M7 26 Q28 -8 51 -2" fill="none" stroke="#60A5FA" stroke-width="2" stroke-linecap="round" opacity="0.4"/>
+    <circle cx="51" cy="-2" r="3.5" fill="#2DD4BF"/>
+  </g>
+
+  <!-- Wordmark -->
+  <text x="120" y="58" font-family="'Inter', 'SF Pro Display', -apple-system, sans-serif" font-weight="600" font-size="36" letter-spacing="-1" fill="#FFFFFF">Insight<tspan fill="#60A5FA">Flow</tspan></text>
+  <!-- Tagline -->
+  <text x="121" y="82" font-family="'Inter', 'SF Pro Display', -apple-system, sans-serif" font-weight="400" font-size="13" fill="#475569" letter-spacing="0.1">Business intelligence, beautifully clear</text>
+</svg>
