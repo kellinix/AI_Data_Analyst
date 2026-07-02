@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import hashlib
 import mimetypes
-import os
 import uuid
 from pathlib import Path
 
 import aiofiles
 from fastapi import APIRouter, File, HTTPException, UploadFile, status
 
-from app.api.deps import CurrentUser, DB
+from app.api.deps import DB, CurrentUser
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.analysis import UploadedFile

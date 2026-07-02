@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Analysis Engine — Orchestrates the full pipeline for a single analysis.
 
@@ -12,13 +10,15 @@ Pipeline:
 6. Persist results to DB
 """
 
+from __future__ import annotations
+
 import uuid
 from pathlib import Path
 from typing import Any
 
 import duckdb
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.analytics.anomaly_detection import detect_anomalies
@@ -243,7 +243,7 @@ class AnalysisEngine:
                     """).fetchall()
                     x_data = [str(r[0]) for r in rows]
                     opt["xAxis"]["data"] = x_data
-                    for index, col in enumerate(y_cols):
+                    for index, _col in enumerate(y_cols):
                         opt["series"][index]["data"] = [
                             round(float(r[index + 1]), 2) if r[index + 1] is not None else 0
                             for r in rows

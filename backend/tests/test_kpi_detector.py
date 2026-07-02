@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import pytest
 from app.analytics.kpi_detector import detect_kpis
 
 

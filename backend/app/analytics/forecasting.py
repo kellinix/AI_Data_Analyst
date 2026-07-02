@@ -1,11 +1,11 @@
-from __future__ import annotations
-
 """
 Lightweight statistical forecasting.
 
 This intentionally stays deterministic and transparent. It gives the LLM and UI
 grounded forecast ranges without claiming more certainty than the data supports.
 """
+
+from __future__ import annotations
 
 from typing import Any
 

@@ -1,11 +1,11 @@
-from __future__ import annotations
-
 """
 Chart selector: automatically picks the best chart for each data pattern.
 """
 
-from typing import Any
+from __future__ import annotations
+
 import uuid
+from typing import Any
 
 
 def select_charts(

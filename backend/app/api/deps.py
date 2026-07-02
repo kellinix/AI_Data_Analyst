@@ -1,17 +1,15 @@
 from __future__ import annotations
 
-import uuid
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import verify_supabase_token
 from app.db.session import get_db
 from app.models.user import User
-from app.models.subscription import Subscription
 
 bearer_scheme = HTTPBearer(auto_error=False)
 

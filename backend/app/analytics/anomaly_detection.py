@@ -1,8 +1,8 @@
-from __future__ import annotations
-
 """
 Statistical anomaly detection.
 """
+
+from __future__ import annotations
 
 from typing import Any
 

@@ -21,7 +21,7 @@ class ChatSessionResponse(BaseModel):
     message_count: int
     created_at: datetime
     updated_at: datetime
-    last_message: "ChatMessageResponse | None" = None
+    last_message: ChatMessageResponse | None = None
 
 
 class SendMessageRequest(BaseModel):

@@ -7,8 +7,8 @@ import pytest
 pytest.importorskip("pydantic_settings")
 
 from app.services.ai_service import (
-    _compute_team_performance_context,
     _chart_config_markdown_answer,
+    _compute_team_performance_context,
     _known_metric_notes,
 )
 

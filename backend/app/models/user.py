@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-import uuid
-from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text, func
-from sqlalchemy.dialects.postgresql import JSONB, UUID
+from sqlalchemy import Boolean, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -14,6 +11,7 @@ from app.db.mixins import TimestampMixin, UUIDMixin
 
 if TYPE_CHECKING:
     from app.models.analysis import Analysis
+    from app.models.subscription import Subscription
 
 
 class SubscriptionPlan(str, Enum):
@@ -47,10 +45,10 @@ class User(UUIDMixin, TimestampMixin, Base):
     storage_used_bytes: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
 
     # Relationships
-    analyses: Mapped[list["Analysis"]] = relationship(
+    analyses: Mapped[list[Analysis]] = relationship(
         "Analysis", back_populates="user", cascade="all, delete-orphan"
     )
-    subscription: Mapped["Subscription | None"] = relationship(
+    subscription: Mapped[Subscription | None] = relationship(
         "Subscription", back_populates="user", uselist=False
     )
 

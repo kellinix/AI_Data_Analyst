@@ -1,9 +1,9 @@
-from __future__ import annotations
-
 """
 KPI Detector — Identifies business KPIs from column names and statistics.
 Never asks the user. Automatically infers what matters.
 """
+
+from __future__ import annotations
 
 from typing import Any
 

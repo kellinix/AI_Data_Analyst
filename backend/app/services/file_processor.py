@@ -197,14 +197,14 @@ class FileProcessor:
     ) -> list[list[str | None]]:
         rows: list[list[str | None]] = []
         try:
-            with open(file_path, "r", encoding=encoding, errors="replace", newline="") as handle:
+            with open(file_path, encoding=encoding, errors="replace", newline="") as handle:
                 reader = csv.reader(handle, delimiter=delimiter)
                 for row in reader:
                     rows.append(row)
                     if len(rows) >= self.SAMPLE_ROWS:
                         break
         except LookupError:
-            with open(file_path, "r", encoding="utf-8", errors="replace", newline="") as handle:
+            with open(file_path, encoding="utf-8", errors="replace", newline="") as handle:
                 reader = csv.reader(handle, delimiter=delimiter)
                 for row in reader:
                     rows.append(row)
@@ -715,7 +715,7 @@ class FileProcessor:
             return self._normalize_report_table(sheets)
 
         frames: list[pl.DataFrame] = []
-        for sheet_name, raw_sheet in sheets.items():
+        for _sheet_name, raw_sheet in sheets.items():
             normalized = self._normalize_report_table(raw_sheet)
             if normalized.is_empty():
                 continue

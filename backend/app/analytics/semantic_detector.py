@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Semantic column detection.
 
@@ -7,10 +5,11 @@ The product promise is zero configuration, so the platform needs to infer what
 columns mean from names, dtypes, and observed values before any LLM reasoning.
 """
 
-from dataclasses import dataclass
-import re
-from typing import Any
+from __future__ import annotations
 
+import re
+from dataclasses import dataclass
+from typing import Any
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 PHONE_RE = re.compile(r"^\+?[\d\s().-]{7,}$")

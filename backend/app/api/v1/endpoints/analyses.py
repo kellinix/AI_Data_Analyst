@@ -3,14 +3,13 @@ from __future__ import annotations
 import math
 import uuid
 from pathlib import Path
-from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.responses import FileResponse
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import CurrentUser, DB
+from app.api.deps import DB, CurrentUser
 from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.analysis import Analysis, AnalysisStatus, UploadedFile
@@ -19,11 +18,11 @@ from app.schemas.analysis import (
     AnalysisListResponse,
     AnalysisStatusResponse,
     ChartConfig,
-    CreateCombinedAnalysisRequest,
     CreateAnalysisRequest,
+    CreateCombinedAnalysisRequest,
+    InsightResponse,
     PaginatedResponse,
     RenameAnalysisRequest,
-    InsightResponse,
 )
 from app.services.file_processor import FileProcessor
 from app.services.semantic_wrangler import SemanticWrangler
@@ -152,8 +151,8 @@ async def list_analyses(
     db: DB,
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
-    search: Optional[str] = Query(None),
-    status_filter: Optional[str] = Query(None, alias="status"),
+    search: str | None = Query(None),
+    status_filter: str | None = Query(None, alias="status"),
 ):
     """List the current user's analyses with pagination."""
     query = select(Analysis).where(Analysis.user_id == current_user.id)

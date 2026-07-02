@@ -1,11 +1,11 @@
-from __future__ import annotations
-
 """
 Deterministic recommendation generation from measured evidence.
 
 These recommendations give the product useful output even when AI generation is
 unavailable, and they constrain the LLM to evidence-backed opportunities.
 """
+
+from __future__ import annotations
 
 from typing import Any
 

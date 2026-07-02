@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 AI service.
 
@@ -7,9 +5,11 @@ Statistical analysis happens before LLM calls. The model receives structured
 metrics, then returns validated JSON for executive narrative and actions.
 """
 
+from __future__ import annotations
+
+import asyncio
 import json
 import re
-import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -730,7 +730,7 @@ def _allowed_title_case(value: Any, allowed: set[str], fallback: str) -> str:
 
 
 def _parse_financial_opportunity(value: Any) -> float | None:
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         return float(value)
     text = str(value or "").strip()
     if not text or text.upper() == "NA":
@@ -786,6 +786,10 @@ async def _build_chat_chart_config(analysis: Any, user_message: str) -> dict[str
     if _asks_for_team_goals_chart(user_message):
         return await _compute_team_goals_chart_config(analysis)
     return None
+
+
+def _quote_identifier(identifier: str) -> str:
+    return '"' + identifier.replace('"', '""') + '"'
 
 
 def _known_metric_notes(analysis: Any) -> str:

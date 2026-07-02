@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter
 from sqlalchemy import select
 
-from app.api.deps import CurrentUser, DB
-from app.models.user import User
+from app.api.deps import DB, CurrentUser
 from app.models.subscription import Subscription
-from app.schemas.user import UserProfileResponse, UserResponse, UserUpdate, UsageStats
-from app.core.config import settings
+from app.schemas.user import UsageStats, UserProfileResponse, UserResponse, UserUpdate
 
 router = APIRouter()
 

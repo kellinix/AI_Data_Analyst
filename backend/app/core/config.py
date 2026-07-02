@@ -1,9 +1,14 @@
 from __future__ import annotations
 
-from typing import Literal, Any
 from functools import lru_cache
+from typing import Any, Literal
 
-from pydantic import AliasChoices, AnyHttpUrl, Field, field_validator, model_validator, PostgresDsn, RedisDsn
+from pydantic import (
+    AliasChoices,
+    Field,
+    field_validator,
+    model_validator,
+)
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -114,7 +119,7 @@ class Settings(BaseSettings):
     supabase_jwt_secret: str = ""
 
     @model_validator(mode="after")
-    def require_production_secrets(self) -> "Settings":
+    def require_production_secrets(self) -> Settings:
         if self.is_production:
             missing = [
                 name

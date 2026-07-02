@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-import io
-import pytest
 import duckdb
 import pandas as pd
+import pytest
 
 from app.analytics.statistics import StatisticsEngine
 

@@ -1,11 +1,11 @@
-from __future__ import annotations
-
 """
 Statistical analysis layer.
 
 Performs all quantitative analysis BEFORE passing anything to the LLM.
 This ensures the AI is grounded in real numbers, not hallucinations.
 """
+
+from __future__ import annotations
 
 from typing import Any
 
@@ -54,7 +54,7 @@ class StatisticsEngine:
     def _get_schema(self) -> list[dict[str, Any]]:
         cols = self.conn.execute(f"DESCRIBE {_quote_identifier(self.table)}").fetchall()
         schema = []
-        for name, dtype, null, key, default, extra in cols:
+        for name, dtype, null, _key, _default, _extra in cols:
             dtype_lower = str(dtype).lower()
             is_numeric = any(t in dtype_lower for t in ["int", "float", "double", "decimal", "numeric", "real", "bigint", "hugeint"])
             is_date = any(t in dtype_lower for t in ["date", "timestamp", "time"])

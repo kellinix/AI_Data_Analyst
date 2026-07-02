@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, ForeignKey, String, DateTime
+from sqlalchemy import Boolean, ForeignKey, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -32,4 +32,4 @@ class Subscription(UUIDMixin, TimestampMixin, Base):
     current_period_end: Mapped[str | None] = mapped_column(String(32), nullable=True)
     cancel_at_period_end: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
-    user: Mapped["User"] = relationship("User", back_populates="subscription")
+    user: Mapped[User] = relationship("User", back_populates="subscription")

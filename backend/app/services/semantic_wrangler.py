@@ -1,11 +1,11 @@
-from __future__ import annotations
-
 """
 Hybrid semantic wrangling.
 
 Deterministic cleaning handles structure. This service handles human-language
 messiness: category aliases and display names for terse database headers.
 """
+
+from __future__ import annotations
 
 import json
 import math
@@ -129,7 +129,9 @@ class SemanticWrangler:
             cleaned = cleaned.with_columns(
                 pl.col(column)
                 .map_elements(
-                    lambda value: mapping.get(str(value), value) if value is not None else None,
+                    lambda value, mapping=mapping: mapping.get(str(value), value)
+                    if value is not None
+                    else None,
                     return_dtype=pl.String,
                 )
                 .alias(column)

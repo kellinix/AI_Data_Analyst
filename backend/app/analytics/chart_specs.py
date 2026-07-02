@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Strict visual specification contract for dashboard charts.
 
@@ -7,8 +5,9 @@ The AI must never generate frontend code. Charts are represented as bounded
 Vega-Lite-style JSON specs that the frontend renders through a fixed wrapper.
 """
 
-from typing import Any
+from __future__ import annotations
 
+from typing import Any
 
 VEGA_LITE_SCHEMA = "https://vega.github.io/schema/vega-lite/v5.json"
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING
 
-from sqlalchemy import ForeignKey, Integer, String, Text
+from sqlalchemy import ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -25,8 +25,8 @@ class ChatSession(UUIDMixin, TimestampMixin, Base):
     )
     title: Mapped[str] = mapped_column(String(512), nullable=False, default="New conversation")
 
-    analysis: Mapped["Analysis"] = relationship("Analysis", back_populates="chat_sessions")
-    messages: Mapped[list["ChatMessage"]] = relationship(
+    analysis: Mapped[Analysis] = relationship("Analysis", back_populates="chat_sessions")
+    messages: Mapped[list[ChatMessage]] = relationship(
         "ChatMessage", back_populates="session", cascade="all, delete-orphan"
     )
 
@@ -51,4 +51,4 @@ class ChatMessage(UUIDMixin, TimestampMixin, Base):
     # Internal metadata (SQL query used, tokens consumed, etc.)
     internal_metadata: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
-    session: Mapped["ChatSession"] = relationship("ChatSession", back_populates="messages")
+    session: Mapped[ChatSession] = relationship("ChatSession", back_populates="messages")

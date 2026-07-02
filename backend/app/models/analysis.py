@@ -5,16 +5,16 @@ from enum import Enum
 from typing import TYPE_CHECKING
 
 from sqlalchemy import BigInteger, ForeignKey, Integer, String, Text
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB, UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
 from app.db.mixins import TimestampMixin, UUIDMixin
 
 if TYPE_CHECKING:
-    from app.models.user import User
-    from app.models.insight import Insight
     from app.models.chat import ChatSession
+    from app.models.insight import Insight
+    from app.models.user import User
 
 
 class AnalysisStatus(str, Enum):
@@ -40,8 +40,8 @@ class UploadedFile(UUIDMixin, TimestampMixin, Base):
     columns: Mapped[list | None] = mapped_column(JSONB, nullable=True)
     checksum: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
-    user: Mapped["User"] = relationship("User")
-    analyses: Mapped[list["Analysis"]] = relationship(
+    user: Mapped[User] = relationship("User")
+    analyses: Mapped[list[Analysis]] = relationship(
         "Analysis", back_populates="file"
     )
 
@@ -78,12 +78,12 @@ class Analysis(UUIDMixin, TimestampMixin, Base):
     charts: Mapped[list | None] = mapped_column(JSONB, nullable=True)
 
     # Relationships
-    user: Mapped["User"] = relationship("User", back_populates="analyses")
-    file: Mapped["UploadedFile"] = relationship("UploadedFile", back_populates="analyses")
-    insights: Mapped[list["Insight"]] = relationship(
+    user: Mapped[User] = relationship("User", back_populates="analyses")
+    file: Mapped[UploadedFile] = relationship("UploadedFile", back_populates="analyses")
+    insights: Mapped[list[Insight]] = relationship(
         "Insight", back_populates="analysis", cascade="all, delete-orphan"
     )
-    chat_sessions: Mapped[list["ChatSession"]] = relationship(
+    chat_sessions: Mapped[list[ChatSession]] = relationship(
         "ChatSession", back_populates="analysis", cascade="all, delete-orphan"
     )
 

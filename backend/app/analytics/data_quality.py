@@ -1,8 +1,8 @@
-from __future__ import annotations
-
 """
 Data quality checks used by the analysis pipeline.
 """
+
+from __future__ import annotations
 
 from typing import Any
 

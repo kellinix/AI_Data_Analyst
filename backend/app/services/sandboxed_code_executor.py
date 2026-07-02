@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """
 Fail-closed execution gateway for AI-generated code.
 
@@ -7,6 +5,8 @@ The application must never execute model-generated Python in the API or worker
 process. This module only forwards code to an explicitly configured isolated
 sandbox provider and captures bounded stdout/stderr for repair attempts.
 """
+
+from __future__ import annotations
 
 import inspect
 import re

@@ -7,11 +7,12 @@ Create Date: 2025-01-01 00:00:00
 """
 from __future__ import annotations
 
-from typing import Sequence
+from collections.abc import Sequence
 
 import sqlalchemy as sa
-from alembic import op
 from sqlalchemy.dialects.postgresql import JSONB, UUID
+
+from alembic import op
 
 revision: str = "001_initial"
 down_revision: str | None = None

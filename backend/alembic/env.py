@@ -4,17 +4,17 @@ import asyncio
 import os
 from logging.config import fileConfig
 
+from sqlalchemy import pool
+
 from alembic import context
-from sqlalchemy import engine_from_config, pool
-from sqlalchemy.ext.asyncio import AsyncEngine
 
 # Import all models so Alembic can detect them
 from app.db.base import Base
-from app.models.user import User  # noqa: F401
 from app.models.analysis import Analysis, UploadedFile  # noqa: F401
+from app.models.chat import ChatMessage, ChatSession  # noqa: F401
 from app.models.insight import Insight  # noqa: F401
-from app.models.chat import ChatSession, ChatMessage  # noqa: F401
 from app.models.subscription import Subscription  # noqa: F401
+from app.models.user import User  # noqa: F401
 
 config = context.config
 

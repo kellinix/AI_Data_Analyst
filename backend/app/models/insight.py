@@ -36,7 +36,7 @@ class Insight(UUIDMixin, TimestampMixin, Base):
     # Linked chart config (optional)
     chart_config: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
 
-    analysis: Mapped["Analysis"] = relationship("Analysis", back_populates="insights")
+    analysis: Mapped[Analysis] = relationship("Analysis", back_populates="insights")
 
     def __repr__(self) -> str:
         return f"<Insight id={self.id} type={self.type} title={self.title[:40]}>"

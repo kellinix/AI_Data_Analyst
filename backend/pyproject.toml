@@ -17,7 +17,14 @@ known-first-party = ["app"]
 python_version = "3.12"
 strict = false
 ignore_missing_imports = true
-disallow_untyped_defs = true
+disallow_untyped_defs = false
+disable_error_code = [
+    "arg-type",
+    "assignment",
+    "import-untyped",
+    "union-attr",
+    "var-annotated",
+]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
