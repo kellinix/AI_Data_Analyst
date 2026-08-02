@@ -90,6 +90,11 @@ async def get_current_user(
         else:
             await db.refresh(user)
 
+    # By this point every code path above has either assigned a real User
+    # (found, newly provisioned, or re-fetched after a provisioning race)
+    # or already raised — mypy can't follow that through the branching, so
+    # this is a genuine narrowing assertion, not a runtime-reachable check.
+    assert user is not None
     if not user.is_active:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

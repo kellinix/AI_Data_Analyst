@@ -30,10 +30,11 @@ from __future__ import annotations
 
 import re
 import statistics as _statistics
+from collections.abc import Sequence
 from dataclasses import dataclass, field
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 from enum import Enum
-from typing import Any, Sequence
+from typing import Any
 
 Row = dict[str, Any]
 
@@ -96,7 +97,7 @@ def _is_blank(value: Any) -> bool:
 def _to_float(value: Any) -> float | None:
     if value is None:
         return None
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         return float(value)
     if isinstance(value, str):
         cleaned = value.strip().replace(",", "")
@@ -314,7 +315,6 @@ def check_outliers(
         affected = sum(1 for v in values if v < lower or v > upper)
         bounds = {"lower": lower, "upper": upper, "q1": q1, "q3": q3}
 
-    ratio = affected / total if total else 0.0
     return CheckResult(
         check="outliers",
         column=column,
@@ -480,7 +480,7 @@ def check_date_validity(
     it and the caller opts into the stricter check).
     """
     total = len(rows)
-    reference = reference_date or datetime.now(timezone.utc).date()
+    reference = reference_date or datetime.now(UTC).date()
     unparseable = 0
     out_of_range = 0
     future = 0
@@ -623,7 +623,7 @@ def run_quality_suite(
         row_count=len(rows),
         column_count=len(columns),
         score=score_report(results),
-        generated_at=datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        generated_at=datetime.now(UTC).isoformat(timespec="seconds"),
         results=results,
     )
 

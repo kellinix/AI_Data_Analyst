@@ -6,9 +6,9 @@ import pytest
 from app.core.config import settings
 from app.services.semantic_wrangler import (
     SemanticWrangler,
+    _friendly_chart_title,
     apply_display_metadata_to_charts,
     apply_display_metadata_to_statistics,
-    _friendly_chart_title,
 )
 
 

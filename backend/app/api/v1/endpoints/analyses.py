@@ -614,7 +614,8 @@ async def query_analysis(
             conn, analysis.file.storage_path, extension
         )
         count_sql = "SELECT COUNT(*) FROM data" + (f" WHERE {filter_sql}" if filter_sql else "")
-        row_count = conn.execute(count_sql, filter_params).fetchone()[0]
+        count_row = conn.execute(count_sql, filter_params).fetchone()
+        row_count = count_row[0] if count_row is not None else 0
 
         chart_patches: list[ChartPatch] = []
         for chart in analysis.charts or []:

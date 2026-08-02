@@ -9,7 +9,6 @@ from typing import Any
 
 from app.analytics.kpi_detector import is_outcome_column
 
-
 # A numeric column null on more than this fraction of rows is sparse/
 # optional data (e.g. a field only some records ever populate), not a
 # continuous series — charting it as a smoothed line would visually imply

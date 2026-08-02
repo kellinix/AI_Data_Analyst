@@ -981,18 +981,20 @@ class FileProcessor:
             conn.register("_temp_df", df.to_pandas())
             conn.execute(f"CREATE OR REPLACE TABLE {table_name} AS SELECT * FROM _temp_df")
         elif ext == ".json":
-            total = conn.execute(
+            json_count_row = conn.execute(
                 f"SELECT COUNT(*) FROM read_json_auto('{file_path}')"
-            ).fetchone()[0]
+            ).fetchone()
+            total = json_count_row[0] if json_count_row is not None else 0
             conn.execute(f"""
                 CREATE OR REPLACE TABLE {table_name} AS
                 SELECT * FROM read_json_auto('{file_path}') LIMIT {self.SAMPLE_ROWS}
             """)
             truncated = total > self.SAMPLE_ROWS
         elif ext == ".parquet":
-            total = conn.execute(
+            parquet_count_row = conn.execute(
                 f"SELECT COUNT(*) FROM read_parquet('{file_path}')"
-            ).fetchone()[0]
+            ).fetchone()
+            total = parquet_count_row[0] if parquet_count_row is not None else 0
             conn.execute(f"""
                 CREATE OR REPLACE TABLE {table_name} AS
                 SELECT * FROM read_parquet('{file_path}') LIMIT {self.SAMPLE_ROWS}
