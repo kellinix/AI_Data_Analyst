@@ -32,6 +32,11 @@ _MISSING_TEXT_VALUES = {
     "#na",
 }
 
+# A numeric column null in more than this fraction of rows is treated as an
+# optional/sparse field, not a required metric, when deciding whether a row
+# has "no numeric data at all" and should be dropped during smart cleaning.
+_SPARSE_NUMERIC_METRIC_NULL_RATIO = 0.7
+
 
 class FileProcessor:
     """Reads uploaded files into DuckDB and Polars for profiling and analysis."""
@@ -57,7 +62,7 @@ class FileProcessor:
 
     def _profile_sync(self, file_path: str, extension: str) -> dict[str, Any]:
         try:
-            df = self._read_file(file_path, extension)
+            df, truncated = self._read_file_ex(file_path, extension)
             columns = []
             for col in df.columns:
                 series = df[col]
@@ -82,12 +87,23 @@ class FileProcessor:
                 "column_count": len(df.columns),
                 "columns": columns,
                 "parser": self._parser_metadata(file_path, extension),
+                "truncated": truncated,
+                "sample_row_limit": self.SAMPLE_ROWS if truncated else None,
             }
         except Exception as exc:
             logger.warning("Profile failed", file_path=file_path, exc=str(exc))
             return {"row_count": None, "column_count": None, "columns": None}
 
     def _read_file(self, file_path: str, extension: str) -> pl.DataFrame:
+        return self._read_file_ex(file_path, extension)[0]
+
+    def _read_file_ex(self, file_path: str, extension: str) -> tuple[pl.DataFrame, bool]:
+        """Read a file capped at SAMPLE_ROWS, consistently across formats.
+
+        Returns (dataframe, truncated) so callers can tell the user when an
+        analysis only covers a sample of a larger file rather than silently
+        dropping rows.
+        """
         ext = extension.lower()
         if ext == ".csv" or ext == ".tsv":
             return self._read_delimited_file(file_path, ext)
@@ -96,23 +112,37 @@ class FileProcessor:
                 file_path,
                 sheet_id=0,
                 has_header=False,
-                read_options={"n_rows": self.SAMPLE_ROWS},
+                read_options={"n_rows": self.SAMPLE_ROWS + 1},
                 infer_schema_length=1000,
             )
-            return self._normalize_excel_sheets(sheets)
+            df = self._normalize_excel_sheets(sheets)
+            return self._cap_dataframe(df)
         elif ext == ".json":
-            return pl.read_json(file_path)
+            # polars has no row-limited JSON reader for arbitrary (non-NDJSON)
+            # structures, so this still parses the full file before capping.
+            df = pl.read_json(file_path)
+            return self._cap_dataframe(df)
         elif ext == ".parquet":
-            return pl.read_parquet(file_path, n_rows=self.SAMPLE_ROWS)
+            df = pl.read_parquet(file_path, n_rows=self.SAMPLE_ROWS + 1)
+            return self._cap_dataframe(df)
         else:
             raise ValueError(f"Unsupported extension: {ext}")
 
-    def _read_delimited_file(self, file_path: str, extension: str) -> pl.DataFrame:
+    def _cap_dataframe(self, df: pl.DataFrame) -> tuple[pl.DataFrame, bool]:
+        if len(df) > self.SAMPLE_ROWS:
+            return df.head(self.SAMPLE_ROWS), True
+        return df, False
+
+    def _read_delimited_file(self, file_path: str, extension: str) -> tuple[pl.DataFrame, bool]:
         encoding = self._detect_encoding(file_path)
         delimiter = self._detect_delimiter(file_path, encoding, extension)
         rows = self._read_delimited_rows(file_path, encoding, delimiter)
         if not rows:
-            return pl.DataFrame()
+            return pl.DataFrame(), False
+
+        truncated = len(rows) > self.SAMPLE_ROWS
+        if truncated:
+            rows = rows[: self.SAMPLE_ROWS]
 
         width = max(len(row) for row in rows)
         padded_rows = [
@@ -122,7 +152,7 @@ class FileProcessor:
         df = pl.DataFrame(
             {f"column_{index + 1}": [row[index] for row in padded_rows] for index in range(width)}
         )
-        return self._normalize_report_table(df)
+        return self._normalize_report_table(df), truncated
 
     def _parser_metadata(self, file_path: str, extension: str) -> dict[str, Any]:
         ext = extension.lower()
@@ -195,20 +225,23 @@ class FileProcessor:
         encoding: str,
         delimiter: str,
     ) -> list[list[str | None]]:
+        # Read one row beyond the cap so callers can detect truncation
+        # without a separate full-file scan.
+        read_limit = self.SAMPLE_ROWS + 1
         rows: list[list[str | None]] = []
         try:
             with open(file_path, encoding=encoding, errors="replace", newline="") as handle:
                 reader = csv.reader(handle, delimiter=delimiter)
                 for row in reader:
                     rows.append(row)
-                    if len(rows) >= self.SAMPLE_ROWS:
+                    if len(rows) >= read_limit:
                         break
         except LookupError:
             with open(file_path, encoding="utf-8", errors="replace", newline="") as handle:
                 reader = csv.reader(handle, delimiter=delimiter)
                 for row in reader:
                     rows.append(row)
-                    if len(rows) >= self.SAMPLE_ROWS:
+                    if len(rows) >= read_limit:
                         break
         return rows
 
@@ -456,12 +489,19 @@ class FileProcessor:
         if df.is_empty():
             return df, report
 
+        # Only treat a numeric column as a "required metric" for the
+        # any-metric-present check below if it's actually populated across
+        # most rows. A sparsely-filled numeric column (e.g. an optional
+        # "hours logged" field on a task tracker) isn't a core metric —
+        # using it here would drop nearly every row just for lacking a
+        # field most rows were never expected to have.
         numeric_metric_columns = [
             column
             for column in df.columns
             if _is_numeric_dtype(df[column].dtype)
             and not _looks_like_identifier_column(column)
             and not _looks_like_year_column(column)
+            and (df[column].null_count() / df.height) <= _SPARSE_NUMERIC_METRIC_NULL_RATIO
         ]
         if numeric_metric_columns:
             before_rows = df.height
@@ -482,6 +522,13 @@ class FileProcessor:
 
             dtype = df[column].dtype
             if _is_numeric_dtype(dtype) and not _looks_like_identifier_column(column):
+                # A sparse numeric column (e.g. an optional "hours logged"
+                # field where most rows never had a value) isn't missing
+                # data to reconstruct — its nulls are real absences. Filling
+                # them with a median/interpolated guess fabricates values
+                # that never existed and silently inflates sums/averages.
+                if (null_count / df.height) > _SPARSE_NUMERIC_METRIC_NULL_RATIO:
+                    continue
                 median = df[column].median()
                 if median is None:
                     continue
@@ -885,6 +932,11 @@ class FileProcessor:
             non_null = series.drop_nulls().len()
             numeric_count = numeric.drop_nulls().len()
             if non_null and numeric_count / non_null >= 0.85:
+                # Whole-number columns become integers so codes and counts
+                # don't render as "2.0" in labels, charts, and stats.
+                values = numeric.drop_nulls()
+                if values.len() and (values % 1 == 0).all():
+                    numeric = numeric.cast(pl.Int64)
                 expressions.append(numeric.alias(column))
 
         if not expressions:
@@ -894,39 +946,64 @@ class FileProcessor:
     async def read_to_duckdb(
         self, conn: duckdb.DuckDBPyConnection, file_path: str, extension: str, table_name: str = "data"
     ) -> int:
-        """Load file into DuckDB table, return row count."""
+        """Load file into DuckDB table, return row count. Deprecated in favor
+        of read_to_duckdb_ex, which also reports whether the source was
+        truncated at SAMPLE_ROWS; kept for callers that only need the count.
+        """
+        row_count, _truncated = await self.read_to_duckdb_ex(conn, file_path, extension, table_name)
+        return row_count
+
+    async def read_to_duckdb_ex(
+        self, conn: duckdb.DuckDBPyConnection, file_path: str, extension: str, table_name: str = "data"
+    ) -> tuple[int, bool]:
+        """Load file into DuckDB table. Returns (row_count, truncated).
+
+        Every format is capped at SAMPLE_ROWS so a given file size behaves
+        consistently regardless of format, instead of CSV/Excel being sampled
+        while JSON/Parquet loaded in full.
+        """
         return await asyncio.to_thread(
             self._load_duckdb_sync, conn, file_path, extension, table_name
         )
 
     def _load_duckdb_sync(
         self, conn: duckdb.DuckDBPyConnection, file_path: str, extension: str, table_name: str
-    ) -> int:
+    ) -> tuple[int, bool]:
         ext = extension.lower()
+        truncated = False
         if ext == ".csv" or ext == ".tsv":
-            df = self._read_file(file_path, ext)
+            df, truncated = self._read_file_ex(file_path, ext)
             conn.register("_temp_df", df.to_pandas())
             conn.execute(f"CREATE OR REPLACE TABLE {table_name} AS SELECT * FROM _temp_df")
         elif ext in (".xlsx", ".xls"):
             # DuckDB doesn't support Excel natively; load via polars first.
-            df = self._read_file(file_path, ext)
+            df, truncated = self._read_file_ex(file_path, ext)
             conn.register("_temp_df", df.to_pandas())
             conn.execute(f"CREATE OR REPLACE TABLE {table_name} AS SELECT * FROM _temp_df")
         elif ext == ".json":
+            total = conn.execute(
+                f"SELECT COUNT(*) FROM read_json_auto('{file_path}')"
+            ).fetchone()[0]
             conn.execute(f"""
                 CREATE OR REPLACE TABLE {table_name} AS
-                SELECT * FROM read_json_auto('{file_path}')
+                SELECT * FROM read_json_auto('{file_path}') LIMIT {self.SAMPLE_ROWS}
             """)
+            truncated = total > self.SAMPLE_ROWS
         elif ext == ".parquet":
+            total = conn.execute(
+                f"SELECT COUNT(*) FROM read_parquet('{file_path}')"
+            ).fetchone()[0]
             conn.execute(f"""
                 CREATE OR REPLACE TABLE {table_name} AS
-                SELECT * FROM read_parquet('{file_path}')
+                SELECT * FROM read_parquet('{file_path}') LIMIT {self.SAMPLE_ROWS}
             """)
+            truncated = total > self.SAMPLE_ROWS
         else:
             raise ValueError(f"Unsupported extension: {ext}")
 
         result = conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()
-        return result[0] if result else 0
+        row_count = result[0] if result else 0
+        return row_count, truncated
 
     async def combine_uploaded_files(
         self,

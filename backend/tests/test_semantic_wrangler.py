@@ -8,6 +8,7 @@ from app.services.semantic_wrangler import (
     SemanticWrangler,
     apply_display_metadata_to_charts,
     apply_display_metadata_to_statistics,
+    _friendly_chart_title,
 )
 
 
@@ -108,3 +109,45 @@ def test_semantic_display_metadata_adds_friendly_column_and_chart_labels() -> No
     assert updated_stats["schema"][0]["display_label"] == "Customer Transaction Count (Q1)"
     assert updated_charts[0]["title"] == "Customer Transactions in Q1"
     assert updated_charts[0]["echarts_option"]["xAxis"]["name"] == "Customer Transaction Count (Q1)"
+
+
+def test_friendly_bar_title_keeps_aggregation_distinct():
+    """Regression test: a chart's aggregation must survive title regeneration
+    (e.g. after chart-data population strips echarts_option._columns) so an
+    averaged bar chart is never relabeled as if it were a sum, and an
+    outcome-rate chart reads as a rate, not a raw value."""
+    labels = {"chol": "Chol", "cp": "Cp", "target": "Target"}
+
+    averaged = {"type": "bar", "xAxis": "chol", "yAxis": "cp", "aggregation": "average"}
+    assert _friendly_chart_title(averaged, labels) == "Avg Chol by Cp"
+
+    summed = {"type": "bar", "xAxis": "chol", "yAxis": "cp", "aggregation": "sum"}
+    assert _friendly_chart_title(summed, labels) == "Chol by Cp"
+
+    rate = {"type": "bar", "xAxis": "target", "yAxis": "cp", "aggregation": "percent_rate"}
+    assert _friendly_chart_title(rate, labels) == "Target Rate by Cp"
+
+
+def test_bar_chart_titles_survive_full_display_metadata_round_trip():
+    """End-to-end version of the aggregation-title regression: a chart built
+    by chart_selector, put through chart-data population (which strips
+    echarts_option._columns), then through apply_display_metadata_to_charts
+    in fallback mode, must still read as an average, not a bare sum."""
+    from app.analytics.chart_selector import _horizontal_bar_chart, _outcome_rate_bar_chart
+    from app.services.semantic_wrangler import _fallback_display_metadata
+
+    bar = _horizontal_bar_chart("cp", "chol", top_values=[{"value": "0", "count": 5}, {"value": "1", "count": 3}])
+    rate = _outcome_rate_bar_chart("cp", "target")
+
+    # Simulate _populate_chart_data's cleanup step.
+    for chart in (bar, rate):
+        chart["echarts_option"].pop("_columns", None)
+
+    statistics = {"schema": [], "numeric_stats": {}, "categorical_stats": {}}
+    display = _fallback_display_metadata(statistics, [bar, rate])
+    updated = apply_display_metadata_to_charts([bar, rate], display)
+
+    updated_bar = next(c for c in updated if c["id"] == bar["id"])
+    updated_rate = next(c for c in updated if c["id"] == rate["id"])
+    assert updated_bar["title"] == "Avg Chol by Cp"
+    assert updated_rate["title"] == "Target Rate by Cp"

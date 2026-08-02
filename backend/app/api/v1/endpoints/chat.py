@@ -1,12 +1,12 @@
-from __future__ import annotations
-
 import uuid
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import DB, CurrentUser
+from app.api.deps import DB, CurrentUser, ensure_ai_query_quota
+from app.core.config import settings
+from app.core.limiter import limiter
 from app.core.logging import get_logger
 from app.models.analysis import Analysis
 from app.models.chat import ChatMessage, ChatSession
@@ -92,6 +92,51 @@ async def create_session(
     )
 
 
+@router.get("/sessions/{session_id}", response_model=ChatSessionResponse)
+async def get_session(
+    session_id: uuid.UUID,
+    current_user: CurrentUser,
+    db: DB,
+):
+    session_result = await db.execute(
+        select(ChatSession)
+        .where(ChatSession.id == session_id)
+        .options(selectinload(ChatSession.analysis), selectinload(ChatSession.messages))
+    )
+    session = session_result.scalar_one_or_none()
+    if not session or session.analysis.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    messages = sorted(session.messages, key=lambda m: m.created_at)
+    return ChatSessionResponse(
+        id=session.id,
+        analysis_id=session.analysis_id,
+        title=session.title,
+        message_count=len(messages),
+        created_at=session.created_at,
+        updated_at=session.updated_at,
+        last_message=ChatMessageResponse.model_validate(messages[-1]) if messages else None,
+    )
+
+
+@router.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_session(
+    session_id: uuid.UUID,
+    current_user: CurrentUser,
+    db: DB,
+):
+    session_result = await db.execute(
+        select(ChatSession)
+        .where(ChatSession.id == session_id)
+        .options(selectinload(ChatSession.analysis))
+    )
+    session = session_result.scalar_one_or_none()
+    if not session or session.analysis.user_id != current_user.id:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    await db.delete(session)
+
+
 @router.get("/sessions/{session_id}/messages", response_model=list[ChatMessageResponse])
 async def get_messages(
     session_id: uuid.UUID,
@@ -113,7 +158,9 @@ async def get_messages(
 
 
 @router.post("/sessions/{session_id}/messages", response_model=ChatMessageResponse)
+@limiter.limit(f"{settings.chat_rate_limit_per_minute}/minute")
 async def send_message(
+    request: Request,
     session_id: uuid.UUID,
     body: SendMessageRequest,
     current_user: CurrentUser,
@@ -132,6 +179,8 @@ async def send_message(
     session = session_result.scalar_one_or_none()
     if not session or session.analysis.user_id != current_user.id:
         raise HTTPException(status_code=404, detail="Session not found")
+
+    ensure_ai_query_quota(current_user)
 
     # Save user message
     user_message = ChatMessage(

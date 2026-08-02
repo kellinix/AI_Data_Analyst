@@ -126,15 +126,17 @@ def _anomaly_recommendations(anomalies: list[dict[str, Any]]) -> list[dict[str, 
         return []
     anomaly = anomalies[0]
     label = _humanize(anomaly["column"])
+    context = anomaly.get("context") or {}
+    context_text = ", ".join(f"{_humanize(k)} {v}" for k, v in context.items())
     return [{
-        "title": f"Look into standout {label}",
-        "description": "Check the players or matches behind the standout result and see what made it different from the rest.",
+        "title": f"Review the context behind standout {label}",
+        "description": (f"Compare the identified record ({context_text}) with similar records to understand the drivers." if context_text else f"Compare the identified {label.lower()} record with similar records before drawing a conclusion."),
         "problem": anomaly.get("description", f"One {label} result is much higher than usual."),
         "evidence": anomaly.get("description", f"One {label} result is much higher than usual."),
         "expected_impact": "Helps explain whether this was exceptional performance, a tactical pattern, or a one-off match moment.",
         "financial_opportunity": None,
-        "importance": "high",
-        "confidence": 0.82,
+        "importance": "medium",
+        "confidence": 0.78,
         "data": {
             "difficulty": "Easy",
             "owner": _owner_for_metric(anomaly["column"]),
@@ -164,8 +166,6 @@ def _looks_like_currency(metric: str) -> bool:
 
 def _owner_for_metric(metric: str) -> str:
     normalized = metric.lower()
-    if any(word in normalized for word in ("goal", "assist", "shot", "pass", "rating", "xg", "xa")):
-        return "Performance Team"
     if any(word in normalized for word in ("revenue", "sales", "profit", "cost", "arr", "mrr")):
         return "Commercial Team"
     return "Operations"
@@ -184,7 +184,7 @@ def _format_value(value: Any) -> str:
 
 
 def _humanize(value: str) -> str:
-    replacements = {"xg": "xG", "xa": "xA", "pct": "%", "km": "km", "kmh": "km/h"}
+    replacements = {"pct": "%", "km": "km", "kmh": "km/h"}
     return " ".join(
         replacements.get(word.lower(), word.capitalize())
         for word in value.replace("_", " ").split()

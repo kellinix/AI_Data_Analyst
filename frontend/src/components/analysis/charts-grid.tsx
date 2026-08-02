@@ -2,6 +2,8 @@
 
 import dynamic from "next/dynamic"
 import { motion } from "framer-motion"
+import { cn } from "@/lib/utils"
+import { useFilterContext } from "@/contexts/filter-context"
 import type { ChartConfig } from "@/types"
 
 const EChartsReact = dynamic(() => import("echarts-for-react"), { ssr: false })
@@ -252,8 +254,87 @@ function seriesWithReadableLabels(
   })
 }
 
+/** The column a bar/donut chart's segments represent, for click-to-filter and
+ * dimming — donut segments are keyed by `series[0]`, bars by `yAxis` (every
+ * bar chart this app generates is horizontal with the category on the y
+ * axis). Other chart types aren't filterable by click. */
+function filterColumnForChart(chart: ChartConfig): string | null {
+  if (chart.type === "donut") return chart.series[0] ?? null
+  if (chart.type === "bar") return chart.yAxis
+  return null
+}
+
+function categoryLabelsForChart(chart: ChartConfig, option: Record<string, unknown>, horizontalBar: boolean): string[] {
+  if (chart.type === "donut") {
+    const series = asArray(option.series)[0]
+    return asArray(asObject(series).data).map((d) => String(asObject(d).name ?? ""))
+  }
+  if (chart.type === "bar") {
+    const axis = horizontalBar ? asObject(option.yAxis) : asObject(option.xAxis)
+    return asArray(axis.data).map(String)
+  }
+  return []
+}
+
+function seriesWithFilterDimming(
+  chart: ChartConfig,
+  series: unknown[] | undefined,
+  categoryLabels: string[],
+  activeValues: (string | number)[]
+): unknown[] | undefined {
+  if (!series || activeValues.length === 0) return series
+  const activeStrings = activeValues.map(String)
+
+  return series.map((item) => {
+    const s = asObject(item)
+    const type = typeof s.type === "string" ? s.type : chart.type
+
+    if (type === "bar") {
+      const data = asArray(s.data)
+      return {
+        ...s,
+        data: data.map((value, i) => {
+          const active = activeStrings.includes(categoryLabels[i])
+          const existing = value && typeof value === "object" ? asObject(value) : { value }
+          return { ...existing, itemStyle: { ...asObject(existing.itemStyle), opacity: active ? 1 : 0.3 } }
+        }),
+      }
+    }
+
+    if (type === "pie" || type === "donut") {
+      const data = asArray(s.data)
+      return {
+        ...s,
+        data: data.map((entry) => {
+          const obj = asObject(entry)
+          const active = activeStrings.includes(String(obj.name ?? ""))
+          return { ...obj, itemStyle: { ...asObject(obj.itemStyle), opacity: active ? 1 : 0.3 } }
+        }),
+      }
+    }
+
+    return s
+  })
+}
+
+function hasBarDataLabels(chart: ChartConfig, series: unknown[] | undefined): boolean {
+  if (chart.type !== "bar" && chart.type !== "histogram") return false
+  return (series ?? []).some((item) => {
+    const s = asObject(item)
+    const type = typeof s.type === "string" ? s.type : chart.type
+    return type === "bar" && seriesDataLength(s) <= 15
+  })
+}
+
 function ChartCard({ chart, index }: ChartCardProps) {
-  const chartOption = optionFromVisualSpec(chart) ?? asObject(chart.echarts_option)
+  const { chartPatches, activeFilters, toggleValue, isRefetching } = useFilterContext()
+  const patch = chartPatches[chart.id]
+  const effectiveChart: ChartConfig =
+    patch && !patch.skipped
+      ? { ...chart, visual_spec: patch.visual_spec ?? chart.visual_spec, echarts_option: patch.echarts_option }
+      : chart
+
+  const chartOption = optionFromVisualSpec(effectiveChart) ?? asObject(effectiveChart.echarts_option)
   const grid = asObject(chartOption.grid)
   const tooltip = asObject(chartOption.tooltip)
   const xAxis = asObject(chartOption.xAxis)
@@ -262,6 +343,33 @@ function ChartCard({ chart, index }: ChartCardProps) {
   const xAxisLabel = asObject(xAxis.axisLabel)
   const yAxisLabel = asObject(yAxis.axisLabel)
   const labelledSeries = seriesWithReadableLabels(chart, chartOption, horizontalBar)
+  // Each bar already shows its exact value via the data label added above —
+  // the value axis's tick labels (0, 5, 10, ...) are redundant next to that,
+  // not the category axis's labels, which are still the only way to tell
+  // bars apart.
+  const barLabelsShown = hasBarDataLabels(chart, labelledSeries)
+  const hideXAxisTicks = barLabelsShown && horizontalBar
+  const hideYAxisTicks = barLabelsShown && !horizontalBar
+
+  const filterColumn = filterColumnForChart(chart)
+  const activeValuesForThisChart =
+    activeFilters.find((f) => f.column === filterColumn)?.values ?? []
+  const categoryLabels = filterColumn
+    ? categoryLabelsForChart(chart, chartOption, horizontalBar)
+    : []
+  const dimmedSeries = filterColumn
+    ? seriesWithFilterDimming(
+        chart,
+        labelledSeries ?? asArray(chartOption.series),
+        categoryLabels,
+        activeValuesForThisChart
+      )
+    : labelledSeries
+
+  function handleChartClick(params: { name?: string }) {
+    if (!filterColumn || !params?.name) return
+    toggleValue(filterColumn, params.name)
+  }
 
   const option = {
     ...chartOption,
@@ -303,6 +411,7 @@ function ChartCard({ chart, index }: ChartCardProps) {
           axisLine: { lineStyle: { color: "#e4e4e7" } },
           axisTick: { show: false },
           axisLabel: {
+            show: !hideXAxisTicks,
             color: "#71717a",
             hideOverlap: true,
             formatter: compactNumber,
@@ -326,6 +435,7 @@ function ChartCard({ chart, index }: ChartCardProps) {
           axisLine: { show: false },
           axisTick: { show: false },
           axisLabel: {
+            show: !hideYAxisTicks,
             color: "#71717a",
             hideOverlap: true,
             formatter: horizontalBar ? undefined : compactNumber,
@@ -337,7 +447,7 @@ function ChartCard({ chart, index }: ChartCardProps) {
           splitLine: { lineStyle: { color: "#f4f4f5", type: "dashed" } },
         }
       : undefined,
-    series: labelledSeries ?? chartOption.series,
+    series: dimmedSeries ?? chartOption.series,
   }
 
   return (
@@ -345,7 +455,11 @@ function ChartCard({ chart, index }: ChartCardProps) {
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: index * 0.07, duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
-      className="flex flex-col gap-3 rounded-2xl border bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/60"
+      className={cn(
+        "flex flex-col gap-3 rounded-2xl border bg-white p-5 shadow-sm transition-opacity dark:border-zinc-800 dark:bg-zinc-900/60",
+        isRefetching && "opacity-70",
+        filterColumn && "[&_canvas]:cursor-pointer [&_svg]:cursor-pointer"
+      )}
     >
       <div>
         <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">
@@ -359,6 +473,7 @@ function ChartCard({ chart, index }: ChartCardProps) {
         option={option}
         style={{ height: horizontalBar ? 340 : 320 }}
         opts={{ renderer: "svg" }}
+        onEvents={{ click: handleChartClick }}
         lazyUpdate
       />
     </motion.div>

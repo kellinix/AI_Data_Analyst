@@ -7,6 +7,25 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
+from app.analytics.kpi_detector import is_outcome_column
+
+
+# A numeric column null on more than this fraction of rows is sparse/
+# optional data (e.g. a field only some records ever populate), not a
+# continuous series — charting it as a smoothed line would visually imply
+# a trend between points that don't actually exist.
+_SPARSE_METRIC_NULL_RATIO = 0.7
+
+
+def _is_sparse_numeric_column(column: str, numeric_stats: dict[str, Any]) -> bool:
+    stats = numeric_stats.get(column) or {}
+    count = stats.get("count") or 0
+    null_count = stats.get("null_count") or 0
+    total = count + null_count
+    if total == 0:
+        return False
+    return (null_count / total) > _SPARSE_METRIC_NULL_RATIO
+
 
 def select_charts(
     schema: list[dict[str, Any]],
@@ -42,18 +61,44 @@ def select_charts(
 
     if date_cols and numeric_cols:
         date_col = date_cols[0]
-        if len(numeric_cols) >= 2:
-            charts.append(_multi_line_chart(date_col, numeric_cols[:3]))
-        charts.append(_time_series_chart(date_col, numeric_cols[0]))
+        dense_cols = [c for c in numeric_cols[:3] if not _is_sparse_numeric_column(c, numeric_stats)]
+        if len(dense_cols) >= 2 and _comparable_scales(dense_cols, numeric_stats):
+            charts.append(_multi_line_chart(date_col, dense_cols))
+        primary_metric = numeric_cols[0]
+        if _is_sparse_numeric_column(primary_metric, numeric_stats):
+            charts.append(_sparse_metric_over_time_chart(date_col, primary_metric))
+        else:
+            charts.append(_time_series_chart(date_col, primary_metric))
+
+    # A binary outcome column (e.g. "target") is the story of the dataset:
+    # show its overall split and how its rate varies across the top dimension.
+    outcome_cols = [
+        c["name"]
+        for c in schema
+        if c["is_numeric"]
+        and c.get("analysis_role") == "flag"
+        and is_outcome_column(_normalize(c["name"]))
+    ]
+    if outcome_cols:
+        outcome = outcome_cols[0]
+        outcome_stats = categorical_stats.get(outcome, {})
+        if len(outcome_stats.get("top_values", [])) >= 2:
+            charts.append(_donut_chart(outcome, outcome_stats["top_values"]))
+        if categorical_cols:
+            charts.append(_outcome_rate_bar_chart(categorical_cols[0], outcome))
+
+    # When outcome charts claimed slots, trim the repetitive bar variants so
+    # the scatter and histogram still fit within max_charts.
+    bar_budget = 2 if charts else 3
 
     if categorical_cols and numeric_cols:
         primary_category = categorical_cols[0]
-        for numeric_col in numeric_cols[:3]:
+        for numeric_col in numeric_cols[:bar_budget]:
             charts.append(_horizontal_bar_chart(primary_category, numeric_col))
             if len(charts) >= max_charts:
                 break
 
-    for cat_col in categorical_cols[:3]:
+    for cat_col in categorical_cols[:bar_budget]:
         cat_stats = categorical_stats.get(cat_col, {})
         top_values = cat_stats.get("top_values", [])
         if len(top_values) >= 2 and numeric_cols and not any(chart.get("xAxis") == numeric_cols[0] and chart.get("yAxis") == cat_col for chart in charts):
@@ -70,10 +115,14 @@ def select_charts(
             break
 
     if correlations:
+        # Only scatter true metrics: correlations are computed over every
+        # numeric column, including categorical codes (role "dimension"/
+        # "flag"), and a scatter of two coded columns is a meaningless grid.
+        metric_columns = set(numeric_cols)
         valid_correlations = [
             (pair, value)
             for pair, value in correlations.items()
-            if all(_is_business_metric(column) for column in pair.split("|"))
+            if all(column in metric_columns for column in pair.split("|"))
         ]
         if valid_correlations:
             top_corr = max(valid_correlations, key=lambda item: abs(item[1]))
@@ -94,21 +143,15 @@ def _is_business_metric(column: str) -> bool:
     normalized = _normalize(column)
     parts = set(normalized.split("_"))
     return not (
-        normalized in {"goals_team", "goals_opponent"}
-        or normalized == "year"
+        normalized == "year"
         or normalized.endswith("_year")
         or "date" in parts
         or "time" in parts
         or "timestamp" in parts
         or "age" in parts
-        or "height" in parts
-        or "weight" in parts
-        or "jersey" in parts
         or "latitude" in parts
         or "longitude" in parts
         or "coord" in parts
-        or "shirt_number" in normalized
-        or "squad_number" in normalized
         or normalized == "id"
         or normalized.endswith("_id")
         or normalized.startswith("id_")
@@ -163,18 +206,36 @@ def _chart_id() -> str:
     return str(uuid.uuid4())[:8]
 
 
+def _aggregation(column: str) -> str:
+    normalized = _normalize(column)
+    additive = ("revenue", "sales", "cost", "amount", "distance", "quantity", "units", "spend")
+    return "sum" if any(term in normalized for term in additive) else "average"
+
+
+def _comparable_scales(columns: list[str], numeric_stats: dict[str, Any]) -> bool:
+    values = [abs(float((numeric_stats.get(c) or {}).get("mean") or 0)) for c in columns]
+    positive = [value for value in values if value > 0]
+    return len(positive) >= 2 and max(positive) / min(positive) <= 10
+
+
 def _time_series_chart(date_col: str, value_col: str) -> dict[str, Any]:
     value_label = _humanize(value_col)
     date_label = _humanize(date_col)
+    aggregation = _aggregation(value_col)
+    aggregation_label = "Total" if aggregation == "sum" else "Average"
     return {
         "id": _chart_id(),
         "type": "line",
-        "title": f"{value_label} over time",
-        "description": f"Shows how {value_label.lower()} changes across {date_label.lower()}",
+        "title": f"{aggregation_label} {value_label} over time",
+        "description": f"Shows the {aggregation} {value_label.lower()} for each {date_label.lower()}",
         "xAxis": date_col,
         "yAxis": value_col,
         "series": [value_col],
         "color_scheme": ["#2563eb"],
+        # Kept at the top level (not just inside echarts_option._columns,
+        # which chart-data population strips out) so the semantic-wrangler
+        # title regeneration step can still tell sum from average.
+        "aggregation": aggregation,
         "echarts_option": {
             "tooltip": {"trigger": "axis"},
             "xAxis": {"type": "category", "name": date_col},
@@ -186,6 +247,41 @@ def _time_series_chart(date_col: str, value_col: str) -> dict[str, Any]:
                 "name": value_col,
                 "symbol": "none",
                 "lineStyle": {"width": 2},
+            }],
+            "_columns": {"x": date_col, "y": value_col, "aggregation": aggregation},
+        },
+    }
+
+
+def _sparse_metric_over_time_chart(date_col: str, value_col: str) -> dict[str, Any]:
+    """Same data query as _time_series_chart (chronological, non-null values
+    only) but rendered as disconnected markers rather than a smoothed line —
+    a metric that's null on most rows has no real trend to connect between
+    the handful of dates it does have a value on.
+    """
+    value_label = _humanize(value_col)
+    date_label = _humanize(date_col)
+    return {
+        "id": _chart_id(),
+        "type": "line",
+        "title": f"{value_label} over time",
+        "description": f"Shows the individual {value_label.lower()} entries recorded across {date_label.lower()} — most rows have no value for this field",
+        "xAxis": date_col,
+        "yAxis": value_col,
+        "series": [value_col],
+        "color_scheme": ["#2563eb"],
+        "echarts_option": {
+            "tooltip": {"trigger": "item"},
+            "xAxis": {"type": "category", "name": date_col},
+            "yAxis": {"type": "value", "name": value_col},
+            "series": [{
+                "type": "line",
+                "smooth": False,
+                "showSymbol": True,
+                "symbol": "circle",
+                "symbolSize": 9,
+                "name": value_col,
+                "lineStyle": {"opacity": 0},
             }],
             "_columns": {"x": date_col, "y": value_col},
         },
@@ -218,7 +314,7 @@ def _multi_line_chart(date_col: str, value_cols: list[str]) -> dict[str, Any]:
                 }
                 for col in value_cols
             ],
-            "_columns": {"x": date_col, "ys": value_cols},
+            "_columns": {"x": date_col, "ys": value_cols, "aggregations": [_aggregation(c) for c in value_cols]},
         },
     }
 
@@ -228,15 +324,19 @@ def _horizontal_bar_chart(cat_col: str, value_col: str, top_values: list[dict] |
     labels = [str(v["value"]) for v in top_values[:10]]
     cat_label = _humanize(cat_col)
     value_label = _humanize(value_col)
+    aggregation = _aggregation(value_col)
+    aggregation_word = "total" if aggregation == "sum" else "average"
+    title = f"{value_label} by {cat_label}" if aggregation == "sum" else f"Avg {value_label} by {cat_label}"
     return {
         "id": _chart_id(),
         "type": "bar",
-        "title": f"{value_label} by {cat_label}",
-        "description": f"Compares {value_label.lower()} across {cat_label.lower()}",
+        "title": title,
+        "description": f"Compares the {aggregation_word} {value_label.lower()} across each {cat_label.lower()}",
         "xAxis": value_col,
         "yAxis": cat_col,
         "series": [value_col],
         "color_scheme": ["#2563eb"],
+        "aggregation": aggregation,
         "echarts_option": {
             "grid": {"left": 112, "right": 20, "top": 16, "bottom": 24},
             "xAxis": {"type": "value"},
@@ -247,7 +347,36 @@ def _horizontal_bar_chart(cat_col: str, value_col: str, top_values: list[dict] |
                 "itemStyle": {"borderRadius": [0, 6, 6, 0]},
                 "name": value_col,
             }],
-            "_columns": {"x": cat_col, "y": value_col, "orientation": "horizontal"},
+            "_columns": {"x": cat_col, "y": value_col, "orientation": "horizontal", "aggregation": aggregation},
+        },
+    }
+
+
+def _outcome_rate_bar_chart(cat_col: str, outcome_col: str) -> dict[str, Any]:
+    """Share of positive outcomes (mean of a 0/1 flag, as %) per category."""
+    cat_label = _humanize(cat_col)
+    outcome_label = _humanize(outcome_col)
+    return {
+        "id": _chart_id(),
+        "type": "bar",
+        "title": f"{outcome_label} rate by {cat_label}",
+        "description": f"Share of records with {outcome_label.lower()} = 1 in each {cat_label.lower()} group",
+        "xAxis": outcome_col,
+        "yAxis": cat_col,
+        "series": [outcome_col],
+        "color_scheme": ["#8b5cf6"],
+        "aggregation": "percent_rate",
+        "echarts_option": {
+            "grid": {"left": 112, "right": 20, "top": 16, "bottom": 24},
+            "xAxis": {"type": "value", "name": f"{outcome_label} rate (%)"},
+            "yAxis": {"type": "category", "data": []},
+            "series": [{
+                "type": "bar",
+                "data": [],
+                "itemStyle": {"borderRadius": [0, 6, 6, 0]},
+                "name": outcome_col,
+            }],
+            "_columns": {"x": cat_col, "y": outcome_col, "orientation": "horizontal", "aggregation": "percent_rate"},
         },
     }
 
@@ -278,13 +407,25 @@ def _donut_chart(cat_col: str, top_values: list[dict]) -> dict[str, Any]:
     }
 
 
+def _relationship_strength(correlation: float) -> str:
+    magnitude = abs(correlation)
+    if magnitude >= 0.7:
+        return "strong"
+    if magnitude >= 0.4:
+        return "moderate"
+    return "weak"
+
+
 def _scatter_chart(col_a: str, col_b: str, correlation: float) -> dict[str, Any]:
-    direction = "positive" if correlation > 0 else "negative"
+    direction = "rise together" if correlation > 0 else "move in opposite directions"
+    label_a = _humanize(col_a)
+    label_b = _humanize(col_b)
+    strength = _relationship_strength(correlation)
     return {
         "id": _chart_id(),
         "type": "scatter",
-        "title": f"{col_a} vs {col_b}",
-        "description": f"{direction.capitalize()} correlation (r={correlation:.2f})",
+        "title": f"{label_a} vs {label_b}",
+        "description": f"A {strength} relationship: as {label_a.lower()} changes, {label_b.lower()} tends to {direction}",
         "xAxis": col_a,
         "yAxis": col_b,
         "series": [col_a, col_b],
@@ -330,8 +471,6 @@ def _histogram_chart(value_col: str, stats: dict[str, Any]) -> dict[str, Any]:
 
 def _humanize(value: str) -> str:
     replacements = {
-        "xg": "xG",
-        "xa": "xA",
         "pct": "%",
         "km": "km",
         "kmh": "km/h",

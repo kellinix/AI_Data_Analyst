@@ -10,7 +10,6 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from pathlib import Path
 from typing import Any
 
 from app.core.config import settings
@@ -26,42 +25,6 @@ except Exception as exc:  # pragma: no cover - exercised only in lean local envs
     logger.warning("OpenAI client unavailable", exc=str(exc))
     client = None
 
-_TEAM_COLUMN_PATTERNS = (
-    "team",
-    "team_name",
-    "player_team",
-    "club",
-    "club_name",
-    "squad",
-    "squad_name",
-    "country",
-    "team_country",
-    "nation",
-    "national_team",
-)
-_GOALS_FOR_PATTERNS = (
-    "goals_team",
-    "team_goals",
-    "goals_for",
-    "goals_scored",
-    "gf",
-)
-_GOALS_AGAINST_PATTERNS = (
-    "goals_opponent",
-    "opponent_goals",
-    "goals_against",
-    "goals_conceded",
-    "ga",
-)
-_PLAYER_GOALS_PATTERNS = (
-    "goals",
-    "player_goals",
-)
-_RESULT_COLUMN_PATTERNS = (
-    "match_result",
-    "result",
-    "outcome",
-)
 _AI_ANALYSIS_TIMEOUT_SECONDS = 75
 _AI_ANALYSIS_FALLBACK_TIMEOUT_SECONDS = 45
 _AI_CHAT_TIMEOUT_SECONDS = 45
@@ -168,6 +131,7 @@ CORE ANALYSIS RULES
 17. If no charts are supported, return an empty layout_grid array.
 18. Never create placeholder charts or filler recommendations.
 19. If the Profile JSON is empty, missing, or unparseable, return an executive_summary stating that the available profile could not be analysed and return empty arrays for layout_grid and recommendations.
+20. If dataset.sample_truncated is true in the Profile JSON, the executive_summary must note that the analysis covers a sample of the first dataset.sample_row_limit rows rather than the full file, in one plain-language sentence.
 
 EXECUTIVE SUMMARY RULES
 
@@ -371,30 +335,6 @@ Before returning the JSON:
         user_message: str,
     ) -> dict[str, Any]:
         analysis_context = _build_chat_analysis_context(analysis)
-        computed_context = await _build_chat_computed_context(analysis, user_message)
-        chart_config = await _build_chat_chart_config(analysis, user_message)
-        if _asks_for_team_goals_chart(user_message):
-            if chart_config:
-                return {
-                    "content": _chart_config_markdown_answer(chart_config),
-                    "chart_config": chart_config,
-                    "metadata": {"deterministic": True},
-                }
-            return {
-                "content": _team_goals_unavailable_answer(analysis),
-                "chart_config": None,
-                "metadata": {"deterministic": True},
-            }
-        if computed_context:
-            analysis_context = f"{analysis_context}\n\nComputed answer context:\n{computed_context}"
-        if chart_config:
-            analysis_context = (
-                f"{analysis_context}\n\nA popup chart is attached to this answer: "
-                f"{chart_config.get('title')}. Briefly mention it when useful."
-            )
-            chart_context = _chart_config_context(chart_config)
-            if chart_context:
-                analysis_context = f"{analysis_context}\n{chart_context}"
         system_prompt = f"""You are a data analyst AI assistant with access to a business dataset.
 Dataset: {analysis.name}
 Rows: {analysis.row_count:,}
@@ -437,7 +377,7 @@ When answering:
             content = response.choices[0].message.content or "I couldn't generate a response."
             return {
                 "content": content,
-                "chart_config": chart_config,
+                "chart_config": None,
                 "metadata": {
                     "prompt_tokens": response.usage.prompt_tokens if response.usage else 0,
                     "completion_tokens": response.usage.completion_tokens if response.usage else 0,
@@ -773,548 +713,6 @@ def _contains_unsafe_chart_value(value: Any) -> bool:
     return False
 
 
-async def _build_chat_computed_context(analysis: Any, user_message: str) -> str:
-    parts = [_known_metric_notes(analysis)]
-    if not _asks_for_team_goals_chart(user_message):
-        team_context = await _compute_team_performance_context(analysis, user_message)
-        if team_context:
-            parts.append(team_context)
-    return "\n\n".join(part for part in parts if part)
-
-
-async def _build_chat_chart_config(analysis: Any, user_message: str) -> dict[str, Any] | None:
-    if _asks_for_team_goals_chart(user_message):
-        return await _compute_team_goals_chart_config(analysis)
-    return None
-
-
-def _quote_identifier(identifier: str) -> str:
-    return '"' + identifier.replace('"', '""') + '"'
-
-
-def _known_metric_notes(analysis: Any) -> str:
-    column_names = {
-        str(column.get("name", "")).lower()
-        for column in (analysis.metadata_ or {}).get("schema", [])
-        if isinstance(column, dict)
-    }
-    notes = []
-    if "goals_opponent" in column_names:
-        notes.append(
-            "- goals_opponent: goals scored by the opposing team against the row's team; lower values indicate stronger defensive results."
-        )
-    if "goals_team" in column_names:
-        notes.append(
-            "- goals_team: goals scored by the row's team; higher values indicate stronger attacking results."
-        )
-    if not notes:
-        return ""
-    return "Metric notes:\n" + "\n".join(notes)
-
-
-async def _compute_team_performance_context(analysis: Any, user_message: str) -> str:
-    if not _asks_for_team_performance(user_message):
-        return ""
-
-    uploaded_file = getattr(analysis, "file", None)
-    storage_path = getattr(uploaded_file, "storage_path", None)
-    if not storage_path:
-        return _team_performance_missing_context(
-            "the uploaded file path is not loaded for this chat session"
-        )
-
-    schema = [
-        column
-        for column in (analysis.metadata_ or {}).get("schema", [])
-        if isinstance(column, dict) and column.get("name")
-    ]
-    if not schema:
-        return _team_performance_missing_context("the column schema is missing")
-
-    team_col = _select_column(schema, _TEAM_COLUMN_PATTERNS, require_non_numeric=True)
-    goals_for_col = _select_column(schema, _GOALS_FOR_PATTERNS, require_numeric=True)
-    goals_against_col = _select_column(schema, _GOALS_AGAINST_PATTERNS, require_numeric=True)
-    player_goals_col = _select_column(
-        schema,
-        _PLAYER_GOALS_PATTERNS,
-        allow_contains=False,
-        require_numeric=True,
-        exclude={goals_for_col, goals_against_col},
-    )
-    result_col = _select_column(schema, _RESULT_COLUMN_PATTERNS)
-    if not team_col:
-        return _team_performance_missing_context("a team, club, or squad column")
-    if not any([goals_for_col, goals_against_col, player_goals_col, result_col]):
-        return _team_performance_missing_context(
-            "team-level performance metrics such as goals_team, goals_opponent, goals, or match_result"
-        )
-
-    try:
-        import duckdb
-
-        from app.services.file_processor import FileProcessor
-
-        conn = duckdb.connect(":memory:")
-    except Exception as exc:
-        logger.warning("Team performance chat aggregate dependencies unavailable", exc=str(exc))
-        return _team_performance_missing_context("the dataset query engine is unavailable")
-
-    try:
-        extension = Path(storage_path).suffix.lower()
-        await FileProcessor().read_to_duckdb(conn, storage_path, extension)
-        rows = _query_team_performance(
-            conn=conn,
-            team_col=team_col,
-            goals_for_col=goals_for_col,
-            goals_against_col=goals_against_col,
-            player_goals_col=player_goals_col,
-            result_col=result_col,
-        )
-    except Exception as exc:
-        logger.warning("Team performance chat aggregate failed", exc=str(exc))
-        return _team_performance_missing_context("the team performance aggregate could not be computed")
-    finally:
-        conn.close()
-
-    if not rows:
-        return _team_performance_missing_context("no non-empty team rows were found")
-
-    ranking_basis = _team_ranking_basis(goals_for_col, goals_against_col, result_col)
-    lines = [
-        "Team performance aggregate computed from the uploaded dataset.",
-        f"Detected columns: team={team_col}; goals_for={goals_for_col or 'missing'}; goals_against={goals_against_col or 'missing'}; player_goals={player_goals_col or 'missing'}; match_result={result_col or 'missing'}.",
-        f"Ranking basis: {ranking_basis}.",
-        "Top teams:",
-    ]
-    for row in rows[:10]:
-        lines.append(_format_team_performance_row(row))
-    return "\n".join(lines)
-
-
-def _asks_for_team_performance(user_message: str) -> bool:
-    normalized = user_message.lower()
-    has_team = any(term in normalized for term in ("team", "club", "squad"))
-    has_comparison = any(
-        term in normalized
-        for term in (
-            "better",
-            "best",
-            "top",
-            "rank",
-            "ranking",
-            "performed",
-            "performance",
-            "winner",
-            "strongest",
-        )
-    )
-    return has_team and has_comparison
-
-
-def _asks_for_team_goals_chart(user_message: str) -> bool:
-    normalized = user_message.lower()
-    has_team = any(term in normalized for term in ("team", "teams", "club", "clubs", "squad"))
-    has_goals = any(term in normalized for term in ("goal", "goals", "scored"))
-    wants_ranked_view = any(
-        term in normalized
-        for term in ("top", "rank", "ranking", "highest", "show", "chart", "bar", "visual")
-    )
-    return has_team and has_goals and wants_ranked_view
-
-
-async def _compute_team_goals_chart_config(analysis: Any) -> dict[str, Any] | None:
-    uploaded_file = getattr(analysis, "file", None)
-    storage_path = getattr(uploaded_file, "storage_path", None)
-    if not storage_path:
-        return None
-
-    schema = [
-        column
-        for column in (analysis.metadata_ or {}).get("schema", [])
-        if isinstance(column, dict) and column.get("name")
-    ]
-    team_col = _select_column(schema, _TEAM_COLUMN_PATTERNS, require_non_numeric=True)
-    goals_for_col = _select_column(schema, _GOALS_FOR_PATTERNS, require_numeric=True)
-    player_goals_col = _select_column(
-        schema,
-        _PLAYER_GOALS_PATTERNS,
-        allow_contains=False,
-        require_numeric=True,
-        exclude={goals_for_col},
-    )
-    goals_col = goals_for_col or player_goals_col
-    if not team_col or not goals_col:
-        return None
-
-    try:
-        import duckdb
-
-        from app.services.file_processor import FileProcessor
-
-        conn = duckdb.connect(":memory:")
-    except Exception as exc:
-        logger.warning("Team goals chart dependencies unavailable", exc=str(exc))
-        return None
-
-    try:
-        extension = Path(storage_path).suffix.lower()
-        await FileProcessor().read_to_duckdb(conn, storage_path, extension)
-        rows = _query_top_team_goals(conn, team_col, goals_col, limit=5)
-    except Exception as exc:
-        logger.warning("Team goals chart aggregate failed", exc=str(exc))
-        return None
-    finally:
-        conn.close()
-
-    if not rows:
-        return None
-    return _team_goals_chart_config(rows, team_col, goals_col)
-
-
-def _query_top_team_goals(
-    conn: Any,
-    team_col: str,
-    goals_col: str,
-    *,
-    limit: int,
-) -> list[dict[str, Any]]:
-    team_identifier = _quote_identifier(team_col)
-    goals_identifier = _quote_identifier(goals_col)
-    sql = f"""
-        SELECT
-            CAST({team_identifier} AS VARCHAR) AS team,
-            SUM({goals_identifier}) AS goals_scored
-        FROM data
-        WHERE {team_identifier} IS NOT NULL AND {goals_identifier} IS NOT NULL
-        GROUP BY {team_identifier}
-        ORDER BY goals_scored DESC NULLS LAST
-        LIMIT {int(limit)}
-    """
-    return [
-        {"team": str(team), "goals_scored": float(goals)}
-        for team, goals in conn.execute(sql).fetchall()
-        if team is not None and goals is not None
-    ]
-
-
-def _team_goals_chart_config(
-    rows: list[dict[str, Any]],
-    team_col: str,
-    goals_col: str,
-) -> dict[str, Any]:
-    labels = [str(row["team"]) for row in rows]
-    values = [round(float(row["goals_scored"]), 2) for row in rows]
-    return {
-        "id": "chat_top_teams_goals",
-        "type": "bar",
-        "title": "Top 5 Teams by Goals Scored",
-        "description": f"Sum of {goals_col} grouped by {team_col}.",
-        "xAxis": "Team",
-        "yAxis": "Goals scored",
-        "series": ["Goals scored"],
-        "color_scheme": ["#2563eb", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444"],
-        "visual_spec": None,
-        "echarts_option": {
-            "tooltip": {"trigger": "axis"},
-            "grid": {"left": 56, "right": 24, "top": 24, "bottom": 72, "containLabel": True},
-            "xAxis": {
-                "type": "category",
-                "name": "Team",
-                "nameLocation": "middle",
-                "nameGap": 48,
-                "data": labels,
-                "axisLabel": {"interval": 0, "rotate": 25},
-            },
-            "yAxis": {"type": "value", "name": "Goals scored", "nameLocation": "middle", "nameGap": 52},
-            "series": [
-                {
-                    "type": "bar",
-                    "name": "Goals scored",
-                    "data": values,
-                    "label": {"show": True, "position": "top", "formatter": "{c}"},
-                    "itemStyle": {"borderRadius": [6, 6, 0, 0]},
-                }
-            ],
-        },
-    }
-
-
-def _chart_config_context(chart_config: dict[str, Any]) -> str:
-    option = chart_config.get("echarts_option")
-    if not isinstance(option, dict):
-        return ""
-    x_axis = option.get("xAxis")
-    series = option.get("series")
-    if not isinstance(x_axis, dict) or not isinstance(series, list) or not series:
-        return ""
-    labels = x_axis.get("data")
-    first_series = series[0]
-    if not isinstance(labels, list) or not isinstance(first_series, dict):
-        return ""
-    values = first_series.get("data")
-    if not isinstance(values, list):
-        return ""
-    pairs = [
-        f"{label}: {_format_context_number(value)}"
-        for label, value in zip(labels, values, strict=False)
-    ]
-    if not pairs:
-        return ""
-    return "Attached chart data: " + "; ".join(pairs)
-
-
-def _chart_config_markdown_answer(chart_config: dict[str, Any]) -> str:
-    option = chart_config.get("echarts_option")
-    if not isinstance(option, dict):
-        return "I found the result and opened a chart for you."
-    x_axis = option.get("xAxis")
-    series = option.get("series")
-    if not isinstance(x_axis, dict) or not isinstance(series, list) or not series:
-        return "I found the result and opened a chart for you."
-    labels = x_axis.get("data")
-    first_series = series[0]
-    if not isinstance(labels, list) or not isinstance(first_series, dict):
-        return "I found the result and opened a chart for you."
-    values = first_series.get("data")
-    if not isinstance(values, list):
-        return "I found the result and opened a chart for you."
-
-    metric = str(first_series.get("name") or chart_config.get("yAxis") or "Value")
-    lines = [
-        f"The {str(chart_config.get('title') or 'top results').lower()} are:",
-        "",
-    ]
-    for index, (label, value) in enumerate(zip(labels, values, strict=False), start=1):
-        lines.append(f"{index}. **{label}**: {_format_context_number(value)} {metric.lower()}")
-    lines.extend(
-        [
-            "",
-            "I've opened a bar chart so you can compare them at a glance.",
-        ]
-    )
-    return "\n".join(lines)
-
-
-def _team_goals_unavailable_answer(analysis: Any) -> str:
-    schema = [
-        column
-        for column in (analysis.metadata_ or {}).get("schema", [])
-        if isinstance(column, dict) and column.get("name")
-    ]
-    team_col = _select_column(schema, _TEAM_COLUMN_PATTERNS, require_non_numeric=True)
-    goals_col = _select_column(schema, _GOALS_FOR_PATTERNS, require_numeric=True) or _select_column(
-        schema,
-        _PLAYER_GOALS_PATTERNS,
-        allow_contains=False,
-        require_numeric=True,
-    )
-    missing = []
-    if not team_col:
-        missing.append("a field that identifies the team, country, nation, club, or squad")
-    if not goals_col:
-        missing.append("a goals field, such as goals_team or goals")
-    if not missing:
-        missing.append("the file could not be read for this question")
-    missing_text = "; ".join(missing)
-    return (
-        "I can't give a real top 5 for goals scored yet because I can't see "
-        f"{missing_text}. "
-        "I don’t want to guess team names or goal totals, so I’ll only show this ranking when those fields are available."
-    )
-
-
-def _team_performance_missing_context(missing: str) -> str:
-    return (
-        "The user asked for a team ranking, but the answer cannot be worked out because "
-        f"{missing} is unavailable. Explain this plainly and do not invent example teams or numbers."
-    )
-
-
-def _select_column(
-    schema: list[dict[str, Any]],
-    patterns: tuple[str, ...],
-    *,
-    allow_contains: bool = True,
-    require_numeric: bool = False,
-    require_non_numeric: bool = False,
-    exclude: set[str | None] | None = None,
-) -> str | None:
-    excluded = {value for value in (exclude or set()) if value}
-    by_name = {
-        str(column["name"]): _normalize_column_name(str(column["name"]))
-        for column in schema
-        if str(column["name"]) not in excluded
-        and (not require_numeric or bool(column.get("is_numeric")))
-        and (not require_non_numeric or not bool(column.get("is_numeric")))
-    }
-    for wanted in patterns:
-        for original, normalized in by_name.items():
-            if normalized == wanted:
-                return original
-    if not allow_contains:
-        return None
-    for wanted in patterns:
-        for original, normalized in by_name.items():
-            if wanted in normalized:
-                return original
-    return None
-
-
-def _query_team_performance(
-    *,
-    conn: Any,
-    team_col: str,
-    goals_for_col: str | None,
-    goals_against_col: str | None,
-    player_goals_col: str | None,
-    result_col: str | None,
-) -> list[dict[str, Any]]:
-    team_identifier = _quote_identifier(team_col)
-    select_parts = [
-        f"CAST({team_identifier} AS VARCHAR) AS team",
-        "COUNT(*) AS rows",
-    ]
-    order_parts = []
-
-    if goals_for_col:
-        goals_for_identifier = _quote_identifier(goals_for_col)
-        select_parts.extend(
-            [
-                f"AVG({goals_for_identifier}) AS avg_goals_for",
-                f"SUM({goals_for_identifier}) AS total_goals_for",
-            ]
-        )
-    else:
-        select_parts.extend(["NULL AS avg_goals_for", "NULL AS total_goals_for"])
-
-    if goals_against_col:
-        goals_against_identifier = _quote_identifier(goals_against_col)
-        select_parts.extend(
-            [
-                f"AVG({goals_against_identifier}) AS avg_goals_against",
-                f"SUM({goals_against_identifier}) AS total_goals_against",
-            ]
-        )
-    else:
-        select_parts.extend(["NULL AS avg_goals_against", "NULL AS total_goals_against"])
-
-    if goals_for_col and goals_against_col:
-        select_parts.append(
-            f"AVG({_quote_identifier(goals_for_col)} - {_quote_identifier(goals_against_col)}) AS avg_goal_difference"
-        )
-        order_parts.append("avg_goal_difference DESC NULLS LAST")
-    else:
-        select_parts.append("NULL AS avg_goal_difference")
-
-    if player_goals_col:
-        player_goals_identifier = _quote_identifier(player_goals_col)
-        select_parts.append(f"SUM({player_goals_identifier}) AS total_player_goals")
-        if not order_parts:
-            order_parts.append("total_player_goals DESC NULLS LAST")
-    else:
-        select_parts.append("NULL AS total_player_goals")
-
-    if result_col:
-        result_identifier = _quote_identifier(result_col)
-        result_text = f"LOWER(CAST({result_identifier} AS VARCHAR))"
-        win_expr = (
-            f"CASE WHEN {result_text} IN ('w', 'win', 'won', '3', 'victory') "
-            f"OR {result_text} LIKE '%win%' THEN 1 ELSE 0 END"
-        )
-        draw_expr = (
-            f"CASE WHEN {result_text} IN ('d', 'draw', 'drawn', '1', 'tie') "
-            f"OR {result_text} LIKE '%draw%' THEN 1 ELSE 0 END"
-        )
-        loss_expr = (
-            f"CASE WHEN {result_text} IN ('l', 'loss', 'lost', '0', 'defeat') "
-            f"OR {result_text} LIKE '%loss%' OR {result_text} LIKE '%lost%' THEN 1 ELSE 0 END"
-        )
-        select_parts.extend(
-            [
-                f"SUM({win_expr}) AS wins",
-                f"SUM({draw_expr}) AS draws",
-                f"SUM({loss_expr}) AS losses",
-                f"AVG({win_expr}) AS win_rate",
-            ]
-        )
-        order_parts.insert(0, "win_rate DESC NULLS LAST")
-    else:
-        select_parts.extend(
-            [
-                "NULL AS wins",
-                "NULL AS draws",
-                "NULL AS losses",
-                "NULL AS win_rate",
-            ]
-        )
-
-    if not order_parts:
-        order_parts.append("rows DESC")
-
-    sql = f"""
-        SELECT {", ".join(select_parts)}
-        FROM data
-        WHERE {team_identifier} IS NOT NULL
-        GROUP BY {team_identifier}
-        ORDER BY {", ".join(order_parts)}, rows DESC
-        LIMIT 10
-    """
-    columns = [description[0] for description in conn.execute(sql).description]
-    return [
-        dict(zip(columns, row, strict=False))
-        for row in conn.fetchall()
-        if row and row[0]
-    ]
-
-
-def _team_ranking_basis(
-    goals_for_col: str | None,
-    goals_against_col: str | None,
-    result_col: str | None,
-) -> str:
-    if result_col and goals_for_col and goals_against_col:
-        return "win rate first, then average goal difference"
-    if result_col:
-        return "win rate"
-    if goals_for_col and goals_against_col:
-        return "average goal difference"
-    if goals_for_col:
-        return f"average {goals_for_col}"
-    return "available team-level metric"
-
-
-def _format_team_performance_row(row: dict[str, Any]) -> str:
-    parts = [
-        f"- {row.get('team')}",
-        f"rows={_format_context_number(row.get('rows'))}",
-    ]
-    if row.get("win_rate") is not None:
-        parts.append(f"win_rate={float(row['win_rate']) * 100:.1f}%")
-        parts.append(f"W-D-L={_format_context_number(row.get('wins'))}-{_format_context_number(row.get('draws'))}-{_format_context_number(row.get('losses'))}")
-    if row.get("avg_goal_difference") is not None:
-        parts.append(f"avg_goal_diff={float(row['avg_goal_difference']):.2f}")
-    if row.get("avg_goals_for") is not None:
-        parts.append(f"avg_goals_for={float(row['avg_goals_for']):.2f}")
-    if row.get("avg_goals_against") is not None:
-        parts.append(f"avg_goals_against={float(row['avg_goals_against']):.2f}")
-    if row.get("total_player_goals") is not None:
-        parts.append(f"total_player_goals={_format_context_number(row.get('total_player_goals'))}")
-    return "; ".join(parts)
-
-
-def _format_context_number(value: Any) -> str:
-    if value is None:
-        return "NA"
-    numeric = float(value)
-    if numeric.is_integer():
-        return f"{numeric:,.0f}"
-    return f"{numeric:,.2f}"
-
-
-def _normalize_column_name(value: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
-
-
 def _build_chat_analysis_context(analysis: Any) -> str:
     metadata = analysis.metadata_ or {}
     lines: list[str] = []
@@ -1416,6 +814,13 @@ def _fallback_summary(statistics: dict[str, Any], kpis: list[dict[str, Any]]) ->
     lines = [
         f"The file contains {statistics.get('row_count', 0):,} rows across {statistics.get('column_count', 0)} columns.",
     ]
+    if statistics.get("sample_truncated"):
+        limit = statistics.get("sample_row_limit")
+        lines.append(
+            f"This analysis covers a sample of the first {limit:,} rows rather than the full file."
+            if limit
+            else "This analysis covers a sample of the file rather than the full file."
+        )
     if kpis:
         lines.append(f"Key measures include {_metric_list_sentence(kpis[:4])}.")
     quality = statistics.get("data_quality", {})
@@ -1434,7 +839,9 @@ def _metric_list_sentence(kpis: list[dict[str, Any]]) -> str:
     for kpi in kpis:
         label = _humanize_column_label(str(kpi.get("column", "measure")))
         value = _format_metric_value(kpi)
-        if kpi.get("is_total", True):
+        if kpi.get("is_percent"):
+            parts.append(f"a {label.lower()} rate of {value}%")
+        elif kpi.get("is_total", True):
             parts.append(f"{label} at {value}")
         else:
             parts.append(f"average {label.lower()} at {value}")
@@ -1457,8 +864,6 @@ def _format_metric_value(kpi: dict[str, Any]) -> str:
 
 def _humanize_column_label(value: str) -> str:
     replacements = {
-        "xg": "xG",
-        "xa": "xA",
         "pct": "%",
         "km": "km",
         "kmh": "km/h",

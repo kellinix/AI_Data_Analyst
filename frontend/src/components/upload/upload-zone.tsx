@@ -18,6 +18,22 @@ const ACCEPTED_TYPES = {
 
 const MAX_SIZE = 512 * 1024 * 1024 // 512 MB
 
+function humanizeRejection(
+  error: { code: string; message: string } | undefined
+): string | undefined {
+  if (!error) return undefined
+  switch (error.code) {
+    case "file-too-large":
+      return `That file is larger than the ${formatBytes(MAX_SIZE)} limit. Try splitting it or removing some columns.`
+    case "file-invalid-type":
+      return "That file type isn't supported. Try CSV, Excel, JSON, Parquet, or TSV."
+    case "too-many-files":
+      return "Please add files one at a time, or drop a folder of supported files."
+    default:
+      return "That file couldn't be added. Please check the format and try again."
+  }
+}
+
 interface UploadZoneProps {
   onFilesAccepted: (files: File[]) => void
   isUploading?: boolean
@@ -47,7 +63,7 @@ export function UploadZone({
       multiple: true,
     })
 
-  const rejectionError = fileRejections[0]?.errors[0]?.message
+  const rejectionError = humanizeRejection(fileRejections[0]?.errors[0])
 
   return (
     <div className={cn("w-full", className)}>

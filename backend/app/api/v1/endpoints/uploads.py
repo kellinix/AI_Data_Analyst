@@ -1,15 +1,14 @@
-from __future__ import annotations
-
 import hashlib
 import mimetypes
 import uuid
 from pathlib import Path
 
 import aiofiles
-from fastapi import APIRouter, File, HTTPException, UploadFile, status
+from fastapi import APIRouter, File, HTTPException, Request, UploadFile, status
 
-from app.api.deps import DB, CurrentUser
+from app.api.deps import DB, CurrentUser, ensure_storage_quota
 from app.core.config import settings
+from app.core.limiter import limiter
 from app.core.logging import get_logger
 from app.models.analysis import UploadedFile
 from app.schemas.analysis import UploadedFileResponse
@@ -32,7 +31,9 @@ def _validate_extension(filename: str) -> str:
 
 
 @router.post("", response_model=UploadedFileResponse, status_code=status.HTTP_201_CREATED)
+@limiter.limit(f"{settings.upload_rate_limit_per_minute}/minute")
 async def upload_file(
+    request: Request,
     current_user: CurrentUser,
     db: DB,
     file: UploadFile = File(...),
@@ -57,6 +58,8 @@ async def upload_file(
             status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             detail="File too large",
         )
+
+    ensure_storage_quota(current_user, len(content))
 
     # Compute checksum
     checksum = hashlib.sha256(content).hexdigest()

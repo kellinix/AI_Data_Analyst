@@ -66,6 +66,9 @@ class Analysis(UUIDMixin, TimestampMixin, Base):
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     celery_task_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    share_token: Mapped[str | None] = mapped_column(
+        String(64), nullable=True, unique=True, index=True
+    )
 
     # Cached data shapes
     row_count: Mapped[int | None] = mapped_column(Integer, nullable=True)

@@ -51,8 +51,8 @@ def test_anomaly_recommendation_uses_domain_neutral_language():
         data_quality={"score": 100, "issues": []},
         anomalies=[
             {
-                "column": "expected_goals_xg",
-                "description": "The highest expected goals xG value is 2.31.",
+                "column": "response_time_hours",
+                "description": "The highest response time is 42.3 hours.",
                 "score": 4.5,
             }
         ],
@@ -64,4 +64,4 @@ def test_anomaly_recommendation_uses_domain_neutral_language():
     assert "organisations" not in recs[0]["description"].lower()
     assert "correction" not in recs[0]["description"].lower()
     assert "standout" in recs[0]["title"].lower()
-    assert recs[0]["data"]["owner"] == "Performance Team"
+    assert recs[0]["data"]["owner"] == "Operations"

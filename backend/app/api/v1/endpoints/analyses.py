@@ -1,16 +1,24 @@
-from __future__ import annotations
-
 import math
+import secrets
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Query, status
-from fastapi.responses import FileResponse
+import duckdb
+from fastapi import APIRouter, HTTPException, Query, Request, status
+from fastapi.responses import FileResponse, Response
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
-from app.api.deps import DB, CurrentUser
+from app.analytics.live_filter import (
+    FilterValidationError,
+    build_where_clause,
+    recompute_kpi,
+    requery_chart,
+    validate_filters,
+)
+from app.api.deps import DB, CurrentUser, ensure_analysis_quota, ensure_storage_quota
 from app.core.config import settings
+from app.core.limiter import limiter
 from app.core.logging import get_logger
 from app.models.analysis import Analysis, AnalysisStatus, UploadedFile
 from app.schemas.analysis import (
@@ -18,12 +26,19 @@ from app.schemas.analysis import (
     AnalysisListResponse,
     AnalysisStatusResponse,
     ChartConfig,
+    ChartPatch,
     CreateAnalysisRequest,
     CreateCombinedAnalysisRequest,
+    FilterableColumn,
     InsightResponse,
+    KpiPatch,
+    LiveQueryRequest,
+    LiveQueryResponse,
     PaginatedResponse,
     RenameAnalysisRequest,
+    ShareLinkResponse,
 )
+from app.services.export_service import build_excel_report, build_pdf_report
 from app.services.file_processor import FileProcessor
 from app.services.semantic_wrangler import SemanticWrangler
 from app.workers.tasks import run_analysis_task
@@ -54,6 +69,60 @@ def _analysis_detail_response(
         insights=insights or [],
         charts=charts or [],
     )
+
+
+def _derive_filterable_columns(metadata: dict | None) -> list[FilterableColumn]:
+    """Slicer candidates derived from the analysis's stored data profile.
+
+    Categorical/flag columns with a small, known set of values (already
+    capped at the top 10 by `build_data_profile_schema`) become dropdown
+    slicers. Metric/attribute columns with a known min/max are exposed as
+    numeric range candidates for a later range-slider UI — the `/query`
+    endpoint already supports `"between"` filters on them today.
+    """
+    columns = ((metadata or {}).get("data_profile") or {}).get("columns", [])
+    out: list[FilterableColumn] = []
+    for c in columns:
+        role = c.get("analysis_role")
+        name = c.get("name")
+        if not name:
+            continue
+        display_label = c.get("display_label") or name
+        if role in {"dimension", "flag"}:
+            cat = c.get("categorical_summary") or {}
+            unique_count = cat.get("unique_count")
+            if unique_count is None or not (2 <= unique_count <= 30):
+                continue
+            out.append(FilterableColumn(
+                column=name, display_label=display_label, role=role,
+                kind="categorical", unique_count=unique_count,
+                top_values=cat.get("top_values"),
+            ))
+        elif role in {"metric", "attribute"}:
+            num = c.get("numeric_summary") or {}
+            if num.get("min") is None or num.get("max") is None:
+                continue
+            out.append(FilterableColumn(
+                column=name, display_label=display_label, role=role,
+                kind="numeric", min=num["min"], max=num["max"],
+            ))
+    # Categorical columns are the only ones the v1 UI renders as slicers, so
+    # they must survive truncation ahead of numeric range candidates — a
+    # flat [:N] slice in schema-column order would otherwise silently drop
+    # whichever categorical dimensions happen to appear later in the file
+    # (e.g. an outcome column like "target" as the last column).
+    categorical = [c for c in out if c.kind == "categorical"]
+    numeric = [c for c in out if c.kind == "numeric"]
+    return (categorical + numeric)[:24]
+
+
+def _delete_file_quietly(path: str | None) -> None:
+    if not path:
+        return
+    try:
+        Path(path).unlink(missing_ok=True)
+    except OSError as exc:
+        logger.warning("Failed to delete file during cleanup", path=path, exc=str(exc))
 
 
 def _cleaning_enabled(cleaning: dict | None) -> bool:
@@ -145,6 +214,79 @@ async def _create_cleaned_uploaded_file(
     return cleaned_file, cleaning_metadata
 
 
+async def _regenerate_cleaned_file_for_rerun(
+    *,
+    analysis: Analysis,
+    current_user: CurrentUser,
+    db: DB,
+) -> UploadedFile:
+    """Rerun must redo cleaning, not just replay the file it produced last
+    time. run_analysis_task reads whatever analysis.file already points to
+    — if cleaning was applied, that's a cleaned artifact baked from the
+    cleaning logic and options in effect at creation time. A rerun that
+    skips this regenerates nothing: it just recomputes stats over the same
+    (possibly since-fixed-in-code, but still-stale-on-disk) file.
+
+    Returns the UploadedFile the analysis should use afterward (unchanged if
+    cleaning isn't in play).
+    """
+    old_file = analysis.file
+    upload_context = (analysis.metadata_ or {}).get("upload_context") or {}
+    cleaning = upload_context.get("cleaning") if isinstance(upload_context, dict) else None
+    if not (isinstance(cleaning, dict) and cleaning.get("enabled") and cleaning.get("mode") == "clean"):
+        return old_file
+
+    source_file_id = cleaning.get("source_file_id")
+    if not source_file_id:
+        return old_file
+
+    source_result = await db.execute(
+        select(UploadedFile).where(
+            UploadedFile.id == uuid.UUID(source_file_id),
+            UploadedFile.user_id == current_user.id,
+        )
+    )
+    source_file = source_result.scalar_one_or_none()
+    if source_file is None:
+        # Original raw upload is gone — fall back to replaying the existing
+        # cleaned file rather than failing the rerun outright.
+        return old_file
+
+    original_options = (cleaning.get("report") or {}).get("options") or {}
+    new_file, new_cleaning_metadata = await _create_cleaned_uploaded_file(
+        source_file=source_file,
+        current_user=current_user,
+        db=db,
+        processor=FileProcessor(),
+        cleaning={"mode": "clean", **original_options},
+    )
+
+    analysis.file_id = new_file.id
+    analysis.metadata_ = {
+        **(analysis.metadata_ or {}),
+        "upload_context": {**upload_context, "cleaning": new_cleaning_metadata},
+    }
+    # Sessions here use autoflush=False, so the file_id reassignment above
+    # wouldn't otherwise be visible to this analysis's own row yet — without
+    # this flush the count below would always see this analysis still
+    # pointing at old_file.id and never reclaim it.
+    await db.flush()
+
+    # Reclaim the old cleaned file if this rerun was the only thing using it.
+    if old_file is not None and old_file.id != new_file.id:
+        remaining = await db.execute(
+            select(func.count()).select_from(Analysis).where(Analysis.file_id == old_file.id)
+        )
+        if remaining.scalar_one() == 0:
+            _delete_file_quietly(old_file.storage_path)
+            current_user.storage_used_bytes = max(
+                0, (current_user.storage_used_bytes or 0) - (old_file.file_size or 0)
+            )
+            await db.delete(old_file)
+
+    return new_file
+
+
 @router.get("", response_model=PaginatedResponse)
 async def list_analyses(
     current_user: CurrentUser,
@@ -200,7 +342,9 @@ async def list_analyses(
 
 
 @router.post("", response_model=AnalysisDetailResponse, status_code=status.HTTP_201_CREATED)
+@limiter.limit(f"{settings.analysis_create_rate_limit_per_minute}/minute")
 async def create_analysis(
+    request: Request,
     body: CreateAnalysisRequest,
     current_user: CurrentUser,
     db: DB,
@@ -216,6 +360,8 @@ async def create_analysis(
     uploaded_file = file_result.scalar_one_or_none()
     if not uploaded_file:
         raise HTTPException(status_code=404, detail="File not found")
+
+    ensure_analysis_quota(current_user)
 
     processor = FileProcessor()
     analysis_file, cleaning_metadata = await _create_cleaned_uploaded_file(
@@ -266,7 +412,9 @@ async def create_analysis(
 
 
 @router.post("/combined", response_model=AnalysisDetailResponse, status_code=status.HTTP_201_CREATED)
+@limiter.limit(f"{settings.analysis_create_rate_limit_per_minute}/minute")
 async def create_combined_analysis(
+    request: Request,
     body: CreateCombinedAnalysisRequest,
     current_user: CurrentUser,
     db: DB,
@@ -284,6 +432,9 @@ async def create_combined_analysis(
 
     files_by_id = {uploaded_file.id: uploaded_file for uploaded_file in uploaded_files}
     ordered_files = [files_by_id[file_id] for file_id in body.file_ids]
+
+    ensure_analysis_quota(current_user)
+    ensure_storage_quota(current_user, sum(f.file_size for f in ordered_files))
 
     upload_dir = Path(settings.upload_dir) / str(current_user.id)
     combined_filename = f"{uuid.uuid4()}.parquet"
@@ -412,9 +563,96 @@ async def get_analysis(
         created_at=analysis.created_at,
         updated_at=analysis.updated_at,
         summary=analysis.summary,
+        error_message=analysis.error_message,
         insights=insights,
         charts=charts,
         metadata=analysis.metadata_,
+        share_token=analysis.share_token,
+        filterable_columns=_derive_filterable_columns(analysis.metadata_),
+    )
+
+
+@router.post("/{analysis_id}/query", response_model=LiveQueryResponse)
+@limiter.limit(f"{settings.live_query_rate_limit_per_minute}/minute")
+async def query_analysis(
+    request: Request,
+    analysis_id: uuid.UUID,
+    body: LiveQueryRequest,
+    current_user: CurrentUser,
+    db: DB,
+):
+    """Re-aggregate this analysis's charts and KPIs under a slicer/cross-filter
+    selection. Reuses the exact aggregation each chart was originally built
+    with (see `app.analytics.live_filter`), so filtered numbers can never
+    drift from the unfiltered dashboard. AI Insights, Recommendations, and
+    the Executive Summary are intentionally NOT recomputed here — they stay
+    as the original full-dataset snapshot.
+    """
+    result = await db.execute(
+        select(Analysis)
+        .where(Analysis.id == analysis_id, Analysis.user_id == current_user.id)
+        .options(selectinload(Analysis.insights), selectinload(Analysis.file))
+    )
+    analysis = result.scalar_one_or_none()
+    if not analysis:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+    if analysis.status != AnalysisStatus.COMPLETED.value:
+        raise HTTPException(status_code=409, detail="Analysis hasn't finished processing yet")
+
+    schema = (analysis.metadata_ or {}).get("schema", [])
+    try:
+        filters = validate_filters([f.model_dump() for f in body.filters], schema)
+    except FilterValidationError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    filter_sql, filter_params = build_where_clause(filters)
+
+    conn = duckdb.connect(":memory:")
+    try:
+        extension = Path(analysis.file.storage_path).suffix.lower()
+        sample_row_count, _truncated = await FileProcessor().read_to_duckdb_ex(
+            conn, analysis.file.storage_path, extension
+        )
+        count_sql = "SELECT COUNT(*) FROM data" + (f" WHERE {filter_sql}" if filter_sql else "")
+        row_count = conn.execute(count_sql, filter_params).fetchone()[0]
+
+        chart_patches: list[ChartPatch] = []
+        for chart in analysis.charts or []:
+            patched = requery_chart(conn, chart, filter_sql, filter_params)
+            if patched is None:
+                chart_patches.append(ChartPatch(id=chart["id"], skipped=True))
+            else:
+                chart_patches.append(ChartPatch(
+                    id=chart["id"],
+                    echarts_option=patched["echarts_option"],
+                    visual_spec=patched.get("visual_spec"),
+                ))
+
+        known_columns = {c.get("name") for c in schema}
+        kpi_patches: list[KpiPatch] = []
+        for insight in analysis.insights:
+            if insight.type != "summary":
+                continue
+            data = insight.data or {}
+            column = data.get("column")
+            if not column or column not in known_columns:
+                kpi_patches.append(KpiPatch(insight_id=insight.id, skipped=True))
+                continue
+            value = recompute_kpi(
+                conn, column,
+                is_total=data.get("is_total", True),
+                is_percent=data.get("is_percent", False),
+                filter_sql=filter_sql, filter_params=filter_params,
+            )
+            kpi_patches.append(KpiPatch(insight_id=insight.id, value=value))
+    finally:
+        conn.close()
+
+    return LiveQueryResponse(
+        row_count=row_count,
+        sample_row_count=sample_row_count,
+        charts=chart_patches,
+        kpis=kpi_patches,
     )
 
 
@@ -511,6 +749,126 @@ async def download_profile_json(
     )
 
 
+async def _load_analysis_for_export(
+    analysis_id: uuid.UUID, current_user: CurrentUser, db: DB
+) -> Analysis:
+    result = await db.execute(
+        select(Analysis)
+        .where(Analysis.id == analysis_id, Analysis.user_id == current_user.id)
+        .options(selectinload(Analysis.insights))
+    )
+    analysis = result.scalar_one_or_none()
+    if not analysis:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+    if analysis.status != AnalysisStatus.COMPLETED.value:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This analysis hasn't finished processing yet, so there's nothing to export.",
+        )
+    return analysis
+
+
+def _insight_dicts(analysis: Analysis) -> list[dict]:
+    return [
+        {
+            "type": i.type,
+            "title": i.title,
+            "description": i.description,
+            "importance": i.importance,
+            "data": i.data,
+        }
+        for i in sorted(analysis.insights, key=lambda i: i.sort_order)
+    ]
+
+
+@router.get("/{analysis_id}/export/pdf")
+async def export_pdf(
+    analysis_id: uuid.UUID,
+    current_user: CurrentUser,
+    db: DB,
+):
+    analysis = await _load_analysis_for_export(analysis_id, current_user, db)
+    pdf_bytes = build_pdf_report(
+        name=analysis.name,
+        row_count=analysis.row_count,
+        column_count=analysis.column_count,
+        summary=analysis.summary,
+        insights=_insight_dicts(analysis),
+    )
+    filename = f"{analysis.name.replace(' ', '_').lower()}.pdf"
+    return Response(
+        content=pdf_bytes,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/{analysis_id}/export/excel")
+async def export_excel(
+    analysis_id: uuid.UUID,
+    current_user: CurrentUser,
+    db: DB,
+):
+    analysis = await _load_analysis_for_export(analysis_id, current_user, db)
+    excel_bytes = build_excel_report(
+        name=analysis.name,
+        row_count=analysis.row_count,
+        column_count=analysis.column_count,
+        summary=analysis.summary,
+        insights=_insight_dicts(analysis),
+    )
+    filename = f"{analysis.name.replace(' ', '_').lower()}.xlsx"
+    return Response(
+        content=excel_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.post("/{analysis_id}/share", response_model=ShareLinkResponse)
+async def create_share_link(
+    analysis_id: uuid.UUID,
+    current_user: CurrentUser,
+    db: DB,
+):
+    result = await db.execute(
+        select(Analysis).where(
+            Analysis.id == analysis_id, Analysis.user_id == current_user.id
+        )
+    )
+    analysis = result.scalar_one_or_none()
+    if not analysis:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+
+    if not analysis.share_token:
+        analysis.share_token = secrets.token_urlsafe(24)
+        await db.flush()
+
+    return ShareLinkResponse(
+        share_token=analysis.share_token,
+        share_url=f"{settings.frontend_url}/shared/{analysis.share_token}",
+    )
+
+
+@router.delete("/{analysis_id}/share", status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_share_link(
+    analysis_id: uuid.UUID,
+    current_user: CurrentUser,
+    db: DB,
+):
+    result = await db.execute(
+        select(Analysis).where(
+            Analysis.id == analysis_id, Analysis.user_id == current_user.id
+        )
+    )
+    analysis = result.scalar_one_or_none()
+    if not analysis:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+
+    analysis.share_token = None
+    await db.flush()
+
+
 @router.patch("/{analysis_id}", response_model=AnalysisListResponse)
 async def rename_analysis(
     analysis_id: uuid.UUID,
@@ -550,19 +908,44 @@ async def delete_analysis(
     db: DB,
 ):
     result = await db.execute(
-        select(Analysis).where(
-            Analysis.id == analysis_id, Analysis.user_id == current_user.id
-        )
+        select(Analysis)
+        .where(Analysis.id == analysis_id, Analysis.user_id == current_user.id)
+        .options(selectinload(Analysis.file))
     )
     analysis = result.scalar_one_or_none()
     if not analysis:
         raise HTTPException(status_code=404, detail="Analysis not found")
 
+    uploaded_file = analysis.file
+    upload_context = (analysis.metadata_ or {}).get("upload_context") or {}
+    cleaning = upload_context.get("cleaning") if isinstance(upload_context, dict) else None
+    profile_json_path = (analysis.metadata_ or {}).get("profile_json_path")
+
     await db.delete(analysis)
+    await db.flush()
+
+    # Only reclaim the underlying file if no other analysis still points to it
+    # (e.g. the same raw upload reused across multiple analyses).
+    if uploaded_file is not None:
+        remaining = await db.execute(
+            select(func.count()).select_from(Analysis).where(Analysis.file_id == uploaded_file.id)
+        )
+        if remaining.scalar_one() == 0:
+            _delete_file_quietly(uploaded_file.storage_path)
+            if isinstance(cleaning, dict):
+                _delete_file_quietly(cleaning.get("cleaned_csv_path"))
+            current_user.storage_used_bytes = max(
+                0, (current_user.storage_used_bytes or 0) - (uploaded_file.file_size or 0)
+            )
+            await db.delete(uploaded_file)
+
+    _delete_file_quietly(profile_json_path)
 
 
 @router.post("/{analysis_id}/rerun", response_model=AnalysisDetailResponse)
+@limiter.limit(f"{settings.analysis_create_rate_limit_per_minute}/minute")
 async def rerun_analysis(
+    request: Request,
     analysis_id: uuid.UUID,
     current_user: CurrentUser,
     db: DB,
@@ -575,6 +958,12 @@ async def rerun_analysis(
     analysis = result.scalar_one_or_none()
     if not analysis:
         raise HTTPException(status_code=404, detail="Analysis not found")
+
+    analysis_file = await _regenerate_cleaned_file_for_rerun(
+        analysis=analysis,
+        current_user=current_user,
+        db=db,
+    )
 
     analysis.status = AnalysisStatus.PENDING.value
     analysis.progress = 0
@@ -602,4 +991,4 @@ async def rerun_analysis(
             exc=str(exc),
         )
 
-    return _analysis_detail_response(analysis, analysis.file)
+    return _analysis_detail_response(analysis, analysis_file)

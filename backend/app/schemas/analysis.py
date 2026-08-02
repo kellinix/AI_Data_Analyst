@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -78,6 +78,50 @@ class InsightResponse(BaseModel):
     created_at: datetime
 
 
+class FilterableColumn(BaseModel):
+    """A column the interactive dashboard can offer as a slicer, derived from
+    the analysis's stored data profile."""
+
+    column: str
+    display_label: str
+    role: str
+    kind: Literal["categorical", "numeric"]
+    unique_count: int | None = None
+    top_values: list[dict[str, Any]] | None = None
+    min: float | None = None
+    max: float | None = None
+
+
+class FilterSpec(BaseModel):
+    column: str
+    op: Literal["in", "between"]
+    values: list[Any] = Field(..., min_length=1, max_length=50)
+
+
+class LiveQueryRequest(BaseModel):
+    filters: list[FilterSpec] = Field(default_factory=list, max_length=8)
+
+
+class ChartPatch(BaseModel):
+    id: str
+    echarts_option: dict[str, Any] = Field(default_factory=dict)
+    visual_spec: dict[str, Any] | None = None
+    skipped: bool = False
+
+
+class KpiPatch(BaseModel):
+    insight_id: uuid.UUID
+    value: float | None = None
+    skipped: bool = False
+
+
+class LiveQueryResponse(BaseModel):
+    row_count: int
+    sample_row_count: int
+    charts: list[ChartPatch] = Field(default_factory=list)
+    kpis: list[KpiPatch] = Field(default_factory=list)
+
+
 class AnalysisListResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -94,15 +138,33 @@ class AnalysisListResponse(BaseModel):
 
 class AnalysisDetailResponse(AnalysisListResponse):
     summary: str | None
+    error_message: str | None = None
     insights: list[InsightResponse] = Field(default_factory=list)
     charts: list[ChartConfig] = Field(default_factory=list)
     metadata: dict[str, Any] | None = None
+    share_token: str | None = None
+    filterable_columns: list[FilterableColumn] = Field(default_factory=list)
 
 
 class AnalysisStatusResponse(BaseModel):
     status: str
     progress: int
     error: str | None = None
+
+
+class ShareLinkResponse(BaseModel):
+    share_token: str
+    share_url: str
+
+
+class SharedAnalysisResponse(BaseModel):
+    name: str
+    row_count: int | None
+    column_count: int | None
+    created_at: datetime
+    summary: str | None
+    insights: list[InsightResponse] = Field(default_factory=list)
+    charts: list[ChartConfig] = Field(default_factory=list)
 
 
 class PaginatedResponse(BaseModel):

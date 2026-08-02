@@ -26,6 +26,7 @@ from app.analytics.chart_selector import select_charts
 from app.analytics.chart_specs import attach_visual_specs
 from app.analytics.forecasting import generate_forecasts
 from app.analytics.kpi_detector import detect_kpis
+from app.analytics.live_filter import populate_chart_option
 from app.analytics.recommendations import generate_recommendations
 from app.analytics.statistics import StatisticsEngine
 from app.core.logging import get_logger
@@ -82,7 +83,7 @@ class AnalysisEngine:
         # Step 1: Load into DuckDB
         conn = duckdb.connect(":memory:")
         extension = Path(uploaded_file.storage_path).suffix.lower()
-        row_count = await self.file_processor.read_to_duckdb(
+        row_count, truncated = await self.file_processor.read_to_duckdb_ex(
             conn, uploaded_file.storage_path, extension
         )
         await self._update_progress(db, analysis, AnalysisStatus.PROCESSING, 15)
@@ -94,6 +95,9 @@ class AnalysisEngine:
             uploaded_file.storage_path,
             extension,
         )
+        if truncated:
+            statistics["sample_truncated"] = True
+            statistics["sample_row_limit"] = self.file_processor.SAMPLE_ROWS
         _adjust_portfolio_data_quality(statistics, upload_context)
         uploaded_file.row_count = row_count
         uploaded_file.column_count = len(statistics["schema"])
@@ -215,137 +219,20 @@ class AnalysisEngine:
     async def _populate_chart_data(
         self, conn: duckdb.DuckDBPyConnection, charts: list[dict[str, Any]]
     ) -> list[dict[str, Any]]:
-        """Query DuckDB to populate chart series data."""
+        """Query DuckDB to populate chart series data.
+
+        `_columns` is intentionally kept on the stored `echarts_option` (not
+        popped) — the live-filter endpoint (`app.analytics.live_filter`)
+        reuses it to re-run this exact same aggregation with a WHERE clause,
+        so a filtered view can never drift from how this chart was built.
+        """
         populated = []
         for chart in charts:
             try:
-                opt = chart.get("echarts_option", {})
-                cols = opt.get("_columns", {})
-                x_col = cols.get("x")
-                y_col = cols.get("y")
-                cat_col = cols.get("category")
-                y_cols = cols.get("ys", [])
-                orientation = cols.get("orientation")
-
-                if chart["type"] == "line" and x_col and y_cols:
-                    select_columns = ", ".join(
-                        f"AVG({_quote_identifier(col)}) AS {_quote_identifier(col)}"
-                        for col in y_cols
-                    )
-                    x_identifier = _quote_identifier(x_col)
-                    rows = conn.execute(f"""
-                        SELECT CAST({x_identifier} AS VARCHAR) AS period, {select_columns}
-                        FROM data
-                        WHERE {x_identifier} IS NOT NULL
-                        GROUP BY {x_identifier}
-                        ORDER BY {x_identifier}
-                        LIMIT 100
-                    """).fetchall()
-                    x_data = [str(r[0]) for r in rows]
-                    opt["xAxis"]["data"] = x_data
-                    for index, _col in enumerate(y_cols):
-                        opt["series"][index]["data"] = [
-                            round(float(r[index + 1]), 2) if r[index + 1] is not None else 0
-                            for r in rows
-                        ]
-
-                elif chart["type"] == "line" and x_col and y_col:
-                    x_identifier = _quote_identifier(x_col)
-                    y_identifier = _quote_identifier(y_col)
-                    rows = conn.execute(f"""
-                        SELECT CAST({x_identifier} AS VARCHAR), AVG({y_identifier})
-                        FROM data
-                        WHERE {x_identifier} IS NOT NULL AND {y_identifier} IS NOT NULL
-                        GROUP BY {x_identifier}
-                        ORDER BY {x_identifier}
-                        LIMIT 100
-                    """).fetchall()
-                    x_data = [str(r[0]) for r in rows]
-                    y_data = [round(float(r[1]), 2) if r[1] is not None else 0 for r in rows]
-                    opt["xAxis"]["data"] = x_data
-                    opt["series"][0]["data"] = y_data
-
-                elif chart["type"] == "bar" and x_col and y_col:
-                    x_identifier = _quote_identifier(x_col)
-                    y_identifier = _quote_identifier(y_col)
-                    rows = conn.execute(f"""
-                        SELECT CAST({x_identifier} AS VARCHAR), SUM({y_identifier}) as value
-                        FROM data
-                        WHERE {x_identifier} IS NOT NULL AND {y_identifier} IS NOT NULL
-                        GROUP BY {x_identifier}
-                        ORDER BY value DESC
-                        LIMIT 15
-                    """).fetchall()
-                    labels = [str(r[0]) for r in rows]
-                    values = [round(float(r[1]), 2) for r in rows]
-                    if orientation == "horizontal":
-                        opt["yAxis"]["data"] = labels[::-1]
-                        opt["series"][0]["data"] = values[::-1]
-                    else:
-                        opt["xAxis"]["data"] = labels
-                        opt["series"][0]["data"] = values
-
-                elif chart["type"] == "donut" and cat_col:
-                    cat_identifier = _quote_identifier(cat_col)
-                    rows = conn.execute(f"""
-                        SELECT CAST({cat_identifier} AS VARCHAR), COUNT(*) as cnt
-                        FROM data
-                        WHERE {cat_identifier} IS NOT NULL
-                        GROUP BY {cat_identifier}
-                        ORDER BY cnt DESC
-                        LIMIT 8
-                    """).fetchall()
-                    opt["series"][0]["data"] = [
-                        {"name": str(r[0]), "value": int(r[1])} for r in rows
-                    ]
-
-                elif chart["type"] == "scatter" and x_col and y_col:
-                    x_identifier = _quote_identifier(x_col)
-                    y_identifier = _quote_identifier(y_col)
-                    rows = conn.execute(f"""
-                        SELECT {x_identifier}, {y_identifier}
-                        FROM data
-                        WHERE {x_identifier} IS NOT NULL AND {y_identifier} IS NOT NULL
-                        LIMIT 500
-                    """).fetchall()
-                    opt["series"][0]["data"] = [[float(r[0]), float(r[1])] for r in rows if r[0] is not None and r[1] is not None]
-
-                elif chart["type"] == "histogram" and x_col:
-                    x_identifier = _quote_identifier(x_col)
-                    rows = conn.execute(f"""
-                        SELECT {x_identifier}
-                        FROM data
-                        WHERE {x_identifier} IS NOT NULL
-                        LIMIT 10000
-                    """).fetchall()
-                    values = [float(row[0]) for row in rows if row[0] is not None]
-                    if values:
-                        min_value = min(values)
-                        max_value = max(values)
-                        bucket_count = min(12, max(1, len(set(values))))
-                        if min_value == max_value:
-                            opt["xAxis"]["data"] = [f"{min_value:.0f}"]
-                            opt["series"][0]["data"] = [len(values)]
-                        else:
-                            bucket_size = (max_value - min_value) / bucket_count
-                            counts = [0 for _ in range(bucket_count)]
-                            for value in values:
-                                index = int((value - min_value) / bucket_size)
-                                index = min(index, bucket_count - 1)
-                                counts[index] += 1
-                            opt["xAxis"]["data"] = [
-                                f"{min_value + (i * bucket_size):.0f}-{min_value + ((i + 1) * bucket_size):.0f}"
-                                for i in range(bucket_count)
-                            ]
-                            opt["series"][0]["data"] = counts
-
-                # Remove internal _columns hint
-                opt.pop("_columns", None)
-                chart["echarts_option"] = opt
+                populate_chart_option(conn, chart)
                 populated.append(chart)
             except Exception as exc:
                 logger.warning("Chart data population failed", chart_type=chart.get("type"), exc=str(exc))
-                opt.pop("_columns", None)
                 populated.append(chart)
 
         return populated
@@ -376,19 +263,36 @@ class AnalysisEngine:
                 kpi["column"],
                 kpi["column"].replace("_", " ").title(),
             )
+            is_total = kpi.get("is_total", True)
+            is_percent = kpi.get("is_percent", False)
+            if is_percent:
+                title = f"{kpi_label} Rate"
+                description = f"{kpi['value']:,.1f}% of records have {kpi_label.lower()} = 1"
+            elif is_total:
+                title = kpi_label
+                description = f"{kpi_label}: {kpi['value']:,}"
+            else:
+                title = f"Avg {kpi_label}"
+                description = f"Average {kpi_label}: {kpi['value']:,.2f}"
+            if kpi.get("is_currency"):
+                value_word = "Total" if is_total else "Average"
+                description = f"{value_word} {kpi_label}: {kpi['value']:,.2f}"
             insight = Insight(
                 analysis_id=analysis.id,
                 type="summary",
-                title=kpi_label,
-                description=f"Total {kpi_label}: {kpi['value']:,.2f}" if kpi.get("is_currency") else f"{kpi_label}: {kpi['value']:,}",
+                title=title,
+                description=description,
                 importance="high",
                 confidence=0.99,
                 sort_order=i,
                 data={
                     "value": kpi.get("value"),
                     "is_currency": kpi.get("is_currency", False),
+                    "is_percent": is_percent,
                     "kpi_type": kpi.get("kpi_type"),
                     "mean": kpi.get("mean"),
+                    "column": kpi["column"],
+                    "is_total": is_total,
                 },
             )
             db.add(insight)
@@ -410,13 +314,15 @@ class AnalysisEngine:
         # Forecast insights
         for i, forecast in enumerate(metadata.get("forecasts", [])[:3]):
             next_month = forecast.get("predictions", {}).get("next_month", {})
+            metric_label = _humanize_metric_label(forecast["metric"])
             insight = Insight(
                 analysis_id=analysis.id,
                 type="forecast",
-                title=f"{forecast['metric']} forecast",
+                title=f"{metric_label} forecast",
                 description=(
-                    f"Next month is forecast at {next_month.get('value', 0):,.2f} "
-                    f"with a confidence interval of {next_month.get('lower', 0):,.2f} to {next_month.get('upper', 0):,.2f}."
+                    f"Next month is forecast at {next_month.get('value', 0):,.2f}, "
+                    f"likely to fall somewhere between {next_month.get('lower', 0):,.2f} "
+                    f"and {next_month.get('upper', 0):,.2f}."
                 ),
                 importance="medium",
                 confidence=float(forecast.get("confidence", 0.7)),
@@ -512,12 +418,20 @@ def _merge_recommendations(
 ) -> list[dict[str, Any]]:
     merged: list[dict[str, Any]] = []
     seen_titles: set[str] = set()
+    seen_evidence: set[str] = set()
     for recommendation in [*ai_recommendations, *deterministic_recommendations]:
         title = str(recommendation.get("title", "")).strip()
         key = _recommendation_key(recommendation)
+        # Two cards citing the same evidence are the same finding worded
+        # differently (an AI card and a deterministic card for one anomaly).
+        evidence = " ".join(str(recommendation.get("evidence", "")).lower().split())
         if not title or key in seen_titles:
             continue
+        if evidence and evidence in seen_evidence:
+            continue
         seen_titles.add(key)
+        if evidence:
+            seen_evidence.add(evidence)
         merged.append(recommendation)
     return merged[:8]
 
@@ -567,6 +481,10 @@ def _adjust_portfolio_data_quality(
         data_quality["score"] = max(int(data_quality.get("score") or 0), 95)
 
 
+def _humanize_metric_label(value: str) -> str:
+    return " ".join(word.capitalize() for word in value.replace("_", " ").split())
+
+
 def _recommendation_key(recommendation: dict[str, Any]) -> str:
     title = str(recommendation.get("title", "")).lower()
     evidence = str(recommendation.get("evidence", "")).lower()
@@ -580,7 +498,3 @@ def _recommendation_key(recommendation: dict[str, Any]) -> str:
                 return f"volume:{metric}"
         return "volume"
     return normalized
-
-
-def _quote_identifier(identifier: str) -> str:
-    return '"' + identifier.replace('"', '""') + '"'

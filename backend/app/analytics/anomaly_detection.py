@@ -29,7 +29,7 @@ def detect_anomalies(
     for column, stats in numeric_stats.items():
         if column not in candidate_columns:
             continue
-        anomalies.extend(_distribution_anomalies(conn, table, column, stats))
+        anomalies.extend(_distribution_anomalies(conn, table, column, stats, schema))
         if date_columns:
             anomalies.extend(_time_series_anomalies(conn, table, date_columns[0], column))
         if len(anomalies) >= max_anomalies:
@@ -43,6 +43,7 @@ def _distribution_anomalies(
     table: str,
     column: str,
     stats: dict[str, Any],
+    schema: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     mean = stats.get("mean")
     std = stats.get("std")
@@ -50,31 +51,76 @@ def _distribution_anomalies(
         return []
 
     quoted = _quote_identifier(column)
+    display_labels = {
+        item["name"]: item["display_label"]
+        for item in schema
+        if item.get("display_label")
+    }
+    context_columns = [
+        item["name"] for item in schema
+        if item["name"] != column
+        and (item.get("is_date") or item.get("analysis_role") in {"dimension", "temporal_dimension"})
+    ][:4]
+    context_select = "".join(f", {_quote_identifier(name)}" for name in context_columns)
+    # Percentile must be computed over every non-null row BEFORE filtering to
+    # outliers; a window over the filtered set would rank the value among the
+    # outliers only (e.g. a minimum could read as the "100th percentile").
     rows = conn.execute(
         f"""
-        SELECT {quoted}, ABS(({quoted} - {mean}) / {std}) AS z_score
-        FROM {_quote_identifier(table)}
-        WHERE {quoted} IS NOT NULL AND ABS(({quoted} - {mean}) / {std}) >= 3
+        SELECT * FROM (
+            SELECT {quoted}, ABS(({quoted} - {mean}) / {std}) AS z_score{context_select},
+                   100.0 * CUME_DIST() OVER (ORDER BY {quoted}) AS percentile
+            FROM {_quote_identifier(table)}
+            WHERE {quoted} IS NOT NULL
+        )
+        WHERE z_score >= 3
         ORDER BY z_score DESC
         LIMIT 1
         """
     ).fetchall()
 
-    return [
-        {
+    results = []
+    for row in rows:
+        value, z_score = row[0], row[1]
+        context = {name: row[index + 2] for index, name in enumerate(context_columns) if row[index + 2] is not None}
+        percentile = float(row[-1])
+        context_text = ", ".join(
+            f"{display_labels.get(name, _humanize(name))} {_format_context_value(value)}"
+            for name, value in context.items()
+        )
+        label = display_labels.get(column, _humanize(column))
+        results.append({
             "type": "statistical_outlier",
             "column": column,
             "title": f"Standout {label}",
             "description": (
                 f"One record reached {float(value):,.2f} for {label}, "
-                "which is much higher than the usual range in this file."
+                f"{_plain_percentile(percentile)}"
+                + (f" ({context_text})." if context_text else ".")
             ),
             "score": round(float(z_score), 2),
             "value": float(value),
-        }
-        for value, z_score in rows
-        for label in [_humanize(column)]
-    ]
+            "percentile": round(percentile, 1),
+            "context": context,
+        })
+    return results
+
+
+def _format_context_value(value: Any) -> Any:
+    if isinstance(value, float) and value.is_integer():
+        return f"{value:.0f}"
+    return value
+
+
+def _plain_percentile(percentile: float) -> str:
+    """Translate a percentile rank into a plain-English comparison sentence fragment."""
+    if percentile >= 99:
+        return "higher than almost every other record"
+    if percentile <= 1:
+        return "lower than almost every other record"
+    if percentile >= 50:
+        return f"higher than about {percentile:.0f}% of other records"
+    return f"lower than about {100 - percentile:.0f}% of other records"
 
 
 def _time_series_anomalies(
@@ -135,21 +181,15 @@ def _is_business_metric(column: str) -> bool:
     normalized = column.lower().replace(" ", "_")
     parts = set(normalized.split("_"))
     return not (
-        normalized in {"goals_team", "goals_opponent"}
-        or normalized == "year"
+        normalized == "year"
         or normalized.endswith("_year")
         or "date" in parts
         or "time" in parts
         or "timestamp" in parts
         or "age" in parts
-        or "height" in parts
-        or "weight" in parts
-        or "jersey" in parts
         or "latitude" in parts
         or "longitude" in parts
         or "coord" in parts
-        or "shirt_number" in normalized
-        or "squad_number" in normalized
         or normalized == "id"
         or normalized.endswith("_id")
         or normalized.startswith("id_")
@@ -159,7 +199,7 @@ def _is_business_metric(column: str) -> bool:
 
 
 def _humanize(value: str) -> str:
-    replacements = {"xg": "xG", "xa": "xA", "pct": "%", "km": "km", "kmh": "km/h"}
+    replacements = {"pct": "%", "km": "km", "kmh": "km/h"}
     return " ".join(
         replacements.get(word.lower(), word.capitalize())
         for word in value.replace("_", " ").split()

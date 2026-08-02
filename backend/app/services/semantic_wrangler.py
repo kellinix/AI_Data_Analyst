@@ -7,6 +7,7 @@ messiness: category aliases and display names for terse database headers.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import math
 import re
@@ -24,6 +25,9 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 
 client = AsyncOpenAI(api_key=settings.openai_api_key)
+
+_EMBEDDING_TIMEOUT_SECONDS = 20
+_DISPLAY_METADATA_TIMEOUT_SECONDS = 30
 
 
 CATEGORY_ALIASES = {
@@ -117,12 +121,27 @@ class SemanticWrangler:
             return SemanticWrangleResult(df, report)
 
         cleaned = df.clone()
+        candidate_columns = []
+        candidate_counts = []
         for column in _candidate_category_columns(cleaned):
             counts = _string_value_counts(cleaned[column])
-            if not (2 <= len(counts) <= settings.semantic_wrangling_max_unique_values):
+            if 2 <= len(counts) <= settings.semantic_wrangling_max_unique_values:
+                candidate_columns.append(column)
+                candidate_counts.append(counts)
+
+        # Compute mappings for all candidate columns concurrently instead of
+        # one sequential OpenAI round trip per column.
+        results = await asyncio.gather(
+            *(self._canonical_mapping(counts) for counts in candidate_counts),
+            return_exceptions=True,
+        )
+
+        for column, result in zip(candidate_columns, results, strict=False):
+            if isinstance(result, BaseException):
+                logger.warning("Semantic mapping failed for column", column=column, exc=str(result))
                 continue
 
-            mapping, clusters = await self._canonical_mapping(counts)
+            mapping, clusters = result
             if not mapping:
                 continue
 
@@ -220,9 +239,12 @@ class SemanticWrangler:
 
     async def _embed_values(self, values: list[str]) -> dict[str, list[float]]:
         try:
-            response = await client.embeddings.create(
-                model=settings.openai_embedding_model,
-                input=[f"Category value: {value}" for value in values],
+            response = await asyncio.wait_for(
+                client.embeddings.create(
+                    model=settings.openai_embedding_model,
+                    input=[f"Category value: {value}" for value in values],
+                ),
+                timeout=_EMBEDDING_TIMEOUT_SECONDS,
             )
             return {
                 value: list(item.embedding)
@@ -281,15 +303,18 @@ class SemanticWrangler:
         )
 
         try:
-            response = await client.chat.completions.create(
-                model=settings.openai_model,
-                messages=[
-                    {"role": "system", "content": prompt},
-                    {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
-                ],
-                temperature=0.1,
-                max_tokens=min(settings.openai_max_tokens, 2048),
-                response_format={"type": "json_object"},
+            response = await asyncio.wait_for(
+                client.chat.completions.create(
+                    model=settings.openai_model,
+                    messages=[
+                        {"role": "system", "content": prompt},
+                        {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
+                    ],
+                    temperature=0.1,
+                    max_tokens=min(settings.openai_max_tokens, 2048),
+                    response_format={"type": "json_object"},
+                ),
+                timeout=_DISPLAY_METADATA_TIMEOUT_SECONDS,
             )
             content = response.choices[0].message.content or "{}"
             metadata = json.loads(content)
@@ -315,7 +340,27 @@ def apply_display_metadata_to_statistics(
                 "display_description": _column_descriptions(display_metadata).get(name),
             }
         )
-    return {**statistics, "schema": schema, "semantic_display": display_metadata}
+    updated = {**statistics, "schema": schema, "semantic_display": display_metadata}
+
+    # Data-quality issues reference raw column names; give the UI a readable
+    # label so a non-technical reader isn't shown identifiers like "trestbps".
+    data_quality = statistics.get("data_quality")
+    if isinstance(data_quality, dict):
+        issues = [
+            {
+                **issue,
+                "column_label": (
+                    labels.get(issue.get("column")) or _humanize_identifier(str(issue.get("column")))
+                    if issue.get("column")
+                    else None
+                ),
+            }
+            if isinstance(issue, dict)
+            else issue
+            for issue in data_quality.get("issues", [])
+        ]
+        updated["data_quality"] = {**data_quality, "issues": issues}
+    return updated
 
 
 def apply_display_metadata_to_charts(
@@ -544,13 +589,22 @@ def _friendly_chart_title(chart: dict[str, Any], labels: dict[str, str]) -> str:
     y_axis = chart.get("yAxis")
     x_label = labels.get(x_axis, _humanize_identifier(str(x_axis))) if x_axis else None
     y_label = labels.get(y_axis, _humanize_identifier(str(y_axis))) if y_axis else None
+    # Read from the chart's own top-level field, not echarts_option._columns —
+    # chart-data population strips that hint out before this function runs.
+    aggregation = chart.get("aggregation")
 
     if chart_type == "bar" and x_label and y_label:
+        if aggregation == "percent_rate":
+            return f"{x_label} Rate by {y_label}"
+        if aggregation == "average":
+            return f"Avg {x_label} by {y_label}"
         return f"{x_label} by {y_label}"
     if chart_type == "line" and x_label and y_label:
         if len(chart.get("series", [])) > 1:
             return "Key Metrics Over Time"
-        return f"{y_label} Over Time" if "time" in x_label.lower() or "date" in x_label.lower() else f"{y_label} by {x_label}"
+        if "time" in x_label.lower() or "date" in x_label.lower():
+            return f"Average {y_label} Over Time" if aggregation == "average" else f"{y_label} Over Time"
+        return f"{y_label} by {x_label}"
     if chart_type == "donut" and chart.get("series"):
         return f"{labels.get(chart['series'][0], _humanize_identifier(str(chart['series'][0])))} Distribution"
     if chart_type == "scatter" and x_label and y_label:

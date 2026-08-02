@@ -7,12 +7,13 @@ import sentry_sdk
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
-from slowapi.util import get_remote_address
+from slowapi.middleware import SlowAPIMiddleware
 
 from app.api.v1.router import api_router
 from app.core.config import settings
+from app.core.limiter import limiter
 from app.core.logging import configure_logging, get_logger
 from app.db.session import engine
 
@@ -26,9 +27,6 @@ if settings.sentry_dsn:
         environment=settings.environment,
         traces_sample_rate=0.1 if settings.is_production else 1.0,
     )
-
-# Rate limiter
-limiter = Limiter(key_func=get_remote_address)
 
 
 @asynccontextmanager
@@ -48,9 +46,11 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# Rate limiter
+# Rate limiter — default_limits apply to every route; per-route decorators
+# in endpoint modules override with stricter limits where needed.
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
 
 # CORS
 app.add_middleware(

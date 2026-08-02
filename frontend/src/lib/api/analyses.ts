@@ -1,11 +1,14 @@
 import { apiClient, get, post, del, patch } from "@/lib/api/client"
 import type {
+  ActiveFilter,
   Analysis,
   AnalysisListItem,
   AnalysisStatus,
   CreateCombinedAnalysisRequest,
   CreateAnalysisRequest,
+  LiveQueryResponse,
   PaginatedResponse,
+  ShareLinkResponse,
 } from "@/types"
 
 const ANALYSIS_CREATE_TIMEOUT_MS = 10 * 60 * 1000
@@ -50,6 +53,12 @@ export const analysesApi = {
     return get(`/analyses/${id}/status`)
   },
 
+  queryAnalysis(id: string, filters: ActiveFilter[]): Promise<LiveQueryResponse> {
+    return post(`/analyses/${id}/query`, {
+      filters: filters.map((f) => ({ column: f.column, op: f.op, values: f.values })),
+    })
+  },
+
   async downloadCleaned(id: string): Promise<Blob> {
     const res = await apiClient.get<Blob>(`/analyses/${id}/cleaned-download`, {
       responseType: "blob",
@@ -64,5 +73,29 @@ export const analysesApi = {
       timeout: 120_000,
     })
     return res.data
+  },
+
+  async downloadPdf(id: string): Promise<Blob> {
+    const res = await apiClient.get<Blob>(`/analyses/${id}/export/pdf`, {
+      responseType: "blob",
+      timeout: 120_000,
+    })
+    return res.data
+  },
+
+  async downloadExcel(id: string): Promise<Blob> {
+    const res = await apiClient.get<Blob>(`/analyses/${id}/export/excel`, {
+      responseType: "blob",
+      timeout: 120_000,
+    })
+    return res.data
+  },
+
+  createShareLink(id: string): Promise<ShareLinkResponse> {
+    return post<ShareLinkResponse>(`/analyses/${id}/share`, undefined)
+  },
+
+  revokeShareLink(id: string): Promise<void> {
+    return del<void>(`/analyses/${id}/share`)
   },
 }

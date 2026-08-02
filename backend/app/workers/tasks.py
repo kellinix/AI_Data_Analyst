@@ -78,4 +78,32 @@ def run_analysis_task(self: AsyncTask, analysis_id: str) -> dict:
         try:
             raise self.retry(exc=exc, countdown=60)
         except self.MaxRetriesExceededError:
+            self.run_async(_mark_analysis_failed(analysis_id, str(exc)[:1024]))
             return {"status": "failed", "error": str(exc)}
+
+
+async def _reset_monthly_usage_counters() -> int:
+    from sqlalchemy import update
+
+    from app.db.session import AsyncSessionLocal
+    from app.models.user import User
+
+    async with AsyncSessionLocal() as db:
+        result = await db.execute(
+            update(User).values(analyses_this_month=0, ai_queries_this_month=0)
+        )
+        await db.commit()
+        return result.rowcount or 0
+
+
+@celery_app.task(
+    bind=True,
+    base=AsyncTask,
+    name="reset_monthly_usage_counters",
+    queue="default",
+)
+def reset_monthly_usage_counters_task(self: AsyncTask) -> dict:
+    """Runs on the 1st of each month via Celery Beat to reset plan usage counters."""
+    updated = self.run_async(_reset_monthly_usage_counters())
+    logger.info("Monthly usage counters reset", users_updated=updated)
+    return {"status": "completed", "users_updated": updated}

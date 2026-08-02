@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from celery import Celery
+from celery.schedules import crontab
 
 from app.core.config import settings
 
@@ -29,4 +30,10 @@ celery_app.conf.update(
     task_max_retries=settings.celery_max_retries,
     broker_connection_retry_on_startup=True,
     result_expires=3600,
+    beat_schedule={
+        "reset-monthly-usage-counters": {
+            "task": "reset_monthly_usage_counters",
+            "schedule": crontab(minute=0, hour=0, day_of_month=1),
+        },
+    },
 )

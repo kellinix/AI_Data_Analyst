@@ -45,14 +45,25 @@ def analyze_data_quality(
                 "type": "review",
                 "safe_to_auto_apply": False,
             })
+        # IQR outlier scans only make sense for measurable quantities;
+        # on categorical codes or identifiers every rare code reads as an
+        # "unusual value".
+        if column.get("is_numeric") and column.get("analysis_role") in {None, "metric", "attribute"}:
+            issues.extend(_numeric_quality_issues(conn, table, name, numeric_stats.get(name, {})))
+
+    issues.extend(_relationship_issues(conn, table, {column["name"] for column in schema}))
 
     duplicate_count = _duplicate_count(conn, table)
     if duplicate_count > 0:
+        duplicate_ratio = duplicate_count / row_count
         issues.append({
             "type": "duplicates",
             "column": None,
-            "severity": "medium",
-            "description": f"{duplicate_count:,} duplicate rows detected in the first 10,000 rows",
+            "severity": _ratio_severity(duplicate_ratio),
+            "description": (
+                f"{duplicate_count:,} rows ({duplicate_ratio:.0%} of the dataset) "
+                "are exact copies of other rows"
+            ),
             "affected_rows": duplicate_count,
         })
         fixes.append({
@@ -96,7 +107,10 @@ def _numeric_quality_issues(
                     "type": "outliers",
                     "column": column,
                     "severity": "medium",
-                    "description": f"{count:,} statistically unusual values detected",
+                    "description": (
+                        f"{count:,} value{'s' if count != 1 else ''} fall far outside "
+                        f"the typical range ({lower:,.0f} to {upper:,.0f})"
+                    ),
                     "affected_rows": count,
                     "bounds": {"lower": lower, "upper": upper},
                 })
@@ -120,13 +134,29 @@ def _numeric_quality_issues(
     return issues
 
 
+def _ratio_severity(ratio: float) -> str:
+    """Severity of an issue proportional to how much of the dataset it touches."""
+    if ratio >= 0.5:
+        return "critical"
+    if ratio >= 0.2:
+        return "high"
+    if ratio >= 0.05:
+        return "medium"
+    return "low"
+
+
 def _quality_score(row_count: int, issues: list[dict[str, Any]]) -> int:
     penalty = 0.0
     severity_weight = {"low": 1.5, "medium": 4.0, "high": 8.0, "critical": 14.0}
     for issue in issues:
         affected = issue.get("affected_rows") or 0
         affected_ratio = min(float(affected) / max(row_count, 1), 1.0)
-        penalty += severity_weight.get(issue.get("severity", "medium"), 4.0) * max(affected_ratio, 0.05)
+        weight = severity_weight.get(issue.get("severity", "medium"), 4.0)
+        # An issue touching most of the dataset dominates everything computed
+        # from it — the score must not stay in the "healthy" band.
+        if affected_ratio > 0.5:
+            weight *= 2
+        penalty += weight * max(affected_ratio, 0.05)
     return max(0, min(100, int(round(100 - penalty))))
 
 
@@ -148,7 +178,7 @@ def _duplicate_count(conn: duckdb.DuckDBPyConnection, table: str) -> int:
             SELECT COALESCE(SUM(row_count - 1), 0)
             FROM (
                 SELECT COUNT(*) AS row_count
-                FROM (SELECT * FROM {_quote_identifier(table)} LIMIT 10000)
+                FROM {_quote_identifier(table)}
                 GROUP BY {grouped_columns}
                 HAVING COUNT(*) > 1
             ) duplicates
@@ -159,6 +189,23 @@ def _duplicate_count(conn: duckdb.DuckDBPyConnection, table: str) -> int:
     except Exception:
         return 0
     return 0
+
+
+def _relationship_issues(conn: duckdb.DuckDBPyConnection, table: str, columns: set[str]) -> list[dict[str, Any]]:
+    """Flag "part exceeds whole" pairs for common business ratio columns
+    (e.g. a completed count that's larger than its own total)."""
+    checks = [
+        ("units_returned", "units_sold", "units_returned_exceeds_units_sold"),
+        ("completed_orders", "total_orders", "completed_orders_exceed_total"),
+        ("successful_deliveries", "total_deliveries", "successful_deliveries_exceed_total"),
+    ]
+    issues: list[dict[str, Any]] = []
+    for left, right, issue_type in checks:
+        if {left, right} <= columns:
+            count = _single_int(conn, f"SELECT COUNT(*) FROM {_quote_identifier(table)} WHERE {_quote_identifier(left)} > {_quote_identifier(right)}")
+            if count:
+                issues.append({"type": issue_type, "column": left, "severity": "high", "description": f"{count:,} rows have {left} greater than {right}", "affected_rows": count})
+    return issues
 
 
 def _single_int(conn: duckdb.DuckDBPyConnection, query: str) -> int:

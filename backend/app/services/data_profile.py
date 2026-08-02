@@ -34,6 +34,8 @@ def build_data_profile_schema(
             "row_count": statistics.get("row_count"),
             "column_count": statistics.get("column_count"),
             "parser": statistics.get("parser", {}),
+            "sample_truncated": statistics.get("sample_truncated", False),
+            "sample_row_limit": statistics.get("sample_row_limit"),
         },
         "columns": [
             _column_profile(column, numeric_stats, categorical_stats)

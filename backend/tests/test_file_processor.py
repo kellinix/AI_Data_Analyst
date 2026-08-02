@@ -41,6 +41,20 @@ def test_promotes_excel_header_below_report_title():
     ]
 
 
+def test_whole_number_text_columns_become_integers_not_floats():
+    """Category codes like cp (0-3) must not surface as 0.0/2.0 in chart
+    labels — whole-number columns are downcast to Int64; genuinely
+    fractional columns stay Float64."""
+    processor = FileProcessor()
+    df = pl.DataFrame({"cp": ["0", "2", "3"], "oldpeak": ["1.5", "2.3", "0"]})
+
+    cast = processor._cast_numeric_like_columns(df)
+
+    assert cast["cp"].dtype == pl.Int64
+    assert cast["cp"].to_list() == [0, 2, 3]
+    assert cast["oldpeak"].dtype == pl.Float64
+
+
 def test_promotes_first_row_when_excel_has_normal_header():
     processor = FileProcessor()
     raw = pl.DataFrame(
@@ -146,6 +160,46 @@ def test_clean_dataframe_imputes_missing_values_and_drops_rows_without_metrics()
     assert report["dropped_rows_missing_critical_metrics"] == 1
     assert report["missing_values"]["numeric_imputations"]
     assert report["missing_values"]["categorical_imputations"]
+
+
+def test_clean_dataframe_does_not_drop_rows_for_a_sparse_optional_metric():
+    """A numeric column populated in only a handful of rows (e.g. an optional
+    "hours logged" field on a task tracker, where most tasks never log hours)
+    is not a required metric — it must not gate row survival via the
+    any-numeric-metric-present check. Regression test for a bug where a
+    115-row real-world export was reduced to 3 rows because "Hours of Work"
+    was empty on all but 3 tasks.
+    """
+    processor = FileProcessor()
+    row_count = 20
+    hours = [None] * row_count
+    hours[0] = 30.0
+    hours[5] = 13.0
+    df = pl.DataFrame(
+        {
+            "Task ID": [str(1000 + i) for i in range(row_count)],
+            "Name": [f"Task {i}" for i in range(row_count)],
+            "Hours of Work": hours,
+        }
+    )
+
+    cleaned, report = processor.clean_dataframe(
+        df,
+        {
+            "missing_data_strategy": "smart",
+            "remove_duplicates": False,
+            "semantic_categorical_merging": False,
+        },
+    )
+
+    assert cleaned.height == row_count
+    assert report["dropped_rows_missing_critical_metrics"] == 0
+    # The 18 originally-null rows must stay null, not get fabricated median/
+    # interpolated values — a task that never logged hours isn't "missing"
+    # a hidden 13-hour entry.
+    assert cleaned["hours_of_work"].drop_nulls().len() == 2
+    assert cleaned["hours_of_work"].sum() == 43.0
+    assert report["missing_values"]["numeric_imputations"] == []
 
 
 def test_clean_dataframe_collapses_messy_text_whitespace():

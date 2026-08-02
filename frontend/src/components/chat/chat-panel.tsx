@@ -233,7 +233,7 @@ export function ChatPanel({ analysisId, onClose }: ChatPanelProps) {
           </button>
         </div>
         <p className="mt-1.5 text-center text-[10px] text-zinc-400">
-          Powered by GPT-4o · Results may contain errors
+          AI-generated · Results may contain errors
         </p>
       </div>
       </motion.aside>

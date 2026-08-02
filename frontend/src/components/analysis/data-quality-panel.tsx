@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils"
 interface DataQualityIssue {
   type: string
   column?: string | null
+  column_label?: string | null
   severity: "low" | "medium" | "high" | "critical"
   description: string
   affected_rows?: number
@@ -45,6 +46,15 @@ export function DataQualityPanel({ metadata }: DataQualityPanelProps) {
   const issues = quality.issues ?? []
   const fixes = quality.fixes ?? []
   const healthy = score >= 90 && issues.length === 0
+  const uploadContext = metadata.upload_context as Record<string, unknown> | undefined
+  const cleaning = uploadContext?.cleaning as Record<string, unknown> | undefined
+  const report = cleaning?.report as Record<string, unknown> | undefined
+  const cleaned = cleaning?.enabled === true && cleaning?.mode === "clean"
+  const capped = Number(report?.capped_outlier_values ?? 0)
+  const excluded = Number(report?.excluded_outlier_rows ?? 0)
+  const duplicatesRemoved = Number(report?.removed_duplicate_rows ?? 0)
+  const inputRows = Number(report?.input_rows ?? 0)
+  const outputRows = Number(report?.output_rows ?? 0)
 
   return (
     <section>
@@ -63,7 +73,7 @@ export function DataQualityPanel({ metadata }: DataQualityPanelProps) {
         >
           <div className="flex items-center justify-between">
             <p className="text-sm font-medium text-zinc-500 dark:text-zinc-400">
-              Quality score
+              Analysis quality score
             </p>
             {healthy ? (
               <CheckCircle2 className="h-5 w-5 text-emerald-500" />
@@ -90,6 +100,9 @@ export function DataQualityPanel({ metadata }: DataQualityPanelProps) {
             {healthy
               ? "No major quality issues detected."
               : `${issues.length} issue${issues.length === 1 ? "" : "s"} detected before AI reasoning.`}
+          </p>
+          <p className="mt-2 text-[11px] leading-relaxed text-zinc-400">
+            Checks apply to the {cleaned ? "cleaned" : "uploaded"} data used for analysis.
           </p>
         </motion.div>
 
@@ -119,7 +132,7 @@ export function DataQualityPanel({ metadata }: DataQualityPanelProps) {
               >
                 <div>
                   <p className="text-sm font-medium text-zinc-800 dark:text-zinc-100">
-                    {issue.column ?? "Dataset"}
+                    {issue.column_label ?? issue.column ?? "Whole dataset"}
                   </p>
                   <p className="mt-0.5 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
                     {issue.description}
@@ -138,6 +151,38 @@ export function DataQualityPanel({ metadata }: DataQualityPanelProps) {
             )}
           </div>
         </motion.div>
+      </div>
+
+      <div className="mt-4 grid gap-4 md:grid-cols-3">
+        <div className="rounded-2xl border bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
+          <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Source quality</h3>
+          <p className="mt-2 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
+            {cleaned
+              ? `The source contained ${inputRows.toLocaleString()} rows. A separate pre-cleaning quality score was not recorded.`
+              : "The quality score above describes the uploaded source data."}
+          </p>
+        </div>
+        <div className="rounded-2xl border bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
+          <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Cleaning performed</h3>
+          <p className="mt-2 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
+            {cleaned
+              ? `${duplicatesRemoved.toLocaleString()} duplicates removed, ${capped.toLocaleString()} numeric values capped, and ${excluded.toLocaleString()} outlier rows excluded. ${outputRows.toLocaleString()} rows were analysed.`
+              : "Raw mode was used; no automated cleaning was applied."}
+          </p>
+          {capped > 0 && (
+            <p className="mt-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
+              Analysis based on cleaned data. Numeric outliers were capped.
+            </p>
+          )}
+        </div>
+        <div className="rounded-2xl border bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
+          <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Analysis checks</h3>
+          <p className="mt-2 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
+            {issues.length === 0
+              ? "The data used for analysis passed the currently implemented automated checks."
+              : `${issues.length} issue${issues.length === 1 ? "" : "s"} remain in the data used for analysis.`}
+          </p>
+        </div>
       </div>
     </section>
   )

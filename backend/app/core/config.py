@@ -21,9 +21,12 @@ class Settings(BaseSettings):
     )
 
     # ── App ────────────────────────────────────────────────────────────────
-    app_name: str = "AI Dashboard Generator"
+    app_name: str = "InsightFlow"
     app_version: str = "1.0.0"
-    environment: Literal["development", "staging", "production"] = "development"
+    environment: Literal["development", "staging", "production"] = Field(
+        default="development",
+        validation_alias=AliasChoices("ENVIRONMENT", "APP_ENV"),
+    )
     debug: bool = False
     secret_key: str
     allowed_hosts: list[str] = ["*"]
@@ -35,6 +38,7 @@ class Settings(BaseSettings):
     # ── CORS ───────────────────────────────────────────────────────────────
     cors_origins: list[str] = ["http://localhost:3000"]
     cors_allow_credentials: bool = True
+    frontend_url: str = "http://localhost:3000"
 
     @field_validator("cors_origins", mode="before")
     @classmethod
@@ -164,6 +168,9 @@ class Settings(BaseSettings):
     # ── Rate limiting ──────────────────────────────────────────────────────
     rate_limit_per_minute: int = 100
     upload_rate_limit_per_minute: int = 10
+    chat_rate_limit_per_minute: int = 20
+    analysis_create_rate_limit_per_minute: int = 10
+    live_query_rate_limit_per_minute: int = 60
 
     # ── Analysis engine ────────────────────────────────────────────────────
     max_sample_rows: int = 100_000      # rows sampled for AI context

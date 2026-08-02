@@ -12,6 +12,7 @@ import {
   Activity,
 } from "lucide-react"
 import { cn, formatNumber, formatCurrency } from "@/lib/utils"
+import { useFilterContext } from "@/contexts/filter-context"
 import type { Insight } from "@/types"
 
 const ICON_MAP: Record<string, React.ElementType> = {
@@ -40,9 +41,13 @@ function KpiCard({
   insight: Insight
   index: number
 }) {
-  const value = insight.data?.value as number | undefined
+  const { kpiPatches, isRefetching } = useFilterContext()
+  const patch = kpiPatches[insight.id]
+  const baseValue = insight.data?.value as number | undefined
+  const value = patch && !patch.skipped && patch.value !== null ? patch.value : baseValue
   const changePercent = insight.data?.change_percent as number | undefined
   const currency = insight.data?.is_currency as boolean | undefined
+  const percent = insight.data?.is_percent as boolean | undefined
   const Icon = getKpiIcon(insight.title)
 
   const direction =
@@ -58,6 +63,8 @@ function KpiCard({
     value !== undefined
       ? currency
         ? formatCurrency(value)
+        : percent
+        ? `${formatNumber(value)}%`
         : formatNumber(value)
       : "—"
 
@@ -66,7 +73,10 @@ function KpiCard({
       initial={{ opacity: 0, y: 12 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ delay: index * 0.06, duration: 0.4, ease: [0.22, 1, 0.36, 1] }}
-      className="flex flex-col gap-4 rounded-2xl border bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/60"
+      className={cn(
+        "flex flex-col gap-4 rounded-2xl border bg-white p-5 shadow-sm transition-opacity dark:border-zinc-800 dark:bg-zinc-900/60",
+        isRefetching && "opacity-60"
+      )}
     >
       <div className="flex items-center justify-between">
         <p className="text-sm font-medium text-zinc-500 dark:text-zinc-400">

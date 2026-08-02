@@ -4,11 +4,18 @@ import { Component, type ReactNode, useEffect, useState } from "react"
 import { motion } from "framer-motion"
 import { notFound } from "next/navigation"
 import { useQueryClient } from "@tanstack/react-query"
-import { analysisKeys, useAnalysis, useAnalysisStatus } from "@/hooks/use-analyses"
+import { toast } from "sonner"
+import {
+  analysisKeys,
+  useAnalysis,
+  useAnalysisStatus,
+  useRerunAnalysis,
+} from "@/hooks/use-analyses"
 import { KpiGrid } from "@/components/analysis/kpi-grid"
 import { ExecutiveSummary } from "@/components/analysis/executive-summary"
 import { InsightsPanel } from "@/components/analysis/insights-panel"
 import { ChartsGrid } from "@/components/analysis/charts-grid"
+import { SlicerBar } from "@/components/analysis/slicer-bar"
 import { RecommendationsPanel } from "@/components/analysis/recommendations-panel"
 import { DataQualityPanel } from "@/components/analysis/data-quality-panel"
 import { ChatPanel } from "@/components/chat/chat-panel"
@@ -16,7 +23,13 @@ import { AnalysisHeader } from "@/components/analysis/analysis-header"
 import { ProcessingBanner } from "@/components/analysis/processing-banner"
 import { AnalysisDashboardSkeleton } from "@/components/analysis/analysis-dashboard-skeleton"
 import { Button } from "@/components/ui/button"
-import { MessageSquare } from "lucide-react"
+import { FilterProvider } from "@/contexts/filter-context"
+import { AlertTriangle, MessageSquare, RefreshCw } from "lucide-react"
+
+function isNotFoundError(error: unknown): boolean {
+  const maybeAxiosError = error as { response?: { status?: number } } | null
+  return maybeAxiosError?.response?.status === 404
+}
 
 interface AnalysisDashboardProps {
   id: string
@@ -52,11 +65,12 @@ class SectionErrorBoundary extends Component<
 export function AnalysisDashboard({ id }: AnalysisDashboardProps) {
   const [isChatOpen, setIsChatOpen] = useState(false)
   const queryClient = useQueryClient()
-  const { data: analysis, isLoading, error } = useAnalysis(id)
+  const { data: analysis, isLoading, error, refetch } = useAnalysis(id)
   const { data: status } = useAnalysisStatus(
     id,
     analysis?.status !== "completed" && analysis?.status !== "failed"
   )
+  const rerunAnalysis = useRerunAnalysis()
 
   useEffect(() => {
     if (status?.status === "completed" || status?.status === "failed") {
@@ -65,7 +79,26 @@ export function AnalysisDashboard({ id }: AnalysisDashboardProps) {
   }, [id, queryClient, status?.status])
 
   if (isLoading) return <AnalysisDashboardSkeleton />
-  if (error || !analysis) return notFound()
+  if (error && isNotFoundError(error)) return notFound()
+  if (error || !analysis) {
+    return (
+      <div className="flex min-h-[420px] flex-col items-center justify-center gap-4 p-8 text-center">
+        <AlertTriangle className="h-10 w-10 text-amber-500" />
+        <div className="space-y-1">
+          <h2 className="text-lg font-semibold text-zinc-900 dark:text-white">
+            Couldn&apos;t load this analysis
+          </h2>
+          <p className="max-w-sm text-sm text-zinc-500">
+            Something went wrong while fetching this page. Your analysis is safe — try again in a moment.
+          </p>
+        </div>
+        <Button onClick={() => refetch()} variant="outline">
+          <RefreshCw className="mr-2 h-4 w-4" />
+          Try again
+        </Button>
+      </div>
+    )
+  }
 
   const shouldUsePolledStatus =
     analysis.status === "pending" || analysis.status === "processing"
@@ -74,9 +107,20 @@ export function AnalysisDashboard({ id }: AnalysisDashboardProps) {
     : analysis.status
   const currentProgress = shouldUsePolledStatus ? status?.progress ?? 0 : 100
   const isProcessing = currentStatus === "processing" || currentStatus === "pending"
+  const isFailed = currentStatus === "failed"
   const insights = Array.isArray(analysis.insights) ? analysis.insights : []
   const charts = Array.isArray(analysis.charts) ? analysis.charts : []
   const hasGeneratedContent = Boolean(analysis.summary) || insights.length > 0 || charts.length > 0
+
+  async function handleRetry() {
+    try {
+      await rerunAnalysis.mutateAsync(id)
+      toast.success("Analysis restarted")
+    } catch (retryError) {
+      console.error("Retrying analysis failed", retryError)
+      toast.error("Couldn't restart the analysis")
+    }
+  }
 
   return (
     <div className="flex h-full">
@@ -95,6 +139,23 @@ export function AnalysisDashboard({ id }: AnalysisDashboardProps) {
 
           {isProcessing ? (
             <AnalysisDashboardSkeleton />
+          ) : isFailed ? (
+            <div className="flex flex-col items-center justify-center gap-4 rounded-lg border border-red-200 bg-red-50 p-10 text-center dark:border-red-900/50 dark:bg-red-950/20">
+              <AlertTriangle className="h-10 w-10 text-red-500" />
+              <div className="space-y-1">
+                <h2 className="text-lg font-semibold text-zinc-900 dark:text-white">
+                  This analysis couldn&apos;t be completed
+                </h2>
+                <p className="max-w-md text-sm text-zinc-600 dark:text-zinc-300">
+                  {analysis.error_message ||
+                    "Something went wrong while analysing this file. This is usually caused by a formatting issue in the file itself."}
+                </p>
+              </div>
+              <Button onClick={handleRetry} disabled={rerunAnalysis.isPending}>
+                <RefreshCw className="mr-2 h-4 w-4" />
+                Try again
+              </Button>
+            </div>
           ) : (
             <motion.div
               initial={{ opacity: 0 }}
@@ -104,7 +165,7 @@ export function AnalysisDashboard({ id }: AnalysisDashboardProps) {
             >
               {!hasGeneratedContent && (
                 <section className="rounded-lg border border-zinc-200 bg-zinc-50 p-5 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900/50 dark:text-zinc-300">
-                  This analysis is marked ready, but no summary, charts, or insights were returned by the API.
+                  This analysis finished, but didn&apos;t produce a summary, charts, or insights. Try re-analysing the file, or check that it has enough data to work with.
                 </section>
               )}
 
@@ -115,19 +176,32 @@ export function AnalysisDashboard({ id }: AnalysisDashboardProps) {
                 </SectionErrorBoundary>
               )}
 
-              {/* KPI grid */}
-              {insights.length > 0 && (
-                <SectionErrorBoundary title="Key metrics">
-                  <KpiGrid insights={insights} />
-                </SectionErrorBoundary>
-              )}
+              {/* KPI grid + charts share filter state so a slicer or chart
+                  click can cross-filter both; Insights/Recommendations/
+                  Summary above and below stay outside this provider, since
+                  they're the original full-dataset snapshot and never
+                  recompute on a filter change. */}
+              <FilterProvider analysisId={id} filterableColumns={analysis.filterable_columns ?? []}>
+                {/* KPI grid */}
+                {insights.length > 0 && (
+                  <SectionErrorBoundary title="Key metrics">
+                    <KpiGrid insights={insights} />
+                  </SectionErrorBoundary>
+                )}
 
-              {/* Charts */}
-              {charts.length > 0 && (
-                <SectionErrorBoundary title="Charts">
-                  <ChartsGrid charts={charts} />
-                </SectionErrorBoundary>
-              )}
+                {(analysis.filterable_columns ?? []).length > 0 && (
+                  <SectionErrorBoundary title="Filters">
+                    <SlicerBar filterableColumns={analysis.filterable_columns} />
+                  </SectionErrorBoundary>
+                )}
+
+                {/* Charts */}
+                {charts.length > 0 && (
+                  <SectionErrorBoundary title="Charts">
+                    <ChartsGrid charts={charts} />
+                  </SectionErrorBoundary>
+                )}
+              </FilterProvider>
 
               {/* Insights */}
               {insights.length > 0 && (
@@ -163,7 +237,7 @@ export function AnalysisDashboard({ id }: AnalysisDashboardProps) {
       )}
 
       {/* Chat toggle FAB */}
-      {!isChatOpen && !isProcessing && (
+      {!isChatOpen && !isProcessing && !isFailed && (
         <motion.div
           initial={{ scale: 0 }}
           animate={{ scale: 1 }}

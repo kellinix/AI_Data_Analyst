@@ -69,7 +69,7 @@ function getErrorMessage(error: unknown): string {
   }
 
   if (error instanceof Error) return error.message
-  return "Please try again or check the backend logs."
+  return "Something went wrong. Please try again."
 }
 
 function normalizeColumnName(name: string): string {
@@ -317,7 +317,7 @@ export function UploadWorkspace() {
   const [instructions, setInstructions] = useState("")
   const [cleaningMode, setCleaningMode] = useState<CleaningOptions["mode"]>("clean")
   const [outlierPolicy, setOutlierPolicy] =
-    useState<NonNullable<CleaningOptions["outlier_policy"]>>("cap")
+    useState<NonNullable<CleaningOptions["outlier_policy"]>>("keep")
   const [semanticCleanup, setSemanticCleanup] = useState(true)
   const [fuzzyDeduplicate, setFuzzyDeduplicate] = useState(false)
   const [processingStep, setProcessingStep] = useState(0)
@@ -658,49 +658,68 @@ export function UploadWorkspace() {
 
           {cleaningMode === "clean" && (
             <div className="mt-4 grid gap-2 sm:grid-cols-2">
-              <label className="flex items-center gap-3 rounded-lg border border-zinc-200 px-3 py-2 dark:border-zinc-800">
+              <label className="flex items-start gap-3 rounded-lg border border-zinc-200 px-3 py-2 dark:border-zinc-800">
                 <input
                   type="checkbox"
                   checked={semanticCleanup}
                   onChange={(event) => setSemanticCleanup(event.target.checked)}
                   disabled={state !== "idle"}
-                  className="h-4 w-4 rounded border-zinc-300 text-blue-600 focus:ring-blue-500"
+                  className="mt-0.5 h-4 w-4 rounded border-zinc-300 text-blue-600 focus:ring-blue-500"
                 />
-                <span className="text-sm text-zinc-700 dark:text-zinc-200">
-                  Merge semantic category variants
+                <span>
+                  <span className="block text-sm text-zinc-700 dark:text-zinc-200">
+                    Merge similar categories
+                  </span>
+                  <span className="block text-xs text-zinc-400">
+                    e.g. treats &quot;USA&quot;, &quot;US&quot;, and &quot;United States&quot; as one value
+                  </span>
                 </span>
               </label>
-              <label className="flex items-center gap-3 rounded-lg border border-zinc-200 px-3 py-2 dark:border-zinc-800">
+              <label className="flex items-start gap-3 rounded-lg border border-zinc-200 px-3 py-2 dark:border-zinc-800">
                 <input
                   type="checkbox"
                   checked={fuzzyDeduplicate}
                   onChange={(event) => setFuzzyDeduplicate(event.target.checked)}
                   disabled={state !== "idle"}
-                  className="h-4 w-4 rounded border-zinc-300 text-blue-600 focus:ring-blue-500"
+                  className="mt-0.5 h-4 w-4 rounded border-zinc-300 text-blue-600 focus:ring-blue-500"
                 />
-                <span className="text-sm text-zinc-700 dark:text-zinc-200">
-                  Find near-duplicate text records
+                <span>
+                  <span className="block text-sm text-zinc-700 dark:text-zinc-200">
+                    Find near-duplicate rows
+                  </span>
+                  <span className="block text-xs text-zinc-400">
+                    Catches rows that are almost identical, like a repeat entry with a typo
+                  </span>
                 </span>
               </label>
-              <div className="rounded-lg border border-zinc-200 px-3 py-2 dark:border-zinc-800">
-                <p className="mb-2 text-sm text-zinc-700 dark:text-zinc-200">
-                  Outlier handling
+              <div className="rounded-lg border border-zinc-200 px-3 py-2 dark:border-zinc-800 sm:col-span-2">
+                <p className="text-sm text-zinc-700 dark:text-zinc-200">
+                  Unusually high or low values
+                </p>
+                <p className="mb-2 text-xs text-zinc-400">
+                  How to handle numbers far outside the normal range for a column (often data entry mistakes)
                 </p>
                 <div className="grid grid-cols-3 gap-1 rounded-md bg-zinc-100 p-1 dark:bg-zinc-900">
-                  {(["keep", "cap", "exclude"] as const).map((policy) => (
+                  {(
+                    [
+                      { value: "keep", label: "Keep them" },
+                      { value: "cap", label: "Smooth them" },
+                      { value: "exclude", label: "Remove them" },
+                    ] as const
+                  ).map((policy) => (
                     <button
-                      key={policy}
+                      key={policy.value}
                       type="button"
-                      onClick={() => setOutlierPolicy(policy)}
+                      onClick={() => setOutlierPolicy(policy.value)}
                       disabled={state !== "idle"}
                       className={cn(
-                        "rounded px-2 py-1 text-xs font-medium capitalize transition-colors disabled:opacity-50",
-                        outlierPolicy === policy
+                        "rounded px-2 py-1 text-xs font-medium transition-colors disabled:opacity-50",
+                        outlierPolicy === policy.value
                           ? "bg-blue-600 text-white"
                           : "text-zinc-500 hover:text-zinc-900 dark:hover:text-white"
                       )}
                     >
-                      {policy}
+                      {policy.label}
                     </button>
                   ))}
                 </div>
@@ -774,7 +793,7 @@ export function UploadWorkspace() {
                 value={dataDescription}
                 onChange={(event) => setDataDescription(event.target.value)}
                 rows={3}
-                placeholder="Optional: e.g. This is UK visa sponsorship COS volume data by organisation and visa route. Higher values mean more certificates assigned."
+                placeholder="Optional: e.g. This is monthly sales data by store and product category. Higher values mean more revenue."
                 className="w-full resize-none rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition-colors placeholder:text-zinc-400 focus:border-blue-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-white"
               />
             </label>
@@ -787,7 +806,7 @@ export function UploadWorkspace() {
                 value={instructions}
                 onChange={(event) => setInstructions(event.target.value)}
                 rows={4}
-                placeholder="Optional: e.g. Join files by Organisation Name, compare 2025 vs 2026, and focus on COS volume changes."
+                placeholder="Optional: e.g. Join files by Store Name, compare this year vs last year, and focus on revenue changes."
                 className="w-full resize-none rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 outline-none transition-colors placeholder:text-zinc-400 focus:border-blue-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-white"
               />
             </label>

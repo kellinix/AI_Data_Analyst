@@ -24,21 +24,20 @@ RETENTION_KEYWORDS = ["retention", "renewal", "repeat_purchase", "repeat_rate"]
 MRR_KEYWORDS = ["mrr", "monthly_recurring_revenue"]
 ARR_KEYWORDS = ["arr", "annual_recurring_revenue"]
 ASSET_VALUE_KEYWORDS = ["market_value", "valuation"]
-MATCH_CONTEXT_METRIC_NAMES = {"goals_team", "goals_opponent"}
-PERFORMANCE_COUNT_KEYWORDS = [
-    "goals", "assists", "shots", "passes", "tackles", "interceptions",
-    "clearances", "blocks", "recoveries", "saves", "crosses", "dribbles",
-    "duels", "fouls", "offsides", "accelerations", "decelerations",
-]
-DURATION_KEYWORDS = ["minutes_played", "minutes", "distance_covered", "sprint_distance"]
+DURATION_KEYWORDS = ["duration", "hours", "minutes", "distance", "time_to_hire", "cycle_time"]
 AVERAGE_METRIC_KEYWORDS = [
     "accuracy", "rating", "score", "percentage", "percent", "pct", "rate",
-    "ratio", "speed", "stamina", "impact", "resistance", "creativity",
-    "consistency",
+    "ratio", "speed", "impact", "satisfaction", "nps",
 ]
 NON_KPI_NUMERIC_KEYWORDS = [
-    "date", "time", "timestamp", "age", "height", "weight", "jersey",
-    "shirt_number", "squad_number", "latitude", "longitude", "coord",
+    "date", "time", "timestamp", "age", "latitude", "longitude", "coord",
+]
+# Binary flag columns whose name marks them as the outcome the dataset is
+# about (e.g. "target" in a disease dataset, "churned" in a customer list).
+OUTCOME_KEYWORDS = [
+    "target", "outcome", "label", "churned", "converted", "survived",
+    "fraud", "clicked", "purchased", "responded", "approved", "won",
+    "success", "disease", "readmitted", "defaulted",
 ]
 
 
@@ -49,8 +48,8 @@ def detect_kpis(
     """
     Return a list of detected KPIs with their values and metadata.
     """
-    kpis = []
-    matched_cols: set[str] = set()
+    kpis = _outcome_rate_kpis(schema, numeric_stats)
+    matched_cols: set[str] = {kpi["column"] for kpi in kpis}
 
     for col_info in schema:
         if not col_info["is_numeric"]:
@@ -83,16 +82,17 @@ def detect_kpis(
                 "count": count,
             })
 
-    if not kpis:
+    if not [kpi for kpi in kpis if kpi["kpi_type"] != "outcome_rate"]:
         kpis.extend(_fallback_kpis(schema, numeric_stats))
 
     # Sort by importance
     priority = {
+        "outcome_rate": -1,
         "revenue": 0, "arr": 1, "mrr": 2, "profit": 3, "orders": 4,
         "customers": 5, "margin": 6, "conversion": 7, "growth": 8,
-        "aov": 9, "performance": 10, "asset_value": 11, "average": 12,
-        "duration": 13, "retention": 14, "churn": 15, "cost": 16,
-        "return": 17, "inventory": 18, "other": 19,
+        "aov": 9, "asset_value": 10, "average": 11,
+        "duration": 12, "retention": 13, "churn": 14, "cost": 15,
+        "return": 16, "inventory": 17, "other": 18,
     }
     kpis.sort(key=lambda k: priority.get(k["kpi_type"], 9))
     return kpis[:10]
@@ -147,9 +147,6 @@ def _classify_column(col: str) -> str | None:
     for kw in INVENTORY_KEYWORDS:
         if kw in col:
             return "inventory"
-    for kw in PERFORMANCE_COUNT_KEYWORDS:
-        if kw in col:
-            return "performance"
     for kw in DURATION_KEYWORDS:
         if kw in col:
             return "duration"
@@ -183,8 +180,7 @@ def _is_metric_role(col_info: dict[str, Any]) -> bool:
 def _is_non_kpi_numeric(col: str) -> bool:
     parts = set(col.split("_"))
     return (
-        col in MATCH_CONTEXT_METRIC_NAMES
-        or col == "year"
+        col == "year"
         or col.endswith("_year")
         or col == "id"
         or col.endswith("_id")
@@ -192,8 +188,42 @@ def _is_non_kpi_numeric(col: str) -> bool:
         or col.startswith("is_")
         or col.startswith("has_")
         or any(keyword in parts for keyword in NON_KPI_NUMERIC_KEYWORDS)
-        or any(keyword in col for keyword in ("shirt_number", "squad_number"))
     )
+
+
+def is_outcome_column(col: str) -> bool:
+    parts = set(col.split("_"))
+    return any(keyword in parts for keyword in OUTCOME_KEYWORDS)
+
+
+def _outcome_rate_kpis(
+    schema: list[dict[str, Any]],
+    numeric_stats: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Binary outcome columns (role "flag") are the headline of datasets like
+    heart-disease or churn data — surface the share of positive records."""
+    kpis = []
+    for col_info in schema:
+        if not col_info["is_numeric"] or col_info.get("analysis_role") != "flag":
+            continue
+        col = col_info["name"]
+        col_lower = col.lower().replace(" ", "_")
+        if not is_outcome_column(col_lower):
+            continue
+        mean = numeric_stats.get(col, {}).get("mean")
+        if mean is None:
+            continue
+        kpis.append({
+            "column": col,
+            "kpi_type": "outcome_rate",
+            "value": round(mean * 100, 1),
+            "is_total": False,
+            "is_percent": True,
+            "is_currency": False,
+            "mean": mean,
+            "count": numeric_stats.get(col, {}).get("count", 0),
+        })
+    return kpis
 
 
 def _fallback_kpis(
@@ -211,24 +241,22 @@ def _fallback_kpis(
         if _is_non_kpi_numeric(col_lower):
             continue
         stats = numeric_stats.get(col, {})
-        value = stats.get("total")
-        use_mean = _uses_average(col_lower, "other")
-        if use_mean:
-            value = stats.get("mean")
-        if value is None:
-            value = stats.get("mean")
+        # No keyword matched, so we don't know the column is additive —
+        # a raw SUM of e.g. blood pressures or 0/1 codes is meaningless.
+        # The average is the only safe headline value for an unknown metric.
+        value = stats.get("mean")
         if value is None:
             continue
         ranked.append({
             "column": col,
             "kpi_type": "other",
             "value": value,
-            "is_total": not use_mean and stats.get("total") is not None,
+            "is_total": False,
             "is_currency": _is_currency(col.lower().replace(" ", "_")),
             "mean": stats.get("mean"),
             "count": stats.get("count", 0),
             "score": _fallback_score(col_lower, stats),
-            "fallback_reason": "Highest available numeric business metric",
+            "fallback_reason": "Average of a numeric column with no recognized business meaning",
         })
     ranked.sort(key=lambda item: item.get("score", 0), reverse=True)
     for item in ranked:
@@ -240,8 +268,6 @@ def _fallback_score(col: str, stats: dict[str, Any]) -> float:
     score = 0.0
     if _uses_average(col, "other"):
         score += 35
-    if any(keyword in col for keyword in PERFORMANCE_COUNT_KEYWORDS):
-        score += 30
     if any(keyword in col for keyword in DURATION_KEYWORDS):
         score += 12
     if _is_currency(col):

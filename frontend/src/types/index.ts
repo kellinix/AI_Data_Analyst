@@ -94,7 +94,66 @@ export interface Analysis extends AnalysisListItem {
   insights: Insight[]
   charts: ChartConfig[]
   summary: string | null
+  error_message: string | null
   metadata: Record<string, unknown>
+  share_token: string | null
+  filterable_columns: FilterableColumn[]
+}
+
+// ---- Interactive filtering / slicers ------------------------
+export interface FilterableColumn {
+  column: string
+  display_label: string
+  role: string
+  kind: "categorical" | "numeric"
+  unique_count?: number | null
+  top_values?: { value: string; count: number }[] | null
+  min?: number | null
+  max?: number | null
+}
+
+export type FilterOp = "in" | "between"
+
+export interface ActiveFilter {
+  column: string
+  display_label: string
+  op: FilterOp
+  values: (string | number)[]
+}
+
+export interface ChartPatch {
+  id: string
+  echarts_option: Record<string, unknown>
+  visual_spec?: Record<string, unknown> | null
+  skipped: boolean
+}
+
+export interface KpiPatch {
+  insight_id: string
+  value: number | null
+  skipped: boolean
+}
+
+export interface LiveQueryResponse {
+  row_count: number
+  sample_row_count: number
+  charts: ChartPatch[]
+  kpis: KpiPatch[]
+}
+
+export interface ShareLinkResponse {
+  share_token: string
+  share_url: string
+}
+
+export interface SharedAnalysis {
+  name: string
+  row_count: number | null
+  column_count: number | null
+  created_at: string
+  summary: string | null
+  insights: Insight[]
+  charts: ChartConfig[]
 }
 
 export interface CreateAnalysisRequest {
@@ -196,21 +255,6 @@ export interface ChatSession {
   last_message: ChatMessage | null
 }
 
-// ---- Exports -----------------------------------------------
-export type ExportFormat = "pdf" | "xlsx" | "csv" | "png"
-export type ExportStatus = "pending" | "processing" | "completed" | "failed"
-
-export interface ExportJob {
-  id: string
-  analysis_id: string
-  format: ExportFormat
-  status: ExportStatus
-  download_url: string | null
-  expires_at: string | null
-  file_size: number | null
-  error: string | null
-  created_at: string
-}
 
 // ---- API Errors --------------------------------------------
 export interface ApiError {

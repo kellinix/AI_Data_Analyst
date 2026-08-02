@@ -4,17 +4,11 @@ from fastapi import APIRouter
 from sqlalchemy import select
 
 from app.api.deps import DB, CurrentUser
+from app.core.plan_limits import plan_limits_for
 from app.models.subscription import Subscription
 from app.schemas.user import UsageStats, UserProfileResponse, UserResponse, UserUpdate
 
 router = APIRouter()
-
-PLAN_LIMITS = {
-    "free":         {"analyses": 5,   "ai_queries": 20,   "storage": 100 * 1024 * 1024},
-    "starter":      {"analyses": 20,  "ai_queries": 100,  "storage": 1 * 1024 * 1024 * 1024},
-    "professional": {"analyses": 100, "ai_queries": 500,  "storage": 10 * 1024 * 1024 * 1024},
-    "enterprise":   {"analyses": 9999,"ai_queries": 9999, "storage": 100 * 1024 * 1024 * 1024},
-}
 
 
 @router.get("/me", response_model=UserProfileResponse)
@@ -26,7 +20,7 @@ async def get_me(current_user: CurrentUser, db: DB):
     )
     subscription = result.scalar_one_or_none()
 
-    limits = PLAN_LIMITS.get(current_user.plan, PLAN_LIMITS["free"])
+    limits = plan_limits_for(current_user.plan)
     usage = UsageStats(
         analyses_this_month=current_user.analyses_this_month,
         analyses_limit=limits["analyses"],

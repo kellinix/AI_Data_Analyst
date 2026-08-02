@@ -36,20 +36,74 @@ def test_numeric_date_name_is_temporal_not_metric():
     assert enriched[0]["analysis_role"] == "temporal_dimension"
 
 
-def test_player_physical_columns_are_attributes_not_metrics():
+def test_age_and_coordinate_columns_are_attributes_not_metrics():
     schema = [
         {"name": "age", "dtype": "BIGINT", "is_numeric": True, "is_date": False},
-        {"name": "height_cm", "dtype": "BIGINT", "is_numeric": True, "is_date": False},
-        {"name": "weight_kg", "dtype": "BIGINT", "is_numeric": True, "is_date": False},
-        {"name": "jersey_number", "dtype": "BIGINT", "is_numeric": True, "is_date": False},
+        {"name": "warehouse_latitude", "dtype": "DOUBLE", "is_numeric": True, "is_date": False},
+        {"name": "warehouse_longitude", "dtype": "DOUBLE", "is_numeric": True, "is_date": False},
     ]
     numeric_stats = {
-        "age": {"min": 18.0, "max": 38.0},
-        "height_cm": {"min": 165.0, "max": 205.0},
-        "weight_kg": {"min": 60.0, "max": 100.0},
-        "jersey_number": {"min": 1.0, "max": 99.0},
+        "age": {"min": 18.0, "max": 65.0},
+        "warehouse_latitude": {"min": -90.0, "max": 90.0},
+        "warehouse_longitude": {"min": -180.0, "max": 180.0},
     }
 
     enriched = enrich_schema_with_semantics(schema, numeric_stats, {})
 
     assert {column["analysis_role"] for column in enriched} == {"attribute"}
+
+
+def test_small_integer_code_columns_are_dimensions_not_metrics():
+    """Columns like cp (chest pain type 0-3) are integer category codes —
+    summing, averaging, or outlier-scanning them produces nonsense. A wide
+    continuous integer column (e.g. cholesterol) must stay a metric.
+    Uses DOUBLE dtype because the CSV loader stores all numbers as DOUBLE —
+    detection must work from the observed values."""
+    schema = [
+        {"name": "cp", "dtype": "DOUBLE", "is_numeric": True, "is_date": False},
+        {"name": "chol", "dtype": "DOUBLE", "is_numeric": True, "is_date": False},
+    ]
+    numeric_stats = {
+        "cp": {"min": 0.0, "max": 3.0, "count": 1025, "unique_count": 4},
+        "chol": {"min": 126.0, "max": 564.0, "count": 1025, "unique_count": 152},
+    }
+
+    enriched = enrich_schema_with_semantics(schema, numeric_stats, {})
+    by_name = {column["name"]: column for column in enriched}
+
+    assert by_name["cp"]["analysis_role"] == "dimension"
+    assert by_name["cp"]["semantic_type"] == "categorical_code"
+    assert by_name["chol"]["analysis_role"] == "metric"
+
+
+def test_fractional_low_cardinality_columns_stay_metrics():
+    """A float column with a few distinct fractional values (e.g. discount
+    tiers 0.25/0.5/0.75) is still a quantity, not a category code."""
+    schema = [{"name": "discount", "dtype": "DOUBLE", "is_numeric": True, "is_date": False}]
+    numeric_stats = {"discount": {"min": 0.25, "max": 2.5, "count": 500, "unique_count": 4}}
+
+    enriched = enrich_schema_with_semantics(schema, numeric_stats, {})
+
+    assert enriched[0]["analysis_role"] == "metric"
+
+
+def test_binary_integer_columns_are_flags_not_metrics():
+    schema = [{"name": "sex", "dtype": "DOUBLE", "is_numeric": True, "is_date": False}]
+    numeric_stats = {"sex": {"min": 0.0, "max": 1.0, "count": 1025, "unique_count": 2}}
+
+    enriched = enrich_schema_with_semantics(schema, numeric_stats, {})
+
+    assert enriched[0]["semantic_type"] == "boolean"
+    assert enriched[0]["analysis_role"] == "flag"
+
+
+def test_package_weight_is_treated_as_a_business_metric():
+    """A generic business dataset (e.g. logistics) can legitimately have a
+    'weight' column as a real metric — it must not be excluded the way a
+    sport-specific player-attribute list would."""
+    schema = [{"name": "package_weight_kg", "dtype": "DOUBLE", "is_numeric": True, "is_date": False}]
+    numeric_stats = {"package_weight_kg": {"min": 0.5, "max": 40.0}}
+
+    enriched = enrich_schema_with_semantics(schema, numeric_stats, {})
+
+    assert enriched[0]["analysis_role"] == "metric"

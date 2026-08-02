@@ -39,12 +39,6 @@ RULES: tuple[SemanticRule, ...] = (
 
 NUMERIC_ATTRIBUTE_KEYWORDS = (
     "age",
-    "height",
-    "weight",
-    "jersey",
-    "shirt_number",
-    "squad_number",
-    "number",
     "latitude",
     "longitude",
     "lat",
@@ -130,6 +124,10 @@ def detect_column_semantics(
             return _profile("numeric_attribute", 0.84, "Numeric descriptor, not an additive metric", "attribute")
         if _looks_like_average_metric(normalized):
             return _profile("average_metric", 0.78, "Numeric performance score or rate", "metric")
+        if _looks_like_categorical_code(column, stats):
+            if stats.get("unique_count", 0) <= 2:
+                return _profile("boolean", 0.8, "Integer column with only two repeated values", "flag")
+            return _profile("categorical_code", 0.78, "Small set of repeated integer codes, not a measurable quantity", "dimension")
         if minimum is not None and maximum is not None and 0 <= minimum <= maximum <= 1:
             return _profile("percentage", 0.72, "Numeric values fall between 0 and 1", "metric")
         return _profile("numeric_metric", 0.7, "Numeric dtype", "metric")
@@ -187,11 +185,7 @@ def _looks_like_numeric_attribute(
     parts = set(normalized.split("_"))
     if "market_value" in normalized:
         return False
-    if normalized in {"number"} or "jersey" in parts:
-        return True
     if any(keyword in parts for keyword in NUMERIC_ATTRIBUTE_KEYWORDS):
-        return True
-    if any(keyword in normalized for keyword in ("shirt_number", "squad_number")):
         return True
     if "id" in parts or normalized.endswith("_id") or normalized.startswith("id_"):
         return True
@@ -202,6 +196,29 @@ def _looks_like_numeric_attribute(
 
 def _looks_like_average_metric(normalized: str) -> bool:
     return any(keyword in normalized for keyword in AVERAGE_METRIC_KEYWORDS)
+
+
+def _looks_like_categorical_code(column: dict[str, Any], stats: dict[str, Any]) -> bool:
+    """Columns whose values are a small set of repeated integer codes
+    (e.g. 0/1 flags or 0-4 category codes) are labels, not quantities —
+    summing, averaging, or outlier-scanning them produces nonsense.
+
+    The file loader parses CSVs permissively and stores numbers as DOUBLE,
+    so integer-ness is judged from the observed values, not the dtype."""
+    unique_count = stats.get("unique_count")
+    count = stats.get("count") or 0
+    minimum = stats.get("min")
+    maximum = stats.get("max")
+    if not unique_count or minimum is None or maximum is None:
+        return False
+    if unique_count > 12 or maximum - minimum > 20:
+        return False
+    if "int" not in str(column.get("dtype", "")).lower() and not (
+        float(minimum).is_integer() and float(maximum).is_integer()
+    ):
+        return False
+    # Require enough repetition that the small domain isn't just a tiny sample.
+    return count >= unique_count * 5
 
 
 def _looks_like_year(

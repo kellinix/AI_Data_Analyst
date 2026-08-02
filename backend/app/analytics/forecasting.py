@@ -112,21 +112,15 @@ def _is_business_metric(column: str) -> bool:
     normalized = column.lower().replace(" ", "_")
     parts = set(normalized.split("_"))
     return not (
-        normalized in {"goals_team", "goals_opponent"}
-        or normalized == "year"
+        normalized == "year"
         or normalized.endswith("_year")
         or "date" in parts
         or "time" in parts
         or "timestamp" in parts
         or "age" in parts
-        or "height" in parts
-        or "weight" in parts
-        or "jersey" in parts
         or "latitude" in parts
         or "longitude" in parts
         or "coord" in parts
-        or "shirt_number" in normalized
-        or "squad_number" in normalized
         or normalized == "id"
         or normalized.endswith("_id")
         or normalized.startswith("id_")

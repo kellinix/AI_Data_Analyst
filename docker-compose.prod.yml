@@ -136,7 +136,11 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
-    command: celery -A app.workers.celery_app worker --loglevel=warning --concurrency=8 --queues=analysis,default,celery
+    # concurrency=4 against a 4G limit gives ~1G/task headroom: a single file
+    # can be held 2-3x in memory during ingestion (polars -> pandas -> duckdb),
+    # and max_upload_size_bytes allows 512MB files, so concurrency=8 here
+    # risked OOM-killing the whole worker process under concurrent large uploads.
+    command: celery -A app.workers.celery_app worker --loglevel=warning --concurrency=4 --queues=analysis,default,celery
     deploy:
       replicas: 2
       resources:

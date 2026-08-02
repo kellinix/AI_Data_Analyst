@@ -84,6 +84,61 @@ export function AnalysisHeader({ analysis, status }: AnalysisHeaderProps) {
     )
   }
 
+  function downloadPdf() {
+    if (status !== "completed") {
+      toast.error("This analysis isn't finished yet, so there's nothing to export.")
+      return
+    }
+    return downloadBlob(
+      () => analysesApi.downloadPdf(analysis.id),
+      `${analysis.name.replace(/\s+/g, "_").toLowerCase()}.pdf`,
+      "PDF export failed"
+    )
+  }
+
+  function downloadExcel() {
+    if (status !== "completed") {
+      toast.error("This analysis isn't finished yet, so there's nothing to export.")
+      return
+    }
+    return downloadBlob(
+      () => analysesApi.downloadExcel(analysis.id),
+      `${analysis.name.replace(/\s+/g, "_").toLowerCase()}.xlsx`,
+      "Excel export failed"
+    )
+  }
+
+  async function shareLink() {
+    if (status !== "completed") {
+      toast.error("This analysis isn't finished yet, so it can't be shared.")
+      return
+    }
+    try {
+      const { share_url } = await analysesApi.createShareLink(analysis.id)
+      await navigator.clipboard.writeText(share_url)
+      toast.success("Share link copied", {
+        description: "Anyone with this link can view a read-only copy of this analysis.",
+      })
+      queryClient.invalidateQueries({ queryKey: analysisKeys.detail(analysis.id) })
+    } catch (error) {
+      console.error("Creating share link failed", error)
+      toast.error("Couldn't create a share link")
+    }
+  }
+
+  async function revokeShareLink() {
+    try {
+      await analysesApi.revokeShareLink(analysis.id)
+      toast.success("Share link revoked", {
+        description: "The old link no longer works.",
+      })
+      queryClient.invalidateQueries({ queryKey: analysisKeys.detail(analysis.id) })
+    } catch (error) {
+      console.error("Revoking share link failed", error)
+      toast.error("Couldn't revoke the share link")
+    }
+  }
+
   async function rerunAnalysis() {
     try {
       await analysesApi.rerun(analysis.id)
@@ -139,18 +194,25 @@ export function AnalysisHeader({ analysis, status }: AnalysisHeaderProps) {
               </DropdownMenuItem>
             )}
             {(hasProfileJson || hasCleanedDataset) && <DropdownMenuSeparator />}
-            <DropdownMenuItem>
+            <DropdownMenuItem onClick={downloadPdf} disabled={status !== "completed"}>
               <Download className="mr-2 h-4 w-4" />
               Export PDF
             </DropdownMenuItem>
-            <DropdownMenuItem>
+            <DropdownMenuItem onClick={downloadExcel} disabled={status !== "completed"}>
               <Download className="mr-2 h-4 w-4" />
               Export Excel
             </DropdownMenuItem>
-            <DropdownMenuItem>
-              <Share2 className="mr-2 h-4 w-4" />
-              Share link
-            </DropdownMenuItem>
+            {analysis.share_token ? (
+              <DropdownMenuItem onClick={revokeShareLink}>
+                <Share2 className="mr-2 h-4 w-4" />
+                Revoke share link
+              </DropdownMenuItem>
+            ) : (
+              <DropdownMenuItem onClick={shareLink} disabled={status !== "completed"}>
+                <Share2 className="mr-2 h-4 w-4" />
+                Share link
+              </DropdownMenuItem>
+            )}
             <DropdownMenuSeparator />
             <DropdownMenuItem onClick={rerunAnalysis}>
               <RefreshCw className="mr-2 h-4 w-4" />
