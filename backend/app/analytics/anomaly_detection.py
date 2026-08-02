@@ -8,6 +8,8 @@ from typing import Any
 
 import duckdb
 
+from app.analytics.sql_utils import quote_identifier as _quote_identifier
+
 
 def detect_anomalies(
     conn: duckdb.DuckDBPyConnection,
@@ -171,10 +173,6 @@ def _time_series_anomalies(
         for period, value, z_score in rows
         if z_score is not None
     ]
-
-
-def _quote_identifier(identifier: str) -> str:
-    return '"' + identifier.replace('"', '""') + '"'
 
 
 def _is_business_metric(column: str) -> bool:

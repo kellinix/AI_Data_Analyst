@@ -8,6 +8,8 @@ from typing import Any
 
 import duckdb
 
+from app.analytics.sql_utils import quote_identifier as _quote_identifier
+
 
 def analyze_data_quality(
     conn: duckdb.DuckDBPyConnection,
@@ -211,7 +213,3 @@ def _relationship_issues(conn: duckdb.DuckDBPyConnection, table: str, columns: s
 def _single_int(conn: duckdb.DuckDBPyConnection, query: str) -> int:
     row = conn.execute(query).fetchone()
     return int(row[0] or 0) if row else 0
-
-
-def _quote_identifier(identifier: str) -> str:
-    return '"' + identifier.replace('"', '""') + '"'

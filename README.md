@@ -1,82 +1,142 @@
 # Zephyr — AI Dashboard Generator
 
-**Users should never build dashboards.**
+**Turn a raw spreadsheet into a complete, evidence-grounded executive analysis — KPIs, charts, forecasts, anomalies, a Decision Feed, and a natural-language chat interface — in seconds, with zero configuration.**
 
-Upload any business file (CSV, Excel, JSON, Parquet, TSV) and get a fully rendered executive dashboard — KPIs, charts, AI insights, recommendations, and interactive chat — in seconds.
+A full-stack, production-shaped data analytics platform: async FastAPI + Celery pipeline, DuckDB-backed statistical engine, PostgreSQL for orchestration state, and GPT-4o for narrative interpretation — deliberately called *after* every number is already correct, not before.
+
+---
+
+## For reviewers: how this repo is organized
+
+This README covers the product. The **`docs/analytics/`** folder is a from-scratch analytics-engineering review of the codebase — data architecture, a reusable data quality framework, a KPI/metric glossary, ER diagrams, a dashboard specification, worked business insights on a real dataset, and an explicit breakdown of what's deterministic vs. AI-generated in this system, with the hallucination-prevention mechanisms actually implemented in code. It's written to be checked against the source, not taken on faith — every non-obvious claim cites a `file:line`.
+
+| Document | What it covers |
+|---|---|
+| [`docs/analytics/01_Data_Architecture.md`](docs/analytics/01_Data_Architecture.md) | Sources, ETL pipeline stage-by-stage, transformations, cleaning, deduplication, joins, calculated fields, known engineering gaps |
+| [`docs/analytics/02_Data_Quality_Framework.md`](docs/analytics/02_Data_Quality_Framework.md) | The pipeline's internal quality detector *and* a standalone, dependency-free, reusable validation framework with a runnable CLI |
+| [`docs/analytics/03_Analytics_Glossary.md`](docs/analytics/03_Analytics_Glossary.md) | Every KPI type, calculation formula, aggregation rule, and the six distinct meanings of "confidence" in this system |
+| [`docs/analytics/04_SQL_Standards.md`](docs/analytics/04_SQL_Standards.md) | Query-by-query SQL review, a real duplicate-code fix, and standards derived from the codebase's own best examples |
+| [`docs/analytics/05_Data_Modelling.md`](docs/analytics/05_Data_Modelling.md) | Full Postgres ER diagram, normalization analysis, why the analytical layer isn't a star schema — plus a proposed dimensional model for a hypothetical cross-analysis feature |
+| [`docs/analytics/06_Dashboard_Specification.md`](docs/analytics/06_Dashboard_Specification.md) | The dashboard that ships, and a specified (not built) executive/ops dashboard for the product itself — every metric checked against the real schema for whether it's actually computable today |
+| [`docs/analytics/07_Business_Insights.md`](docs/analytics/07_Business_Insights.md) | Worked analyst findings — growth, seasonality, an injected anomaly, driver analysis — computed independently against the demo dataset |
+| [`docs/analytics/08_AI_Analytics_and_Guardrails.md`](docs/analytics/08_AI_Analytics_and_Guardrails.md) | Every AI touchpoint, six concrete hallucination-prevention mechanisms, and an honest look at what isn't calibrated yet |
+| [`ANALYTICS_PORTFOLIO_REPORT.md`](ANALYTICS_PORTFOLIO_REPORT.md) | Self-assessed maturity scoring and what a top-tier version of this portfolio would still need |
+
+---
+
+## The business problem
+
+Turning raw business data into a decision takes hours of manual Excel/BI work, requires SQL or DAX skill most operators don't have, and produces static, one-off outputs that are stale the moment they're shared. Existing BI tools (Power BI, Tableau, Looker) are configuration-heavy and have no AI-native narrative layer; conversational AI tools (ChatGPT) answer questions about data but produce nothing persistent, shareable, or grounded in verifiable computation. See [`docs/01_Vision.md`](docs/01_Vision.md) for the full competitive analysis.
+
+## The solution
+
+Upload a file. Get a complete analysis: automatically detected KPIs, auto-selected charts, a written executive summary, forecasts, anomaly detection, a prioritized action list, and a chat interface to interrogate the data further — all computed deterministically first, narrated by an LLM second, and never the other way around. See [`docs/analytics/08_AI_Analytics_and_Guardrails.md`](docs/analytics/08_AI_Analytics_and_Guardrails.md) for exactly why that ordering is the core architectural decision in this codebase.
 
 ---
 
 ## Architecture
 
-```
-Frontend (Next.js 15)  →  Backend (FastAPI)  →  PostgreSQL
-        ↓                        ↓                   ↑
-  Supabase Auth            Celery Worker         Alembic
-                                ↓
-                        DuckDB (analytics)
-                                ↓
-                         OpenAI GPT-4o
+```mermaid
+flowchart LR
+    FE["Next.js 15 Frontend"] -->|REST + JWT| API["FastAPI Backend"]
+    API --> PG[("PostgreSQL\norchestration state")]
+    API -->|enqueue| Q["Celery + Redis"]
+    Q --> ENGINE["Analysis Engine"]
+    ENGINE --> DUCK[("DuckDB\nin-memory analytics")]
+    ENGINE --> AI["GPT-4o\n(narrative only)"]
+    AI -.->|"stats only,\nnever raw rows"| DUCK
+    ENGINE --> PG
+    API -.->|"live slicer queries"| DUCK
 ```
 
-| Layer     | Technology                             |
-|-----------|----------------------------------------|
-| Frontend  | Next.js 15 · React 19 · TypeScript     |
-| Styling   | Tailwind CSS v4 · Framer Motion        |
-| State     | TanStack Query 5 · Zustand 5           |
-| Charts    | Apache ECharts                         |
-| Auth      | Supabase Auth (SSR)                    |
-| Backend   | FastAPI 0.115 · Python 3.12            |
-| ORM       | SQLAlchemy 2.0 async + asyncpg         |
-| Queue     | Celery 5 · Redis 7                     |
-| Analytics | DuckDB 1.2 · Polars · Pandas           |
-| AI        | OpenAI GPT-4o                          |
-| Database  | PostgreSQL 16                          |
-| Container | Docker · Docker Compose                |
+| Layer | Technology |
+|---|---|
+| Frontend | Next.js 15 · React 19 · TypeScript · Tailwind CSS v4 |
+| State/Data | TanStack Query 5 · Zustand 5 · Apache ECharts |
+| Auth | Supabase Auth (JWT, JWKS-verified server-side, fail-closed) |
+| Backend | FastAPI 0.115 · Python 3.12 · SQLAlchemy 2.0 async |
+| Queue | Celery 5 · Redis 7 |
+| Analytics engine | DuckDB 1.2 · Polars · Pandas · NumPy |
+| AI | OpenAI GPT-4o (narrative + chat) · `text-embedding-3-small` (category normalization) |
+| Database | PostgreSQL 16 |
+| Container | Docker · Docker Compose |
+
+Full stage-by-stage data flow: [`docs/analytics/01_Data_Architecture.md`](docs/analytics/01_Data_Architecture.md).
 
 ---
 
-## Quick Start
+## What it actually does
+
+- **Zero-configuration KPI detection** — classifies numeric columns by name/shape into 15+ business KPI types (revenue, profit, orders, churn, MRR, AOV, ...), each with the correct aggregation (sum vs. average) and currency formatting. [Full logic →](docs/analytics/03_Analytics_Glossary.md#2-kpi-types-and-calculation-logic)
+- **Auto chart selection** — bar, line, pie/donut, scatter, chosen by data shape (time-series presence, correlation strength, cardinality), capped and ranked, not user-configured.
+- **Forecasting** — deterministic OLS trend extrapolation with a confidence score derived from history length and residual noise, not a black box. [Formula →](docs/analytics/03_Analytics_Glossary.md#4-forecast-metrics)
+- **Anomaly detection** — statistical z-score outliers (row-level and monthly time-series), verified against a real injected anomaly in this repo's own demo dataset. [Worked example →](docs/analytics/07_Business_Insights.md)
+- **Data quality scoring** — severity-weighted issue detection (missing values, duplicates, outliers, referential "part exceeds whole" checks) baked into every analysis, plus a standalone, dependency-free validation framework you can run against *any* CSV. [Try it →](docs/analytics/02_Data_Quality_Framework.md#running-it)
+- **AI narrative & chat** — grounded exclusively in pre-computed statistics (never raw rows), behind an explicit anti-hallucination system prompt, a JSON schema, server-side sanitization, and a three-tier fallback that degrades to a fully deterministic summary rather than ever forcing a bad answer. [Full breakdown →](docs/analytics/08_AI_Analytics_and_Guardrails.md)
+- **Live cross-filtering** — dashboard slicers re-aggregate via parameterized DuckDB queries with an explicit column-role allowlist, not free-form user-controlled SQL.
+
+---
+
+## Data quality, demonstrated
+
+This repo includes a real, reusable data-quality validation framework (`backend/app/analytics/data_quality_checks.py` — stdlib-only, 8 check types, 20 passing tests) with a runnable CLI:
+
+```bash
+python backend/scripts/data_quality_report.py backend/scripts/demo_data/northwind_outfitters_sales.csv \
+    --date-column week_start_date \
+    --outlier-column revenue --outlier-column marketing_spend \
+    --required-column region --required-column category
+```
+
+Sample output committed at [`backend/scripts/demo_data/sample_data_quality_report.md`](backend/scripts/demo_data/sample_data_quality_report.md) — 99/100, correctly isolating a deliberately-injected revenue anomaly (verified z-score ≈ 4.6) without a single false positive elsewhere in 936 rows.
+
+---
+
+## Data sources
+
+| Source | Format | Notes |
+|---|---|---|
+| User-uploaded file | `.csv .xlsx .xls .json .parquet .tsv` | Up to 512MB; the only ingestion path — no live/streaming/database connectors by design ([`docs/02_Product_Requirements.md §14`](docs/02_Product_Requirements.md)) |
+| `backend/scripts/demo_data/northwind_outfitters_sales.csv` | CSV | Synthetic, generated for this repo's own demos — 936 rows, 18 months, a verified statistical anomaly. [Details →](backend/scripts/demo_data/README.md) |
+
+---
+
+## Validation
+
+**112 tests passing, 0 failing** — 16 files, covering the deterministic analytics pipeline (statistics, KPI detection, chart selection, semantic typing, data quality, live-filter re-aggregation, file cleaning), auth (real JWT signing/verification, not mocked), and, added in this review, the standalone data quality framework (`test_data_quality_checks.py`, 20 tests). Getting a clean run required diagnosing a real Python-3.14/dependency-pin incompatibility — see [`docs/analytics/09_Verification.md`](docs/analytics/09_Verification.md) for the full root cause and reproduction steps, and [`ANALYTICS_PORTFOLIO_REPORT.md`](ANALYTICS_PORTFOLIO_REPORT.md) for how that factors into the maturity scoring.
+
+---
+
+## Quick start
 
 ### Prerequisites
-
 - Docker 24+ and Docker Compose
 - Node.js 20+
 - Python 3.12+
 
 ### 1. Clone and configure
-
 ```bash
 git clone https://github.com/your-org/ai-dashboard-generator.git
 cd ai-dashboard-generator
 cp .env.example .env
 ```
-
-Fill in `.env`:
-- `OPENAI_API_KEY` — from https://platform.openai.com
-- `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_JWT_SECRET` — from your Supabase project
+Fill in `.env`: `OPENAI_API_KEY` (from https://platform.openai.com) and `SUPABASE_URL` / `SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY` / `SUPABASE_JWT_SECRET` (from your Supabase project).
 
 ### 2. Start everything
-
 ```bash
 make setup   # installs deps, runs migrations
 make dev     # starts all services
 ```
-
-App is available at:
 - Frontend: http://localhost:3000
 - Backend API: http://localhost:8000/api/v1
 - API Docs: http://localhost:8000/api/docs
 
 ### 3. Verify health
-
 ```bash
 bash scripts/health_check.sh
 ```
 
----
-
-## Development Commands
-
+### Development commands
 ```bash
 make dev          # Start all services (Docker + hot reload)
 make test         # Run all tests
@@ -89,103 +149,55 @@ make clean        # Stop all containers
 
 ---
 
-## Project Structure
+## Project structure
 
 ```
 .
 ├── frontend/           # Next.js application
-│   └── src/
-│       ├── app/        # App Router pages
-│       ├── components/ # UI components
-│       ├── hooks/      # React Query hooks
-│       ├── lib/        # API client, Supabase, utils
-│       ├── stores/     # Zustand stores
-│       └── types/      # TypeScript types
-│
-├── backend/            # FastAPI application
+│   └── src/{app,components,hooks,lib,stores,types}
+├── backend/
 │   ├── app/
+│   │   ├── analytics/  # Deterministic engines — statistics, KPI, charts, forecasting,
+│   │   │                 anomaly detection, data quality (zero AI calls in this package)
 │   │   ├── api/        # Route handlers
-│   │   ├── analytics/  # Statistics, KPI, chart selection
-│   │   ├── core/       # Config, logging, security
-│   │   ├── db/         # SQLAlchemy session, models
-│   │   ├── models/     # Database models
-│   │   ├── schemas/    # Pydantic schemas
-│   │   ├── services/   # Business logic
+│   │   ├── core/       # Config, logging, security, rate limiting
+│   │   ├── models/     # SQLAlchemy ORM
+│   │   ├── schemas/    # Pydantic request/response contracts
+│   │   ├── services/   # AI integration, file processing, orchestration
 │   │   └── workers/    # Celery tasks
 │   ├── alembic/        # Database migrations
-│   └── tests/          # Test suite
-│
-├── docker/             # Dockerfiles + nginx config
-├── scripts/            # Setup, seed, health check
-└── .github/workflows/  # CI/CD pipelines
+│   ├── scripts/        # Setup, seed, health check, data quality CLI, demo data
+│   └── tests/
+├── docs/
+│   ├── analytics/      # ← Analytics engineering review (this section of the README)
+│   └── *.md            # Product docs — vision, PRD, personas, roadmap
+├── docker/              # Dockerfiles + nginx config
+└── .github/workflows/   # CI/CD pipelines
 ```
 
 ---
 
-## Analysis Pipeline
+## Screenshots
 
-```
-Upload file
-    ↓
-Profile file (Polars) → row count, column types, sample values
-    ↓
-Load into DuckDB (in-memory columnar store)
-    ↓
-StatisticsEngine → numeric stats, categorical stats, correlations, data quality
-    ↓
-KPI Detector → identify revenue, profit, orders, customers, etc.
-    ↓
-Chart Selector → time series, bar, donut, scatter
-    ↓
-Populate chart data from DuckDB
-    ↓
-OpenAI GPT-4o → executive summary, AI insights, recommendations
-    ↓
-Persist to PostgreSQL → insights, charts, summary
-    ↓
-Frontend renders dashboard
-```
-
-The LLM receives only pre-computed statistics — it never touches raw data. This ensures:
-- Speed (statistics are fast; LLM only interprets)
-- Accuracy (numbers are exact, not hallucinated)
-- Security (raw data never leaves the server)
+Not included in this pass — generating them requires a live Supabase project and a running Docker stack, which wasn't set up as part of this documentation/quality review (see [`ANALYTICS_PORTFOLIO_REPORT.md`](ANALYTICS_PORTFOLIO_REPORT.md) for why that was judged out of scope rather than silently skipped). To capture your own: `make dev`, sign in, upload `backend/scripts/demo_data/northwind_outfitters_sales.csv`, and screenshot the resulting dashboard.
 
 ---
 
-## Environment Variables
+## Roadmap
 
-See `.env.example` for all available options with descriptions.
-
-Required for production:
-| Variable | Description |
-|---|---|
-| `SECRET_KEY` | 32+ char random secret |
-| `OPENAI_API_KEY` | OpenAI API key |
-| `SUPABASE_URL` | Supabase project URL |
-| `SUPABASE_ANON_KEY` | Supabase anon key |
-| `SUPABASE_SERVICE_ROLE_KEY` | Supabase service role key |
-| `SUPABASE_JWT_SECRET` | Supabase JWT secret |
-| `POSTGRES_*` | PostgreSQL connection details |
-| `REDIS_HOST` | Redis host |
+Full roadmap: [`docs/06_Feature_Roadmap.md`](docs/06_Feature_Roadmap.md). Near-term highlights: correlation-analysis insights, seasonal pattern detection, categorical/date-range dashboard filters, and — directly motivated by this review — a calibrated (not fixed-lookup) confidence score for AI recommendations, and closing the three schema gaps identified in [`docs/analytics/06_Dashboard_Specification.md §2.10`](docs/analytics/06_Dashboard_Specification.md#210-summary--whats-blocking-a-real-executive-dashboard-today) that currently block a real business-operations dashboard for the product itself.
 
 ---
+
+## Environment variables
+
+See `.env.example` for all available options. Required for production: `SECRET_KEY`, `OPENAI_API_KEY`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_JWT_SECRET`, `POSTGRES_*`, `REDIS_HOST`.
 
 ## Deployment
 
-### Vercel + Railway (recommended)
+**Vercel + Railway (recommended)**: deploy frontend to Vercel, backend + worker + Redis + Postgres to Railway, set env vars in both.
 
-1. Deploy frontend to Vercel (connect GitHub repo)
-2. Deploy backend + worker + Redis + Postgres to Railway
-3. Set environment variables in both platforms
-
-### Docker (self-hosted)
-
-```bash
-docker compose -f docker-compose.prod.yml up -d
-```
-
----
+**Docker (self-hosted)**: `docker compose -f docker-compose.prod.yml up -d`
 
 ## License
 

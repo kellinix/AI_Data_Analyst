@@ -4,6 +4,13 @@ Fail-closed execution gateway for AI-generated code.
 The application must never execute model-generated Python in the API or worker
 process. This module only forwards code to an explicitly configured isolated
 sandbox provider and captures bounded stdout/stderr for repair attempts.
+
+Status: not currently wired into the analysis pipeline. `ai_service.py` and
+`analysis_engine.py` never call this module; it's exercised only by its own
+tests (`tests/test_sandboxed_code_executor.py`). Its feature flag,
+`settings.ai_code_execution_enabled`, defaults to `False`. Kept in the
+codebase as a complete, fail-closed-by-design building block for a future
+"AI writes and runs analysis code" feature, not as active functionality.
 """
 
 from __future__ import annotations

@@ -13,6 +13,7 @@ import duckdb
 
 from app.analytics.data_quality import analyze_data_quality
 from app.analytics.semantic_detector import enrich_schema_with_semantics
+from app.analytics.sql_utils import quote_identifier as _quote_identifier
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -258,7 +259,3 @@ class StatisticsEngine:
             except Exception:
                 values.append(None)
         return values
-
-
-def _quote_identifier(identifier: str) -> str:
-    return '"' + identifier.replace('"', '""') + '"'

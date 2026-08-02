@@ -15,6 +15,7 @@ from typing import Any, Literal
 import duckdb
 
 from app.analytics.chart_specs import build_visual_spec
+from app.analytics.sql_utils import quote_identifier as _quote_identifier
 
 FilterOp = Literal["in", "between"]
 
@@ -29,10 +30,6 @@ class FilterValidationError(ValueError):
     """Raised when a filter references a column outside the analysis's
     validated schema/role allow-list — never let an unvalidated column name
     reach raw SQL identifier interpolation."""
-
-
-def _quote_identifier(identifier: str) -> str:
-    return '"' + identifier.replace('"', '""') + '"'
 
 
 def validate_filters(

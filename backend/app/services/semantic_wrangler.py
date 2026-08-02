@@ -418,7 +418,13 @@ def _candidate_category_columns(df: pl.DataFrame) -> list[str]:
             continue
         try:
             unique_count = df[column].n_unique()
-        except Exception:
+        except Exception as exc:
+            # Matches this codebase's usual graceful-degradation pattern
+            # (skip the column) but, unlike every other broad `except` in
+            # this file, this one previously logged nothing — a genuinely
+            # broken column type would fail silently. Logging at debug
+            # level keeps the skip-and-continue behavior identical.
+            logger.debug("Skipping column for semantic candidacy check", column=column, exc=str(exc))
             continue
         if 2 <= unique_count <= settings.semantic_wrangling_max_unique_values:
             candidates.append(column)

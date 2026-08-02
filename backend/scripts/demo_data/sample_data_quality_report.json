@@ -1,0 +1,215 @@
+{
+  "dataset_name": "Northwind Outfitters \u2014 Weekly Sales",
+  "row_count": 936,
+  "column_count": 10,
+  "score": 99,
+  "generated_at": "2026-08-02T13:49:15+00:00",
+  "results": [
+    {
+      "check": "missing_values",
+      "column": "week_start_date",
+      "passed": true,
+      "severity": "low",
+      "message": "No missing values",
+      "affected_count": 0,
+      "total_count": 936,
+      "affected_ratio": 0.0,
+      "details": {}
+    },
+    {
+      "check": "missing_values",
+      "column": "region",
+      "passed": true,
+      "severity": "low",
+      "message": "No missing values",
+      "affected_count": 0,
+      "total_count": 936,
+      "affected_ratio": 0.0,
+      "details": {}
+    },
+    {
+      "check": "missing_values",
+      "column": "category",
+      "passed": true,
+      "severity": "low",
+      "message": "No missing values",
+      "affected_count": 0,
+      "total_count": 936,
+      "affected_ratio": 0.0,
+      "details": {}
+    },
+    {
+      "check": "missing_values",
+      "column": "channel",
+      "passed": true,
+      "severity": "low",
+      "message": "No missing values",
+      "affected_count": 0,
+      "total_count": 936,
+      "affected_ratio": 0.0,
+      "details": {}
+    },
+    {
+      "check": "missing_values",
+      "column": "revenue",
+      "passed": true,
+      "severity": "low",
+      "message": "No missing values",
+      "affected_count": 0,
+      "total_count": 936,
+      "affected_ratio": 0.0,
+      "details": {}
+    },
+    {
+      "check": "missing_values",
+      "column": "units_sold",
+      "passed": true,
+      "severity": "low",
+      "message": "No missing values",
+      "affected_count": 0,
+      "total_count": 936,
+      "affected_ratio": 0.0,
+      "details": {}
+    },
+    {
+      "check": "missing_values",
+      "column": "avg_order_value",
+      "passed": true,
+      "severity": "low",
+      "message": "No missing values",
+      "affected_count": 0,
+      "total_count": 936,
+      "affected_ratio": 0.0,
+      "details": {}
+    },
+    {
+      "check": "missing_values",
+      "column": "new_customers",
+      "passed": true,
+      "severity": "low",
+      "message": "No missing values",
+      "affected_count": 0,
+      "total_count": 936,
+      "affected_ratio": 0.0,
+      "details": {}
+    },
+    {
+      "check": "missing_values",
+      "column": "marketing_spend",
+      "passed": true,
+      "severity": "low",
+      "message": "No missing values",
+      "affected_count": 0,
+      "total_count": 936,
+      "affected_ratio": 0.0,
+      "details": {}
+    },
+    {
+      "check": "missing_values",
+      "column": "discount_pct",
+      "passed": true,
+      "severity": "low",
+      "message": "No missing values",
+      "affected_count": 0,
+      "total_count": 936,
+      "affected_ratio": 0.0,
+      "details": {}
+    },
+    {
+      "check": "duplicate_records",
+      "column": "week_start_date, region, category",
+      "passed": true,
+      "severity": "low",
+      "message": "No duplicate keys (week_start_date, region, category)",
+      "affected_count": 0,
+      "total_count": 936,
+      "affected_ratio": 0.0,
+      "details": {}
+    },
+    {
+      "check": "outliers",
+      "column": "revenue",
+      "passed": false,
+      "severity": "medium",
+      "message": "13 outlier value(s) in revenue (iqr)",
+      "affected_count": 13,
+      "total_count": 936,
+      "affected_ratio": 0.0139,
+      "details": {
+        "lower": 5415.296249999993,
+        "upper": 20504.426250000004,
+        "q1": 11073.719999999998,
+        "q3": 14846.0025
+      }
+    },
+    {
+      "check": "outliers",
+      "column": "marketing_spend",
+      "passed": false,
+      "severity": "medium",
+      "message": "18 outlier value(s) in marketing_spend (iqr)",
+      "affected_count": 18,
+      "total_count": 936,
+      "affected_ratio": 0.0192,
+      "details": {
+        "lower": 471.02374999999984,
+        "upper": 2620.53375,
+        "q1": 1277.09,
+        "q3": 1814.4675
+      }
+    },
+    {
+      "check": "outliers",
+      "column": "units_sold",
+      "passed": false,
+      "severity": "medium",
+      "message": "14 outlier value(s) in units_sold (iqr)",
+      "affected_count": 14,
+      "total_count": 936,
+      "affected_ratio": 0.015,
+      "details": {
+        "lower": 83.5,
+        "upper": 439.5,
+        "q1": 217.0,
+        "q3": 306.0
+      }
+    },
+    {
+      "check": "unexpected_nulls",
+      "column": "region",
+      "passed": true,
+      "severity": "low",
+      "message": "region: no unexpected nulls",
+      "affected_count": 0,
+      "total_count": 936,
+      "affected_ratio": 0.0,
+      "details": {}
+    },
+    {
+      "check": "unexpected_nulls",
+      "column": "category",
+      "passed": true,
+      "severity": "low",
+      "message": "category: no unexpected nulls",
+      "affected_count": 0,
+      "total_count": 936,
+      "affected_ratio": 0.0,
+      "details": {}
+    },
+    {
+      "check": "date_validity",
+      "column": "week_start_date",
+      "passed": true,
+      "severity": "low",
+      "message": "week_start_date: all dates valid",
+      "affected_count": 0,
+      "total_count": 936,
+      "affected_ratio": 0.0,
+      "details": {
+        "unparseable": 0,
+        "out_of_range": 0,
+        "future": 0
+      }
+    }
+  ]
+}

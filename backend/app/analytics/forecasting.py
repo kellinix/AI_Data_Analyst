@@ -12,6 +12,8 @@ from typing import Any
 import duckdb
 import numpy as np
 
+from app.analytics.sql_utils import quote_identifier as _quote_identifier
+
 
 def generate_forecasts(
     conn: duckdb.DuckDBPyConnection,
@@ -102,10 +104,6 @@ def _confidence(observations: int, residual_std: float, mean_value: float) -> fl
     noise_ratio = residual_std / abs(mean_value) if mean_value else 1.0
     noise_score = max(0.2, 1.0 - min(noise_ratio, 0.8))
     return round(0.45 + 0.45 * history_score * noise_score, 2)
-
-
-def _quote_identifier(identifier: str) -> str:
-    return '"' + identifier.replace('"', '""') + '"'
 
 
 def _is_business_metric(column: str) -> bool:
