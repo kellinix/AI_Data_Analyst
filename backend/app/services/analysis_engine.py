@@ -60,6 +60,10 @@ class AnalysisEngine:
                 await db.commit()
             except Exception as exc:
                 logger.error("Analysis pipeline failed", analysis_id=analysis_id, exc=str(exc))
+                # A failed flush leaves the session unusable until rolled back;
+                # without this, _mark_failed itself raised and the analysis
+                # stayed "processing" forever with no error shown.
+                await db.rollback()
                 await self._mark_failed(db, analysis_id, str(exc))
                 await db.commit()
                 raise
@@ -120,6 +124,7 @@ class AnalysisEngine:
                 "profile_json_path": computed["profile_json_path"],
                 "semantic_display": computed["semantic_display"],
                 "ai_layout_grid": ai_result.get("layout_grid", []),
+                "ai_generation": ai_result.get("generation"),
             },
         )
 
@@ -291,6 +296,7 @@ class AnalysisEngine:
             "semantic_display": metadata.get("semantic_display", {}),
             "forecasts": metadata.get("forecasts", []),
             "anomalies": metadata.get("anomalies", []),
+            "ai_generation": metadata.get("ai_generation"),
         }
 
         await db.flush()

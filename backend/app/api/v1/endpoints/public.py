@@ -1,6 +1,10 @@
-"""Unauthenticated, read-only access to analyses via a share link."""
+"""Unauthenticated, read-only access to analyses via a share link.
 
-from __future__ import annotations
+No `from __future__ import annotations` here: slowapi's `@limiter.limit`
+wrapper makes FastAPI resolve string annotations against slowapi's module,
+where `DB` doesn't exist — the session dependency then degraded into an
+unresolvable query parameter, breaking this endpoint and /api/openapi.json.
+"""
 
 from fastapi import APIRouter, HTTPException, Request
 from sqlalchemy import select

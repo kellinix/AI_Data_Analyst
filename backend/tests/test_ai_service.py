@@ -360,6 +360,7 @@ async def test_generate_analysis_uses_responses_api_with_strict_schema(monkeypat
 
     assert result["executive_summary"] == "OK."
     assert len(result["layout_grid"]) == 1
+    assert result["generation"] == {"status": "ai"}
     assert fake.chat_calls == []
     request = fake.responses_calls[0]
     assert request["text"]["format"]["type"] == "json_schema"
@@ -379,6 +380,7 @@ async def test_generate_analysis_falls_back_to_chat_completions(monkeypatch):
     result = await AIService().generate_analysis("sales.csv", _PROFILE_STATS, [])
 
     assert result["executive_summary"] == "From fallback."
+    assert result["generation"] == {"status": "ai"}
     assert fake.chat_calls[0]["response_format"] == {"type": "json_object"}
 
 
@@ -407,6 +409,8 @@ async def test_generate_analysis_degrades_to_deterministic_output_when_llm_fails
     assert result["layout_grid"] == []
     assert result["recommendations"] == _PROFILE_STATS["deterministic_recommendations"]
     assert "936 rows across 12 columns" in result["executive_summary"]
+    # The dashboard reads this to tell the user the narrative is automatic.
+    assert result["generation"] == {"status": "fallback", "error_type": "TimeoutError"}
 
 
 async def test_generate_analysis_does_not_raise_when_client_is_unavailable(monkeypatch):

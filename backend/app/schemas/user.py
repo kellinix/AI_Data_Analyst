@@ -34,6 +34,10 @@ class UsageStats(BaseModel):
 class UserResponse(UserBase):
     model_config = ConfigDict(from_attributes=True)
 
+    # Plain str, not EmailStr: this echoes an address Supabase already accepted.
+    # Re-validating it here turned reserved domains (e.g. @example.test, which
+    # Supabase allows at sign-up) into a 500 on every /users/me call.
+    email: str
     id: uuid.UUID
     plan: str
     is_active: bool

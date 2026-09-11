@@ -97,3 +97,32 @@ mypy app --ignore-missing-imports                                        → no 
 ```
 
 A bug found while wiring the endpoint: with `from __future__ import annotations`, slowapi's `@limiter.limit` wrapper makes FastAPI resolve annotations against slowapi's module, which broke route registration at import ("204 must not have a response body"). The new endpoint module omits that import, as `analyses.py` already does, and says why in its docstring.
+
+CI on the pull request: backend (229 passed, the 9 feedback tests running against the CI Postgres service, none skipped) and frontend build both green.
+
+## 7. End-to-end test of the running app (2026-09-11)
+
+The full local stack (Docker backend, Celery worker, Postgres, Redis; `next dev` frontend) was driven the way a user would drive it, with the demo CSV and the upload screen's default cleaning.
+
+**API, as a programmatic user** — upload → analyse → rate → withdraw → re-run, checking each step in the API and directly in Postgres: **21/22 checks passed.** Recommendations carried their `confidence_source`; a rule-based forecast recommendation arrived at the measured 0.72; `PUT` upserted without duplicates; invalid verdicts and non-recommendation insights got 422; `DELETE` withdrew; after the re-run both verdicts survived with `insight_id` nulled and the snapshot intact, the regenerated recommendations started unrated, and `recommendation_calibration` aggregated the rows. The one failure was a test artifact (the test user's `@example.test` email — see below).
+
+**Browser, as a logged-in user** (headless Chromium, a temporary Supabase test user) — log in → upload → wait for the dashboard → 👍 one card, 👎 another → reload → withdraw → re-analyse from the header menu: **11/11 checks passed**, no console errors. Both verdicts showed as pressed with "Thanks for the feedback", persisted across the reload, and the re-analysed cards started unrated; Postgres confirmed the verdicts outlived the re-analyse. The test users, their analyses and uploaded files were deleted afterwards.
+
+**Bugs found and fixed** (both present on `main`; regression tests added, suite now 231):
+
+| Bug | Effect | Fix |
+|---|---|---|
+| `anomaly_detection.py` put DuckDB `DATE` cells (`datetime.date`) into anomaly `context`, which is stored in JSONB | **Every cleaned upload with a date column and an outlier failed to save** — the default path, including the repo's own demo CSV | Context values converted with `isoformat()` (`_json_safe`); `test_context_values_are_json_serializable` |
+| `AnalysisEngine.run` called `_mark_failed` on a session left unusable by the failed flush | The failure handler itself raised `PendingRollbackError`, so the analysis **stayed "processing 90%" forever** with no error shown | Roll back before marking failed; `test_analysis_engine.py` |
+
+**Environment problems:** on **Node 25** the server has a `localStorage` object whose methods are undefined, and every `next dev` page returned 500 (`localStorage.getItem is not a function`). A preload script that logged a stack on each server-side `localStorage` read traced it to **Next's own dev overlay** (`react-dev-overlay/…/preferences.js`, `getInitialScale`) — dev-only, not app code. And `next dev` run from `frontend/` reads only `frontend/.env*`, not the repo-root `.env`, so without a `frontend/.env.local` the Supabase middleware had no URL and every page returned 500 (documented in the README).
+
+**Found during testing, then fixed the same day** (regression tests in `test_api_contracts.py` and `test_ai_service.py`):
+
+| Problem | Fix |
+|---|---|
+| **Login and register forms could put credentials in the URL.** `<form onSubmit>` with no `method` meant a submit before React hydrated fell back to a native GET — `/login?email=…&password=…`, into browser history and server logs. Seen for real during testing. | `method="post"` on both forms (`login-form.tsx`, `register-form.tsx`) |
+| **Shared links and `/api/openapi.json` were broken** (500; `/api/docs` didn't load). `public.py` combined `from __future__ import annotations` with `@limiter.limit`, so its `db: DB` dependency became an unresolvable query parameter. Present on `main`. | Drop the future import there, as `analyses.py` does |
+| **`/users/me` returned 500 for reserved-domain emails** (e.g. `@example.test`), which Supabase accepts at sign-up but `EmailStr` rejects. | Response models echo the stored email as `str`; sign-up input is still validated |
+| **AI failures were invisible to users** — the dashboard silently showed the deterministic summary. | `generate_analysis` reports `generation.status` (`ai` / `fallback`), persisted as `metadata.ai_generation`; the dashboard shows a notice on fallback |
+| **Node 25 broke `next dev`** — Next's dev overlay reads Node 25's non-functional server `localStorage`. | `npm run dev` now runs `frontend/scripts/dev.mjs`, which adds `--no-experimental-webstorage` only on Node 25+ (the flag doesn't exist on Node 20, which CI uses). The auth store's `persist` was also made browser-only, defensively |

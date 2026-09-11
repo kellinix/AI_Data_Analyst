@@ -300,7 +300,7 @@ Before returning the JSON:
                 ),
                 timeout=_AI_ANALYSIS_TIMEOUT_SECONDS,
             )
-            return _coerce_analysis_json(response.output_text)
+            return {**_coerce_analysis_json(response.output_text), "generation": {"status": "ai"}}
         except Exception as exc:
             logger.warning("Responses API generation failed, using chat fallback", exc=str(exc))
 
@@ -319,7 +319,7 @@ Before returning the JSON:
                 timeout=_AI_ANALYSIS_FALLBACK_TIMEOUT_SECONDS,
             )
             content = response.choices[0].message.content or "{}"
-            return _coerce_analysis_json(content)
+            return {**_coerce_analysis_json(content), "generation": {"status": "ai"}}
         except Exception as exc:
             logger.error("AI analysis generation failed", exc=str(exc))
             return {
@@ -327,6 +327,9 @@ Before returning the JSON:
                 "layout_grid": [],
                 "insights": [],
                 "recommendations": statistics.get("deterministic_recommendations", []),
+                # Persisted as analysis metadata so the dashboard can say the
+                # narrative is automatic rather than silently looking plainer.
+                "generation": {"status": "fallback", "error_type": type(exc).__name__},
             }
 
     async def chat(

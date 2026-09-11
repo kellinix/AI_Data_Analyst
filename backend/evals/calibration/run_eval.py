@@ -148,9 +148,7 @@ async def run_dataset(
         "scenario": scenario.describe(),
         "truth": truth,
         "ai_recommendation_count": sum(r["source"].startswith("ai:") for r in records),
-        # When both OpenAI calls fail, generate_analysis hands back the
-        # deterministic list itself as its "recommendations".
-        "ai_failed": ai_result.get("recommendations") is computed["deterministic_recommendations"],
+        "ai_failed": (ai_result.get("generation") or {}).get("status") == "fallback",
         "executive_summary": ai_result.get("executive_summary", ""),
         "forecasts": [
             {k: f.get(k) for k in ("metric", "latest_value", "change_percent_next_month", "confidence")}

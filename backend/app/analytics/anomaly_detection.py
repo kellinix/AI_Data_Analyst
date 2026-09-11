@@ -84,7 +84,11 @@ def _distribution_anomalies(
     results = []
     for row in rows:
         value, z_score = row[0], row[1]
-        context = {name: row[index + 2] for index, name in enumerate(context_columns) if row[index + 2] is not None}
+        context = {
+            name: _json_safe(row[index + 2])
+            for index, name in enumerate(context_columns)
+            if row[index + 2] is not None
+        }
         percentile = float(row[-1])
         context_text = ", ".join(
             f"{display_labels.get(name, _humanize(name))} {_format_context_value(value)}"
@@ -106,6 +110,14 @@ def _distribution_anomalies(
             "context": context,
         })
     return results
+
+
+def _json_safe(value: Any) -> Any:
+    """DuckDB returns DATE/TIMESTAMP cells as date/datetime objects, but anomalies
+    are stored in JSONB (`analyses.metadata`, `insights.data`), which can't hold
+    them — an unconverted date made every cleaned upload with a date column fail
+    to save."""
+    return value.isoformat() if hasattr(value, "isoformat") else value
 
 
 def _format_context_value(value: Any) -> Any:

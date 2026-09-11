@@ -119,7 +119,9 @@ export function RegisterForm() {
         <Separator className="flex-1" />
       </div>
 
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-3">
+      {/* method="post": if the form is submitted before React hydrates, the
+          browser's native submit must not put the password in the URL. */}
+      <form method="post" onSubmit={handleSubmit(onSubmit)} className="space-y-3">
         <div className="space-y-1.5">
           <Label htmlFor="full_name">Full name</Label>
           <Input

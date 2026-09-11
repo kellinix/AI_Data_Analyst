@@ -105,7 +105,7 @@ Sample output committed at [`backend/scripts/demo_data/sample_data_quality_repor
 
 ## Validation
 
-**229 backend tests passing, 0 failing** — 20 files, covering the deterministic analytics pipeline (statistics, KPI detection, chart selection, semantic typing, data quality, live-filter re-aggregation, file cleaning), auth (real JWT signing/verification, not mocked), the standalone data quality framework (`test_data_quality_checks.py`), and the AI guardrail layer (`test_ai_service.py`: response parsing, chart allow-listing and executable-value filtering, recommendation normalization, and the Responses API → Chat Completions → deterministic fallback chain, all against a fake OpenAI client). Writing those tests surfaced two real bugs, both now fixed with regression tests: the chart safety filter substring-matched `nan`, silently dropping any chart with a label like "Finance" or "Maintenance", and `"$1.5M"` parsed as `1.5`. Also covered: confidence calibration (`test_calibration.py`), the calibration benchmark harness including one dataset end to end through the real pipeline (`test_calibration_eval.py`), and recommendation feedback against a real Postgres database (`test_recommendation_feedback.py` — CI's service container; skipped when none is reachable). `cd backend && pytest` runs from a clean clone with nothing exported — see [`docs/analytics/09_Verification.md`](docs/analytics/09_Verification.md) for the environment diagnosis behind that, and [`ANALYTICS_PORTFOLIO_REPORT.md`](ANALYTICS_PORTFOLIO_REPORT.md) for how testing factors into the maturity scoring.
+**231 backend tests passing, 0 failing** — 21 files, covering the deterministic analytics pipeline (statistics, KPI detection, chart selection, semantic typing, data quality, live-filter re-aggregation, file cleaning), auth (real JWT signing/verification, not mocked), the standalone data quality framework (`test_data_quality_checks.py`), and the AI guardrail layer (`test_ai_service.py`: response parsing, chart allow-listing and executable-value filtering, recommendation normalization, and the Responses API → Chat Completions → deterministic fallback chain, all against a fake OpenAI client). Writing those tests surfaced two real bugs, both now fixed with regression tests: the chart safety filter substring-matched `nan`, silently dropping any chart with a label like "Finance" or "Maintenance", and `"$1.5M"` parsed as `1.5`. Also covered: confidence calibration (`test_calibration.py`), the calibration benchmark harness including one dataset end to end through the real pipeline (`test_calibration_eval.py`), and recommendation feedback against a real Postgres database (`test_recommendation_feedback.py` — CI's service container; skipped when none is reachable). `cd backend && pytest` runs from a clean clone with nothing exported — see [`docs/analytics/09_Verification.md`](docs/analytics/09_Verification.md) for the environment diagnosis behind that, and [`ANALYTICS_PORTFOLIO_REPORT.md`](ANALYTICS_PORTFOLIO_REPORT.md) for how testing factors into the maturity scoring.
 
 ---
 
@@ -113,7 +113,7 @@ Sample output committed at [`backend/scripts/demo_data/sample_data_quality_repor
 
 ### Prerequisites
 - Docker 24+ and Docker Compose
-- Node.js 20+
+- Node.js 20+ (CI uses 20; on Node 25, `npm run dev` adds the flag Next's dev overlay needs automatically)
 - Python 3.12 (pinned in `backend/.python-version`, matching the Docker image — the pinned dependencies don't build on 3.14)
 
 ### 1. Clone and configure
@@ -123,6 +123,8 @@ cd ai-dashboard-generator
 cp .env.example .env
 ```
 Fill in `.env`: `OPENAI_API_KEY` (from https://platform.openai.com) and `SUPABASE_URL` / `SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY` / `SUPABASE_JWT_SECRET` (from your Supabase project).
+
+Running the frontend outside Docker (`npm run dev` in `frontend/`)? Next.js only reads env files from its own directory, so copy the `NEXT_PUBLIC_*` lines into `frontend/.env.local` (gitignored) — without them every page returns 500.
 
 ### 2. Start everything
 ```bash
