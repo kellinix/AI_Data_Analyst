@@ -1,0 +1,353 @@
+{
+ "dataset_id": "040_outdoor_retail_weekly",
+ "scenario": {
+  "dataset_id": "040_outdoor_retail_weekly",
+  "domain": "outdoor_retail",
+  "grain": "weekly",
+  "months": 19,
+  "start": "2024-05-01",
+  "growth": 0.03,
+  "seasonality": 0.0,
+  "noise": 0.08,
+  "plant_anomaly": true,
+  "tracking_outage": false,
+  "optional_sparse": false
+ },
+ "truth": {
+  "benchmark_version": "2026-09-11.1",
+  "dataset_id": "040_outdoor_retail_weekly",
+  "scenario": {
+   "dataset_id": "040_outdoor_retail_weekly",
+   "domain": "outdoor_retail",
+   "grain": "weekly",
+   "months": 19,
+   "start": "2024-05-01",
+   "growth": 0.03,
+   "seasonality": 0.0,
+   "noise": 0.08,
+   "plant_anomaly": true,
+   "tracking_outage": false,
+   "optional_sparse": false
+  },
+  "domain_description": "Sales for an outdoor-apparel retailer by region and product category.",
+  "date_column": "week_start_date",
+  "dimensions": [
+   "region",
+   "category"
+  ],
+  "metrics": [
+   "revenue",
+   "units_sold",
+   "new_customers"
+  ],
+  "observed_period": [
+   "2024-05",
+   "2025-11"
+  ],
+  "row_count": 738,
+  "columns": {
+   "week_start_date": "Start date of each week.",
+   "region": "Dimension: North America, Europe, Asia Pacific.",
+   "category": "Dimension: Apparel, Footwear, Camping.",
+   "revenue": "Revenue for the row, in the business's currency.",
+   "units_sold": "Count of units sold for the row.",
+   "new_customers": "Count of new customers for the row."
+  },
+  "generating_process": {
+   "true_monthly_growth_percent": 3.0,
+   "seasonality": "No seasonality.",
+   "noise": "Low: records vary modestly around the trend."
+  },
+  "planted_anomaly": {
+   "row_index": 591,
+   "date": "2025-08-04",
+   "month": "2025-08",
+   "dimensions": {
+    "region": "Asia Pacific",
+    "category": "Apparel"
+   },
+   "columns": [
+    "revenue",
+    "units_sold",
+    "new_customers"
+   ],
+   "kind": "spike",
+   "factor": 5.69,
+   "revenue_z_score": 9.74,
+   "story": "A genuine one-off event: a bulk order made this record's revenue, units_sold, new_customers about 5.69x normal. It is worth investigating."
+  },
+  "no_planted_anomaly_note": null,
+  "defect_columns": [],
+  "defect_story": null,
+  "by_design_sparse_columns": [],
+  "missing_percent_by_column": {},
+  "observed_monthly_totals": {
+   "revenue": {
+    "2024-05": 278999.45,
+    "2024-06": 289879.14,
+    "2024-07": 358227.46,
+    "2024-08": 309336.46,
+    "2024-09": 391391.59,
+    "2024-10": 323429.0,
+    "2024-11": 325720.87,
+    "2024-12": 435170.06,
+    "2025-01": 355692.68,
+    "2025-02": 366192.76,
+    "2025-03": 473683.12,
+    "2025-04": 400251.28,
+    "2025-05": 397364.36,
+    "2025-06": 516270.55,
+    "2025-07": 417182.75,
+    "2025-08": 479177.65,
+    "2025-09": 565853.35,
+    "2025-10": 469598.21,
+    "2025-11": 471108.85
+   },
+   "units_sold": {
+    "2024-05": 3402.0,
+    "2024-06": 3510.0,
+    "2024-07": 4419.0,
+    "2024-08": 3785.0,
+    "2024-09": 4838.0,
+    "2024-10": 3981.0,
+    "2024-11": 4000.0,
+    "2024-12": 5317.0,
+    "2025-01": 4359.0,
+    "2025-02": 4541.0,
+    "2025-03": 5787.0,
+    "2025-04": 4817.0,
+    "2025-05": 4893.0,
+    "2025-06": 6241.0,
+    "2025-07": 5122.0,
+    "2025-08": 5809.0,
+    "2025-09": 6910.0,
+    "2025-10": 5606.0,
+    "2025-11": 5869.0
+   },
+   "new_customers": {
+    "2024-05": 1040.0,
+    "2024-06": 1039.0,
+    "2024-07": 1329.0,
+    "2024-08": 1118.0,
+    "2024-09": 1481.0,
+    "2024-10": 1233.0,
+    "2024-11": 1210.0,
+    "2024-12": 1620.0,
+    "2025-01": 1284.0,
+    "2025-02": 1362.0,
+    "2025-03": 1715.0,
+    "2025-04": 1402.0,
+    "2025-05": 1445.0,
+    "2025-06": 1906.0,
+    "2025-07": 1539.0,
+    "2025-08": 1701.0,
+    "2025-09": 2081.0,
+    "2025-10": 1647.0,
+    "2025-11": 1755.0
+   }
+  },
+  "dimension_totals": {
+   "revenue": {
+    "region": {
+     "North America": 2389056.35,
+     "Europe": 2843209.44,
+     "Asia Pacific": 2392263.8
+    },
+    "category": {
+     "Apparel": 1989840.14,
+     "Footwear": 2040101.68,
+     "Camping": 3594587.77
+    }
+   },
+   "units_sold": {
+    "region": {
+     "North America": 34334.0,
+     "Europe": 32087.0,
+     "Asia Pacific": 26785.0
+    },
+    "category": {
+     "Apparel": 21444.0,
+     "Footwear": 36043.0,
+     "Camping": 35719.0
+    }
+   }
+  },
+  "correlations": {
+   "revenue~units_sold": 0.679,
+   "revenue~new_customers": 0.653,
+   "units_sold~new_customers": 0.977
+  },
+  "holdout": {
+   "month": "2025-12",
+   "totals": {
+    "revenue": 622816.82,
+    "units_sold": 7620.0,
+    "new_customers": 2282.0
+   },
+   "last_observed_month_totals": {
+    "revenue": 471108.85,
+    "units_sold": 5869.0,
+    "new_customers": 1755.0
+   },
+   "change_percent_vs_last_observed_month": {
+    "revenue": 32.2,
+    "units_sold": 29.83,
+    "new_customers": 30.03
+   }
+  }
+ },
+ "ai_recommendation_count": 0,
+ "ai_failed": false,
+ "executive_summary": "",
+ "forecasts": [
+  {
+   "metric": "revenue",
+   "latest_value": 471108.85,
+   "change_percent_next_month": 10.51,
+   "confidence": 0.85
+  },
+  {
+   "metric": "units_sold",
+   "latest_value": 5869.0,
+   "change_percent_next_month": 8.13,
+   "confidence": 0.85
+  },
+  {
+   "metric": "new_customers",
+   "latest_value": 1755.0,
+   "change_percent_next_month": 7.43,
+   "confidence": 0.85
+  }
+ ],
+ "anomalies": [
+  {
+   "type": "statistical_outlier",
+   "column": "revenue",
+   "score": 9.74,
+   "period": null,
+   "description": "One record reached 63,988.06 for Revenue, higher than almost every other record (Week Start Date 2025-08-04, Region Asia Pacific, Category Apparel)."
+  },
+  {
+   "type": "statistical_outlier",
+   "column": "units_sold",
+   "score": 8.8,
+   "period": null,
+   "description": "One record reached 688.00 for Units Sold, higher than almost every other record (Week Start Date 2025-08-04, Region Asia Pacific, Category Apparel)."
+  },
+  {
+   "type": "statistical_outlier",
+   "column": "new_customers",
+   "score": 7.45,
+   "period": null,
+   "description": "One record reached 182.00 for New Customers, higher than almost every other record (Week Start Date 2025-08-04, Region Asia Pacific, Category Apparel)."
+  }
+ ],
+ "quality_issues": [
+  {
+   "type": "outliers",
+   "column": "revenue",
+   "severity": "medium",
+   "description": "35 values fall far outside the typical range (-2,267 to 21,439)",
+   "affected_rows": 35,
+   "bounds": {
+    "lower": -2267.371250000002,
+    "upper": 21438.89875
+   },
+   "column_label": "Revenue"
+  },
+  {
+   "type": "outliers",
+   "column": "units_sold",
+   "severity": "medium",
+   "description": "32 values fall far outside the typical range (-19 to 255)",
+   "affected_rows": 32,
+   "bounds": {
+    "lower": -18.75,
+    "upper": 255.25
+   },
+   "column_label": "Units Sold"
+  },
+  {
+   "type": "outliers",
+   "column": "new_customers",
+   "severity": "medium",
+   "description": "40 values fall far outside the typical range (-5 to 75)",
+   "affected_rows": 40,
+   "bounds": {
+    "lower": -5.0,
+    "upper": 75.0
+   },
+   "column_label": "New Customers"
+  }
+ ],
+ "recommendations": [
+  {
+   "source": "rule:forecast",
+   "confidence": 0.85,
+   "confidence_method": "default",
+   "title": "Prepare for Revenue increase",
+   "problem": "Revenue is projected to move materially next month.",
+   "evidence": "Latest value 471,108.85; forecast 520,634.38.",
+   "expected_impact": "Better capacity, budget, and commercial planning before the change lands.",
+   "description": "The next-month forecast suggests revenue may increase by 10.5%.",
+   "label": {
+    "correct": true,
+    "reason": "Predicted +10.5% next month; the held-back month moved +32.2%.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  },
+  {
+   "source": "rule:forecast",
+   "confidence": 0.85,
+   "confidence_method": "default",
+   "title": "Prepare for Units Sold increase",
+   "problem": "Units Sold is projected to move materially next month.",
+   "evidence": "Latest value 5,869.00; forecast 6,346.26.",
+   "expected_impact": "Better capacity, budget, and commercial planning before the change lands.",
+   "description": "The next-month forecast suggests units sold may increase by 8.1%.",
+   "label": {
+    "correct": true,
+    "reason": "Predicted +8.1% next month; the held-back month moved +29.8%.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  },
+  {
+   "source": "rule:forecast",
+   "confidence": 0.85,
+   "confidence_method": "default",
+   "title": "Prepare for New Customers increase",
+   "problem": "New Customers is projected to move materially next month.",
+   "evidence": "Latest value 1,755.00; forecast 1,885.33.",
+   "expected_impact": "Better capacity, budget, and commercial planning before the change lands.",
+   "description": "The next-month forecast suggests new customers may increase by 7.4%.",
+   "label": {
+    "correct": true,
+    "reason": "Predicted +7.4% next month; the held-back month moved +30.0%.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  },
+  {
+   "source": "rule:anomaly",
+   "confidence": 0.78,
+   "confidence_method": "default",
+   "title": "Review the context behind standout Revenue",
+   "problem": "One record reached 63,988.06 for Revenue, higher than almost every other record (Week Start Date 2025-08-04, Region Asia Pacific, Category Apparel).",
+   "evidence": "One record reached 63,988.06 for Revenue, higher than almost every other record (Week Start Date 2025-08-04, Region Asia Pacific, Category Apparel).",
+   "expected_impact": "Helps explain whether this was exceptional performance, a tactical pattern, or a one-off match moment.",
+   "description": "Compare the identified record (Week Start Date 2025-08-04, Region Asia Pacific, Category Apparel) with similar records to understand the drivers.",
+   "label": {
+    "correct": true,
+    "reason": "Flagged the planted record.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  }
+ ]
+}

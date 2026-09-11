@@ -26,7 +26,7 @@ Because `pip install -r requirements.txt` resolves and builds every package in o
 
 **A second, separate issue** surfaced once imports succeeded: `app/core/config.py` instantiates `Settings()` at **module import time** (`config.py:214-217`), which requires `SECRET_KEY`, `POSTGRES_PASSWORD`, and `OPENAI_API_KEY` to already be set as environment variables. `backend/tests/conftest.py` sets safe test values for exactly these fields, but via `monkeypatch.setenv` inside an `autouse` **fixture** — which only runs at test-execution time, after collection/import has already happened. And `backend/.env` doesn't exist (only a repo-root `.env`, in a different working directory than where `pytest` is documented to run from). The net effect: **`pytest` cannot even *collect* the test modules that import `app.core.config` without environment variables being set some other way first** — `conftest.py`'s protection doesn't reach far enough back. Worked around here by exporting the same non-secret values `conftest.py` already defines, directly in the shell, before invoking `pytest` — no real credentials were needed or used anywhere in this verification.
 
-### Recommended fixes (not made — out of scope for a behavior-neutral pass)
+### Recommended fixes (not made in this pass — all three since applied, see §5)
 
 1. Either relax the `requirements.txt` pins to ranges that resolve to `cp314`-compatible versions, or pin the project to Python 3.12/3.13 explicitly in a `.python-version` file / CI matrix and document that as the *only* supported version — right now nothing in the repo states a hard upper bound, so a contributor on a newer Python has no signal they're off the supported path until pip fails deep into a build log.
 2. Drop `scipy` from `requirements.txt` — it's unused.
@@ -48,10 +48,52 @@ Because `pip install -r requirements.txt` resolves and builds every package in o
 
 ```bash
 cd backend
-pip install -r requirements.txt -r requirements-dev.txt   # on Python 3.12/3.13; see §2 if using 3.14
-export SECRET_KEY=test POSTGRES_PASSWORD=test OPENAI_API_KEY=sk-test \
-       SUPABASE_URL=https://test.supabase.co SUPABASE_ANON_KEY=test \
-       SUPABASE_SERVICE_ROLE_KEY=test SUPABASE_JWT_SECRET=test-jwt-secret-32-chars-min!! \
-       POSTGRES_SERVER=localhost POSTGRES_USER=test POSTGRES_DB=test REDIS_HOST=localhost
-pytest tests/ -q
+python -m venv .venv && source .venv/bin/activate   # Python 3.12, per backend/.python-version
+pip install -r requirements.txt -r requirements-dev.txt
+pytest -q   # no env vars needed — tests/conftest.py seeds safe test values before collection
 ```
+
+## 5. Follow-up: install/test fixes and `ai_service.py` coverage (2026-09-11)
+
+All three §2 recommendations were applied, and the AI guardrail layer got the test coverage it was missing:
+
+| Change | Detail |
+|---|---|
+| `scipy` removed from `requirements.txt` | Unused — no imports anywhere in `backend/app`. |
+| `backend/.python-version` → `3.12` | Matches `docker/backend.Dockerfile` (`python:3.12-slim`) and CI (`python-version: "3.12"`). This makes the supported version explicit; it does not make the pinned dependencies build on 3.14. |
+| `tests/conftest.py` seeds test env at import time | The same safe values the `isolate_env` fixture already used are written with `os.environ.setdefault` when `conftest.py` loads, which is before test modules are collected — so `Settings()` can be built at import. `setdefault` means CI- or shell-provided values still win. **Before:** with `SECRET_KEY`/`POSTGRES_PASSWORD`/`OPENAI_API_KEY` unset, `pytest` aborted with 8 collection errors. **After:** it collects and runs. |
+| `tests/test_ai_service.py` (new, 67 tests) | Response parsing, chart allow-listing and executable-value filtering, recommendation normalization (including pinning the fixed confidence lookup, §6 of `08_AI_Analytics_and_Guardrails.md`), the Responses API → Chat Completions → deterministic fallback chain, and chat grounding — all against a fake OpenAI client, no network. |
+| Two bugs found by those tests, fixed in `ai_service.py` | (1) `_contains_unsafe_chart_value()` substring-matched its blocklist, so `nan` inside labels like "Finance" or "Maintenance" silently dropped legitimate charts — it now matches JS syntax and literals as whole tokens. (2) `_parse_financial_opportunity("$1.5M")` returned `1.5` — it now honours K/M/B and thousand/million/billion suffixes. Both have regression tests. |
+
+**Verification — fresh venv, Python 3.12.7, pinned `requirements.txt` only (none of the §2 per-package workarounds):**
+
+```
+pip install -r requirements.txt -r requirements-dev.txt   → exit 0
+pip check                                                 → No broken requirements found
+pytest -q          (no env vars exported)                 → 179 passed
+ruff check .                                              → All checks passed!
+mypy app --ignore-missing-imports                         → Success: no issues found in 58 source files
+```
+
+The same suite also passes (179 passed) in the Python 3.14 environment from §2. **Not verified here:** the Docker image build and a CI run on these changes.
+
+## 6. Follow-up: confidence calibration and recommendation feedback (2026-09-11)
+
+What changed is documented in `10_Confidence_Calibration.md`; this section records how it was checked.
+
+| Change | Verified by |
+|---|---|
+| `compute_analysis` extracted from `AnalysisEngine._run_pipeline` | Full suite, including `test_live_filter.py`'s regression test on the engine's chart-population path (kept as a thin wrapper); the benchmark and `test_calibration_eval.py` call the extracted function end to end on real generated files |
+| `app/analytics/calibration.py` + `calibration_table.json` | `tests/test_calibration.py` — defaults without a table, measured values with one, every malformed-entry fallback, source tagging on AI and rule recommendations, and a check that the committed table is valid. An autouse fixture in `conftest.py` points all other tests at an empty table so they stay deterministic whatever the committed table holds |
+| Migration `003_recommendation_feedback` | Against a throwaway Postgres 16 (`postgres:16-alpine` on port 5433): `alembic upgrade head` → `downgrade 002_add_share_token` → `upgrade head`, all clean; `\d recommendation_feedback` shows the CHECK, the unique constraint, and the SET NULL / CASCADE foreign keys |
+| Feedback endpoints, `user_feedback` on `GET /analyses/{id}`, the `recommendation_calibration` view | `tests/test_recommendation_feedback.py` — 9 tests against that real database through the ASGI app (no mocked session): upsert and change, withdrawal, ownership (404), type check (422), invalid verdict, auth required (401), snapshot surviving insight deletion, and the view's arithmetic |
+| Benchmark harness (`backend/evals/calibration/`) | `tests/test_calibration_eval.py` — 27 tests: metrics against hand-computed values, generator determinism and that planted truth really holds (the planted anomaly is the max-\|z\| record; both gap types exceed cleaning's 70% null threshold; the holdout month is absent from the file), every label rule, judge-output parsing, and one dataset end to end through cleaning + `compute_analysis` offline |
+| Frontend feedback control | `npm run type-check`, `npm run lint` (one pre-existing `<img>` warning, unrelated), and `npm run build` — all routes compile |
+
+```
+pytest -q  (Python 3.12 venv, POSTGRES_PORT=5433, nothing else exported)  → 229 passed
+ruff check .                                                             → All checks passed!
+mypy app --ignore-missing-imports                                        → no issues in 61 source files
+```
+
+A bug found while wiring the endpoint: with `from __future__ import annotations`, slowapi's `@limiter.limit` wrapper makes FastAPI resolve annotations against slowapi's module, which broke route registration at import ("204 must not have a response body"). The new endpoint module omits that import, as `analyses.py` already does, and says why in its docstring.

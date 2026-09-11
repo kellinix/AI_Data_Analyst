@@ -1,0 +1,339 @@
+{
+ "dataset_id": "004_outdoor_retail_monthly",
+ "scenario": {
+  "dataset_id": "004_outdoor_retail_monthly",
+  "domain": "outdoor_retail",
+  "grain": "monthly",
+  "months": 16,
+  "start": "2024-11-01",
+  "growth": 0.08,
+  "seasonality": 0.25,
+  "noise": 0.08,
+  "plant_anomaly": false,
+  "tracking_outage": true,
+  "optional_sparse": false
+ },
+ "truth": {
+  "benchmark_version": "2026-09-11.1",
+  "dataset_id": "004_outdoor_retail_monthly",
+  "scenario": {
+   "dataset_id": "004_outdoor_retail_monthly",
+   "domain": "outdoor_retail",
+   "grain": "monthly",
+   "months": 16,
+   "start": "2024-11-01",
+   "growth": 0.08,
+   "seasonality": 0.25,
+   "noise": 0.08,
+   "plant_anomaly": false,
+   "tracking_outage": true,
+   "optional_sparse": false
+  },
+  "domain_description": "Sales for an outdoor-apparel retailer by region and product category.",
+  "date_column": "month_start_date",
+  "dimensions": [
+   "region",
+   "category"
+  ],
+  "metrics": [
+   "revenue",
+   "units_sold",
+   "new_customers"
+  ],
+  "observed_period": [
+   "2024-11",
+   "2026-02"
+  ],
+  "row_count": 144,
+  "columns": {
+   "month_start_date": "Start date of each month.",
+   "region": "Dimension: North America, Europe, Asia Pacific.",
+   "category": "Dimension: Apparel, Footwear, Camping.",
+   "revenue": "Revenue for the row, in the business's currency.",
+   "units_sold": "Count of units sold for the row.",
+   "new_customers": "Count of new customers for the row."
+  },
+  "generating_process": {
+   "true_monthly_growth_percent": 8.0,
+   "seasonality": "Nov-Dec demand about 25% above baseline, Jan-Feb slightly below.",
+   "noise": "Low: records vary modestly around the trend."
+  },
+  "planted_anomaly": null,
+  "no_planted_anomaly_note": "No genuine anomaly exists. Any standout record is ordinary random variation.",
+  "defect_columns": [
+   "new_customers"
+  ],
+  "defect_story": "The tracking feed for new_customers broke in 2025-03; every new_customers value from then on is blank. This is a real data defect and new_customers totals after 2025-03 are not trustworthy.",
+  "by_design_sparse_columns": [],
+  "missing_percent_by_column": {
+   "new_customers": 75.0
+  },
+  "observed_monthly_totals": {
+   "revenue": {
+    "2024-11": 302667.22,
+    "2024-12": 335030.74,
+    "2025-01": 287008.64,
+    "2025-02": 278441.91,
+    "2025-03": 332082.29,
+    "2025-04": 387076.86,
+    "2025-05": 418593.58,
+    "2025-06": 440103.04,
+    "2025-07": 458261.27,
+    "2025-08": 480936.45,
+    "2025-09": 564926.3,
+    "2025-10": 623894.19,
+    "2025-11": 712875.17,
+    "2025-12": 859287.49,
+    "2026-01": 667807.54,
+    "2026-02": 730288.05
+   },
+   "units_sold": {
+    "2024-11": 3822.0,
+    "2024-12": 4265.0,
+    "2025-01": 3438.0,
+    "2025-02": 3495.0,
+    "2025-03": 3983.0,
+    "2025-04": 4642.0,
+    "2025-05": 4929.0,
+    "2025-06": 5219.0,
+    "2025-07": 5501.0,
+    "2025-08": 6067.0,
+    "2025-09": 6812.0,
+    "2025-10": 7644.0,
+    "2025-11": 9287.0,
+    "2025-12": 10504.0,
+    "2026-01": 8555.0,
+    "2026-02": 8829.0
+   },
+   "new_customers": {
+    "2024-11": 1116.0,
+    "2024-12": 1322.0,
+    "2025-01": 1074.0,
+    "2025-02": 971.0,
+    "2025-03": null,
+    "2025-04": null,
+    "2025-05": null,
+    "2025-06": null,
+    "2025-07": null,
+    "2025-08": null,
+    "2025-09": null,
+    "2025-10": null,
+    "2025-11": null,
+    "2025-12": null,
+    "2026-01": null,
+    "2026-02": null
+   }
+  },
+  "dimension_totals": {
+   "revenue": {
+    "region": {
+     "North America": 1574526.77,
+     "Europe": 3700547.32,
+     "Asia Pacific": 2604206.65
+    },
+    "category": {
+     "Apparel": 2373148.16,
+     "Footwear": 3029522.34,
+     "Camping": 2476610.24
+    }
+   },
+   "units_sold": {
+    "region": {
+     "North America": 26896.0,
+     "Europe": 35969.0,
+     "Asia Pacific": 34127.0
+    },
+    "category": {
+     "Apparel": 33012.0,
+     "Footwear": 36503.0,
+     "Camping": 27477.0
+    }
+   }
+  },
+  "correlations": {
+   "revenue~units_sold": 0.832,
+   "revenue~new_customers": 0.686,
+   "units_sold~new_customers": 0.939
+  },
+  "holdout": {
+   "month": "2026-03",
+   "totals": {
+    "revenue": 847755.72,
+    "units_sold": 10344.0,
+    "new_customers": null
+   },
+   "last_observed_month_totals": {
+    "revenue": 730288.05,
+    "units_sold": 8829.0,
+    "new_customers": null
+   },
+   "change_percent_vs_last_observed_month": {
+    "revenue": 16.09,
+    "units_sold": 17.16,
+    "new_customers": null
+   }
+  }
+ },
+ "ai_recommendation_count": 0,
+ "ai_failed": false,
+ "executive_summary": "",
+ "forecasts": [
+  {
+   "metric": "revenue",
+   "latest_value": 730288.05,
+   "change_percent_next_month": 8.65,
+   "confidence": 0.84
+  },
+  {
+   "metric": "units_sold",
+   "latest_value": 8829.0,
+   "change_percent_next_month": 11.26,
+   "confidence": 0.84
+  },
+  {
+   "metric": "new_customers",
+   "latest_value": 971.0,
+   "change_percent_next_month": -2.16,
+   "confidence": 0.59
+  }
+ ],
+ "anomalies": [
+  {
+   "type": "statistical_outlier",
+   "column": "revenue",
+   "score": 4.12,
+   "period": null,
+   "description": "One record reached 176,070.04 for Revenue, higher than almost every other record (Month Start Date 2025-12-01, Region Europe, Category Footwear)."
+  },
+  {
+   "type": "statistical_outlier",
+   "column": "units_sold",
+   "score": 3.51,
+   "period": null,
+   "description": "One record reached 1,805.00 for Units Sold, higher than almost every other record (Month Start Date 2025-12-01, Region Europe, Category Footwear)."
+  },
+  {
+   "type": "statistical_outlier",
+   "column": "new_customers",
+   "score": 3.16,
+   "period": null,
+   "description": "One record reached 260.00 for New Customers, higher than almost every other record (Month Start Date 2024-12-01, Region Europe, Category Footwear)."
+  }
+ ],
+ "quality_issues": [
+  {
+   "type": "outliers",
+   "column": "revenue",
+   "severity": "medium",
+   "description": "2 values fall far outside the typical range (-23,492 to 128,184)",
+   "affected_rows": 2,
+   "bounds": {
+    "lower": -23491.512500000004,
+    "upper": 128183.8075
+   },
+   "column_label": "Revenue"
+  },
+  {
+   "type": "outliers",
+   "column": "units_sold",
+   "severity": "medium",
+   "description": "4 values fall far outside the typical range (-227 to 1,496)",
+   "affected_rows": 4,
+   "bounds": {
+    "lower": -226.875,
+    "upper": 1496.125
+   },
+   "column_label": "Units Sold"
+  },
+  {
+   "type": "missing_values",
+   "column": "new_customers",
+   "severity": "critical",
+   "description": "75.0% of values are missing",
+   "affected_rows": 108,
+   "column_label": "New Customers"
+  },
+  {
+   "type": "outliers",
+   "column": "new_customers",
+   "severity": "medium",
+   "description": "3 values fall far outside the typical range (30 to 208)",
+   "affected_rows": 3,
+   "bounds": {
+    "lower": 29.5,
+    "upper": 207.5
+   },
+   "column_label": "New Customers"
+  }
+ ],
+ "recommendations": [
+  {
+   "source": "rule:data_quality",
+   "confidence": 0.9,
+   "confidence_method": "default",
+   "title": "Clean high-impact data quality issues",
+   "problem": "New Customers: 75.0% of values are missing",
+   "evidence": "Quality score is 78/100 with 4 detected issues.",
+   "expected_impact": "Higher confidence in KPIs, forecasts, and executive reporting.",
+   "description": "Resolve the most severe data quality gaps before making operational decisions from this dataset.",
+   "label": {
+    "correct": true,
+    "reason": "Flagged new_customers, which has a planted tracking outage.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  },
+  {
+   "source": "rule:forecast",
+   "confidence": 0.84,
+   "confidence_method": "default",
+   "title": "Prepare for Revenue increase",
+   "problem": "Revenue is projected to move materially next month.",
+   "evidence": "Latest value 730,288.05; forecast 793,486.23.",
+   "expected_impact": "Better capacity, budget, and commercial planning before the change lands.",
+   "description": "The next-month forecast suggests revenue may increase by 8.7%.",
+   "label": {
+    "correct": true,
+    "reason": "Predicted +8.7% next month; the held-back month moved +16.1%.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  },
+  {
+   "source": "rule:forecast",
+   "confidence": 0.84,
+   "confidence_method": "default",
+   "title": "Prepare for Units Sold increase",
+   "problem": "Units Sold is projected to move materially next month.",
+   "evidence": "Latest value 8,829.00; forecast 9,823.27.",
+   "expected_impact": "Better capacity, budget, and commercial planning before the change lands.",
+   "description": "The next-month forecast suggests units sold may increase by 11.3%.",
+   "label": {
+    "correct": true,
+    "reason": "Predicted +11.3% next month; the held-back month moved +17.2%.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  },
+  {
+   "source": "rule:anomaly",
+   "confidence": 0.78,
+   "confidence_method": "default",
+   "title": "Review the context behind standout Revenue",
+   "problem": "One record reached 176,070.04 for Revenue, higher than almost every other record (Month Start Date 2025-12-01, Region Europe, Category Footwear).",
+   "evidence": "One record reached 176,070.04 for Revenue, higher than almost every other record (Month Start Date 2025-12-01, Region Europe, Category Footwear).",
+   "expected_impact": "Helps explain whether this was exceptional performance, a tactical pattern, or a one-off match moment.",
+   "description": "Compare the identified record (Month Start Date 2025-12-01, Region Europe, Category Footwear) with similar records to understand the drivers.",
+   "label": {
+    "correct": false,
+    "reason": "No anomaly was planted; the flagged record is ordinary variation.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  }
+ ]
+}

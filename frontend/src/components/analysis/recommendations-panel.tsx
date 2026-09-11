@@ -1,17 +1,22 @@
 "use client"
 
+import type { ReactNode } from "react"
 import { motion } from "framer-motion"
+import { toast } from "sonner"
 import {
   ArrowUpRight,
   AlertCircle,
   Target,
   Clock,
+  ThumbsDown,
+  ThumbsUp,
   User,
   Zap,
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
+import { useRecommendationFeedback } from "@/hooks/use-analyses"
 import { cn, formatCurrency } from "@/lib/utils"
-import type { Insight } from "@/types"
+import type { Insight, RecommendationFeedbackVerdict } from "@/types"
 
 const priorityConfig = {
   critical: {
@@ -36,12 +41,92 @@ const priorityConfig = {
   },
 }
 
+function FeedbackButton({
+  label,
+  active,
+  disabled,
+  onClick,
+  children,
+}: {
+  label: string
+  active: boolean
+  disabled: boolean
+  onClick: () => void
+  children: ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      aria-pressed={active}
+      title={label}
+      disabled={disabled}
+      onClick={onClick}
+      className={cn(
+        "rounded-md p-1.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 disabled:opacity-50 dark:hover:bg-zinc-800 dark:hover:text-zinc-200",
+        active &&
+          "bg-orange-50 text-orange-600 hover:bg-orange-50 hover:text-orange-600 dark:bg-orange-950/40 dark:text-orange-400"
+      )}
+    >
+      {children}
+    </button>
+  )
+}
+
+/** Owner-only verdict control. Each verdict is logged with the confidence the
+ * recommendation was shown with, so confidence can be checked against real use. */
+function RecommendationFeedback({
+  analysisId,
+  insight,
+}: {
+  analysisId: string
+  insight: Insight
+}) {
+  const feedback = useRecommendationFeedback(analysisId)
+  const current = insight.user_feedback ?? null
+
+  function choose(verdict: RecommendationFeedbackVerdict) {
+    feedback.mutate(
+      { insightId: insight.id, verdict: current === verdict ? null : verdict },
+      { onError: () => toast.error("Couldn't save your feedback") }
+    )
+  }
+
+  return (
+    <div className="mt-4 flex items-center justify-between border-t border-zinc-100 pt-3 dark:border-zinc-800">
+      <p className="text-xs text-zinc-500 dark:text-zinc-400">
+        {current ? "Thanks for the feedback" : "Was this useful?"}
+      </p>
+      <div className="flex gap-1" role="group" aria-label="Rate this recommendation">
+        <FeedbackButton
+          label="Useful"
+          active={current === "helpful"}
+          disabled={feedback.isPending}
+          onClick={() => choose("helpful")}
+        >
+          <ThumbsUp className="h-3.5 w-3.5" />
+        </FeedbackButton>
+        <FeedbackButton
+          label="Not useful"
+          active={current === "not_helpful"}
+          disabled={feedback.isPending}
+          onClick={() => choose("not_helpful")}
+        >
+          <ThumbsDown className="h-3.5 w-3.5" />
+        </FeedbackButton>
+      </div>
+    </div>
+  )
+}
+
 function RecommendationCard({
   insight,
   index,
+  analysisId,
 }: {
   insight: Insight
   index: number
+  analysisId?: string
 }) {
   const config = priorityConfig[insight.importance]
   const data = insight.data as {
@@ -156,12 +241,16 @@ function RecommendationCard({
           </div>
         )}
       </div>
+
+      {analysisId && <RecommendationFeedback analysisId={analysisId} insight={insight} />}
     </motion.div>
   )
 }
 
 interface RecommendationsPanelProps {
   insights: Insight[]
+  /** Enables owner feedback on each card; omit on shared/public views. */
+  analysisId?: string
 }
 
 function normalizeRecommendationKey(insight: Insight): string {
@@ -200,7 +289,7 @@ function dedupeRecommendations(recommendations: Insight[]): Insight[] {
   return deduped
 }
 
-export function RecommendationsPanel({ insights }: RecommendationsPanelProps) {
+export function RecommendationsPanel({ insights, analysisId }: RecommendationsPanelProps) {
   const recommendations = dedupeRecommendations(
     insights.filter((i) => i.type === "recommendation")
   )
@@ -222,7 +311,7 @@ export function RecommendationsPanel({ insights }: RecommendationsPanelProps) {
       </div>
       <div className="grid gap-4 md:grid-cols-2">
         {recommendations.map((rec, i) => (
-          <RecommendationCard key={rec.id} insight={rec} index={i} />
+          <RecommendationCard key={rec.id} insight={rec} index={i} analysisId={analysisId} />
         ))}
       </div>
     </section>

@@ -1,0 +1,411 @@
+{
+ "dataset_id": "013_online_marketplace_monthly",
+ "scenario": {
+  "dataset_id": "013_online_marketplace_monthly",
+  "domain": "online_marketplace",
+  "grain": "monthly",
+  "months": 23,
+  "start": "2024-07-01",
+  "growth": 0.03,
+  "seasonality": 0.25,
+  "noise": 0.08,
+  "plant_anomaly": true,
+  "tracking_outage": false,
+  "optional_sparse": true
+ },
+ "truth": {
+  "benchmark_version": "2026-09-11.1",
+  "dataset_id": "013_online_marketplace_monthly",
+  "scenario": {
+   "dataset_id": "013_online_marketplace_monthly",
+   "domain": "online_marketplace",
+   "grain": "monthly",
+   "months": 23,
+   "start": "2024-07-01",
+   "growth": 0.03,
+   "seasonality": 0.25,
+   "noise": 0.08,
+   "plant_anomaly": true,
+   "tracking_outage": false,
+   "optional_sparse": true
+  },
+  "domain_description": "Marketplace activity by sales channel and country.",
+  "date_column": "month_start_date",
+  "dimensions": [
+   "channel",
+   "country"
+  ],
+  "metrics": [
+   "gmv",
+   "orders",
+   "visitors"
+  ],
+  "observed_period": [
+   "2024-07",
+   "2026-05"
+  ],
+  "row_count": 207,
+  "columns": {
+   "month_start_date": "Start date of each month.",
+   "channel": "Dimension: Web, iOS, Android.",
+   "country": "Dimension: United Kingdom, Germany, France.",
+   "gmv": "Revenue for the row, in the business's currency.",
+   "orders": "Count of orders for the row.",
+   "visitors": "Count of visitors for the row.",
+   "refund_total": "refund_total is only filled when a refund was issued in that period; a blank means no refunds, not missing data."
+  },
+  "generating_process": {
+   "true_monthly_growth_percent": 3.0,
+   "seasonality": "Nov-Dec demand about 25% above baseline, Jan-Feb slightly below.",
+   "noise": "Low: records vary modestly around the trend."
+  },
+  "planted_anomaly": {
+   "row_index": 123,
+   "date": "2025-08-01",
+   "month": "2025-08",
+   "dimensions": {
+    "channel": "Android",
+    "country": "United Kingdom"
+   },
+   "columns": [
+    "gmv",
+    "orders",
+    "visitors"
+   ],
+   "kind": "spike",
+   "factor": 5.791,
+   "revenue_z_score": 9.16,
+   "story": "A genuine one-off event: a bulk order made this record's gmv, orders, visitors about 5.79x normal. It is worth investigating."
+  },
+  "no_planted_anomaly_note": null,
+  "defect_columns": [],
+  "defect_story": null,
+  "by_design_sparse_columns": [
+   "refund_total"
+  ],
+  "missing_percent_by_column": {
+   "refund_total": 85.0
+  },
+  "observed_monthly_totals": {
+   "gmv": {
+    "2024-07": 740461.81,
+    "2024-08": 776205.48,
+    "2024-09": 747041.52,
+    "2024-10": 779304.63,
+    "2024-11": 889215.96,
+    "2024-12": 1036019.05,
+    "2025-01": 794541.2,
+    "2025-02": 805360.55,
+    "2025-03": 908114.95,
+    "2025-04": 991498.15,
+    "2025-05": 1013521.3,
+    "2025-06": 1038906.09,
+    "2025-07": 1023387.89,
+    "2025-08": 2131546.91,
+    "2025-09": 996368.43,
+    "2025-10": 1099928.35,
+    "2025-11": 1634376.14,
+    "2025-12": 1542321.5,
+    "2026-01": 1168704.94,
+    "2026-02": 1197775.35,
+    "2026-03": 1371073.23,
+    "2026-04": 1294028.27,
+    "2026-05": 1354385.24
+   },
+   "orders": {
+    "2024-07": 14629.0,
+    "2024-08": 14789.0,
+    "2024-09": 14965.0,
+    "2024-10": 15199.0,
+    "2024-11": 18590.0,
+    "2024-12": 20988.0,
+    "2025-01": 15526.0,
+    "2025-02": 16716.0,
+    "2025-03": 17676.0,
+    "2025-04": 18602.0,
+    "2025-05": 19417.0,
+    "2025-06": 20089.0,
+    "2025-07": 20072.0,
+    "2025-08": 38255.0,
+    "2025-09": 20077.0,
+    "2025-10": 21519.0,
+    "2025-11": 30119.0,
+    "2025-12": 29867.0,
+    "2026-01": 22614.0,
+    "2026-02": 23229.0,
+    "2026-03": 26287.0,
+    "2026-04": 24658.0,
+    "2026-05": 27446.0
+   },
+   "visitors": {
+    "2024-07": 261342.0,
+    "2024-08": 260923.0,
+    "2024-09": 257267.0,
+    "2024-10": 269236.0,
+    "2024-11": 343448.0,
+    "2024-12": 352823.0,
+    "2025-01": 279703.0,
+    "2025-02": 294009.0,
+    "2025-03": 313423.0,
+    "2025-04": 345252.0,
+    "2025-05": 358040.0,
+    "2025-06": 342531.0,
+    "2025-07": 363715.0,
+    "2025-08": 740131.0,
+    "2025-09": 356350.0,
+    "2025-10": 372224.0,
+    "2025-11": 558906.0,
+    "2025-12": 533967.0,
+    "2026-01": 411423.0,
+    "2026-02": 452205.0,
+    "2026-03": 490862.0,
+    "2026-04": 479141.0,
+    "2026-05": 469403.0
+   }
+  },
+  "dimension_totals": {
+   "gmv": {
+    "channel": {
+     "Web": 5918546.34,
+     "iOS": 3624031.06,
+     "Android": 15791509.54
+    },
+    "country": {
+     "United Kingdom": 9660692.03,
+     "Germany": 5814105.96,
+     "France": 9859288.95
+    }
+   },
+   "orders": {
+    "channel": {
+     "Web": 102630.0,
+     "iOS": 127551.0,
+     "Android": 261148.0
+    },
+    "country": {
+     "United Kingdom": 174973.0,
+     "Germany": 153801.0,
+     "France": 162555.0
+    }
+   }
+  },
+  "correlations": {
+   "gmv~orders": 0.931,
+   "gmv~visitors": 0.917,
+   "orders~visitors": 0.988
+  },
+  "holdout": {
+   "month": "2026-06",
+   "totals": {
+    "gmv": 1371426.2,
+    "orders": 27538.0,
+    "visitors": 491407.0
+   },
+   "last_observed_month_totals": {
+    "gmv": 1354385.24,
+    "orders": 27446.0,
+    "visitors": 469403.0
+   },
+   "change_percent_vs_last_observed_month": {
+    "gmv": 1.26,
+    "orders": 0.34,
+    "visitors": 4.69
+   }
+  }
+ },
+ "ai_recommendation_count": 0,
+ "ai_failed": false,
+ "executive_summary": "",
+ "forecasts": [
+  {
+   "metric": "gmv",
+   "latest_value": 1354385.24,
+   "change_percent_next_month": 10.94,
+   "confidence": 0.8
+  },
+  {
+   "metric": "orders",
+   "latest_value": 27446.0,
+   "change_percent_next_month": 4.9,
+   "confidence": 0.81
+  },
+  {
+   "metric": "visitors",
+   "latest_value": 469403.0,
+   "change_percent_next_month": 13.4,
+   "confidence": 0.8
+  }
+ ],
+ "anomalies": [
+  {
+   "type": "statistical_outlier",
+   "column": "visitors",
+   "score": 10.9,
+   "period": null,
+   "description": "One record reached 416,917.00 for Visitors, higher than almost every other record (Month Start Date 2025-08-01, Channel Android, Country United Kingdom)."
+  },
+  {
+   "type": "statistical_outlier",
+   "column": "orders",
+   "score": 10.6,
+   "period": null,
+   "description": "One record reached 20,969.00 for Orders, higher than almost every other record (Month Start Date 2025-08-01, Channel Android, Country United Kingdom)."
+  },
+  {
+   "type": "statistical_outlier",
+   "column": "gmv",
+   "score": 9.16,
+   "period": null,
+   "description": "One record reached 1,348,114.87 for Gmv, higher than almost every other record (Month Start Date 2025-08-01, Channel Android, Country United Kingdom)."
+  },
+  {
+   "type": "time_series_spike",
+   "column": "gmv",
+   "score": 3.05,
+   "period": "2025-08-01",
+   "description": "gmv reached 2,131,546.91 in 2025-08-01, unusually far from the monthly pattern."
+  },
+  {
+   "type": "time_series_spike",
+   "column": "visitors",
+   "score": 3.0,
+   "period": "2025-08-01",
+   "description": "visitors reached 740,131.00 in 2025-08-01, unusually far from the monthly pattern."
+  },
+  {
+   "type": "time_series_spike",
+   "column": "orders",
+   "score": 2.85,
+   "period": "2025-08-01",
+   "description": "orders reached 38,255.00 in 2025-08-01, unusually far from the monthly pattern."
+  }
+ ],
+ "quality_issues": [
+  {
+   "type": "outliers",
+   "column": "gmv",
+   "severity": "medium",
+   "description": "31 values fall far outside the typical range (-71,043 to 244,207)",
+   "affected_rows": 31,
+   "bounds": {
+    "lower": -71043.46999999999,
+    "upper": 244207.37
+   },
+   "column_label": "Gmv"
+  },
+  {
+   "type": "outliers",
+   "column": "orders",
+   "severity": "medium",
+   "description": "7 values fall far outside the typical range (-906 to 5,298)",
+   "affected_rows": 7,
+   "bounds": {
+    "lower": -906.5,
+    "upper": 5297.5
+   },
+   "column_label": "Orders"
+  },
+  {
+   "type": "outliers",
+   "column": "visitors",
+   "severity": "medium",
+   "description": "9 values fall far outside the typical range (-13,730 to 90,506)",
+   "affected_rows": 9,
+   "bounds": {
+    "lower": -13730.5,
+    "upper": 90505.5
+   },
+   "column_label": "Visitors"
+  },
+  {
+   "type": "missing_values",
+   "column": "refund_total",
+   "severity": "critical",
+   "description": "85.0% of values are missing",
+   "affected_rows": 176,
+   "column_label": "Refund Total"
+  },
+  {
+   "type": "outliers",
+   "column": "refund_total",
+   "severity": "medium",
+   "description": "4 values fall far outside the typical range (-4,147 to 17,304)",
+   "affected_rows": 4,
+   "bounds": {
+    "lower": -4147.269999999998,
+    "upper": 17304.009999999995
+   },
+   "column_label": "Refund Total"
+  }
+ ],
+ "recommendations": [
+  {
+   "source": "rule:data_quality",
+   "confidence": 0.9,
+   "confidence_method": "default",
+   "title": "Clean high-impact data quality issues",
+   "problem": "Refund Total: 85.0% of values are missing",
+   "evidence": "Quality score is 75/100 with 5 detected issues.",
+   "expected_impact": "Higher confidence in KPIs, forecasts, and executive reporting.",
+   "description": "Resolve the most severe data quality gaps before making operational decisions from this dataset.",
+   "label": {
+    "correct": false,
+    "reason": "Flagged refund_total, which is blank by design.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  },
+  {
+   "source": "rule:forecast",
+   "confidence": 0.8,
+   "confidence_method": "default",
+   "title": "Prepare for Gmv increase",
+   "problem": "Gmv is projected to move materially next month.",
+   "evidence": "Latest value 1,354,385.24; forecast 1,502,531.58.",
+   "expected_impact": "Better capacity, budget, and commercial planning before the change lands.",
+   "description": "The next-month forecast suggests gmv may increase by 10.9%.",
+   "label": {
+    "correct": false,
+    "reason": "Predicted +10.9% next month; the held-back month moved +1.3%.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  },
+  {
+   "source": "rule:forecast",
+   "confidence": 0.8,
+   "confidence_method": "default",
+   "title": "Prepare for Visitors increase",
+   "problem": "Visitors is projected to move materially next month.",
+   "evidence": "Latest value 469,403.00; forecast 532,283.68.",
+   "expected_impact": "Better capacity, budget, and commercial planning before the change lands.",
+   "description": "The next-month forecast suggests visitors may increase by 13.4%.",
+   "label": {
+    "correct": false,
+    "reason": "Predicted +13.4% next month; the held-back month moved +4.7%.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  },
+  {
+   "source": "rule:anomaly",
+   "confidence": 0.78,
+   "confidence_method": "default",
+   "title": "Review the context behind standout Visitors",
+   "problem": "One record reached 416,917.00 for Visitors, higher than almost every other record (Month Start Date 2025-08-01, Channel Android, Country United Kingdom).",
+   "evidence": "One record reached 416,917.00 for Visitors, higher than almost every other record (Month Start Date 2025-08-01, Channel Android, Country United Kingdom).",
+   "expected_impact": "Helps explain whether this was exceptional performance, a tactical pattern, or a one-off match moment.",
+   "description": "Compare the identified record (Month Start Date 2025-08-01, Channel Android, Country United Kingdom) with similar records to understand the drivers.",
+   "label": {
+    "correct": true,
+    "reason": "Flagged the planted record.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  }
+ ]
+}

@@ -1,0 +1,268 @@
+{
+ "dataset_id": "037_online_marketplace_monthly",
+ "scenario": {
+  "dataset_id": "037_online_marketplace_monthly",
+  "domain": "online_marketplace",
+  "grain": "monthly",
+  "months": 15,
+  "start": "2024-04-01",
+  "growth": 0.0,
+  "seasonality": 0.25,
+  "noise": 0.08,
+  "plant_anomaly": false,
+  "tracking_outage": false,
+  "optional_sparse": false
+ },
+ "truth": {
+  "benchmark_version": "2026-09-11.1",
+  "dataset_id": "037_online_marketplace_monthly",
+  "scenario": {
+   "dataset_id": "037_online_marketplace_monthly",
+   "domain": "online_marketplace",
+   "grain": "monthly",
+   "months": 15,
+   "start": "2024-04-01",
+   "growth": 0.0,
+   "seasonality": 0.25,
+   "noise": 0.08,
+   "plant_anomaly": false,
+   "tracking_outage": false,
+   "optional_sparse": false
+  },
+  "domain_description": "Marketplace activity by sales channel and country.",
+  "date_column": "month_start_date",
+  "dimensions": [
+   "channel",
+   "country"
+  ],
+  "metrics": [
+   "gmv",
+   "orders",
+   "visitors"
+  ],
+  "observed_period": [
+   "2024-04",
+   "2025-06"
+  ],
+  "row_count": 135,
+  "columns": {
+   "month_start_date": "Start date of each month.",
+   "channel": "Dimension: Web, iOS, Android.",
+   "country": "Dimension: United Kingdom, Germany, France.",
+   "gmv": "Revenue for the row, in the business's currency.",
+   "orders": "Count of orders for the row.",
+   "visitors": "Count of visitors for the row."
+  },
+  "generating_process": {
+   "true_monthly_growth_percent": 0.0,
+   "seasonality": "Nov-Dec demand about 25% above baseline, Jan-Feb slightly below.",
+   "noise": "Low: records vary modestly around the trend."
+  },
+  "planted_anomaly": null,
+  "no_planted_anomaly_note": "No genuine anomaly exists. Any standout record is ordinary random variation.",
+  "defect_columns": [],
+  "defect_story": null,
+  "by_design_sparse_columns": [],
+  "missing_percent_by_column": {},
+  "observed_monthly_totals": {
+   "gmv": {
+    "2024-04": 735451.11,
+    "2024-05": 719906.82,
+    "2024-06": 763948.54,
+    "2024-07": 755693.26,
+    "2024-08": 744320.24,
+    "2024-09": 758507.43,
+    "2024-10": 712317.33,
+    "2024-11": 964962.17,
+    "2024-12": 934882.32,
+    "2025-01": 697939.89,
+    "2025-02": 647652.04,
+    "2025-03": 738071.15,
+    "2025-04": 769521.15,
+    "2025-05": 766385.39,
+    "2025-06": 734018.34
+   },
+   "orders": {
+    "2024-04": 12534.0,
+    "2024-05": 12458.0,
+    "2024-06": 12649.0,
+    "2024-07": 12552.0,
+    "2024-08": 12550.0,
+    "2024-09": 12938.0,
+    "2024-10": 12042.0,
+    "2024-11": 16181.0,
+    "2024-12": 15586.0,
+    "2025-01": 11499.0,
+    "2025-02": 11311.0,
+    "2025-03": 12534.0,
+    "2025-04": 12617.0,
+    "2025-05": 12671.0,
+    "2025-06": 12482.0
+   },
+   "visitors": {
+    "2024-04": 221994.0,
+    "2024-05": 219035.0,
+    "2024-06": 241539.0,
+    "2024-07": 230818.0,
+    "2024-08": 236879.0,
+    "2024-09": 226942.0,
+    "2024-10": 207637.0,
+    "2024-11": 292898.0,
+    "2024-12": 274872.0,
+    "2025-01": 201243.0,
+    "2025-02": 208095.0,
+    "2025-03": 235643.0,
+    "2025-04": 230497.0,
+    "2025-05": 224569.0,
+    "2025-06": 228098.0
+   }
+  },
+  "dimension_totals": {
+   "gmv": {
+    "channel": {
+     "Web": 4847380.33,
+     "iOS": 2762581.38,
+     "Android": 3833615.47
+    },
+    "country": {
+     "United Kingdom": 4479498.1,
+     "Germany": 3617954.12,
+     "France": 3346124.96
+    }
+   },
+   "orders": {
+    "channel": {
+     "Web": 76076.0,
+     "iOS": 53973.0,
+     "Android": 62555.0
+    },
+    "country": {
+     "United Kingdom": 77004.0,
+     "Germany": 60649.0,
+     "France": 54951.0
+    }
+   }
+  },
+  "correlations": {
+   "gmv~orders": 0.842,
+   "gmv~visitors": 0.78,
+   "orders~visitors": 0.934
+  },
+  "holdout": {
+   "month": "2025-07",
+   "totals": {
+    "gmv": 769940.63,
+    "orders": 12749.0,
+    "visitors": 228640.0
+   },
+   "last_observed_month_totals": {
+    "gmv": 734018.34,
+    "orders": 12482.0,
+    "visitors": 228098.0
+   },
+   "change_percent_vs_last_observed_month": {
+    "gmv": 4.89,
+    "orders": 2.14,
+    "visitors": 0.24
+   }
+  }
+ },
+ "ai_recommendation_count": 0,
+ "ai_failed": false,
+ "executive_summary": "",
+ "forecasts": [
+  {
+   "metric": "gmv",
+   "latest_value": 734018.34,
+   "change_percent_next_month": 4.08,
+   "confidence": 0.85
+  },
+  {
+   "metric": "orders",
+   "latest_value": 12482.0,
+   "change_percent_next_month": 2.33,
+   "confidence": 0.86
+  },
+  {
+   "metric": "visitors",
+   "latest_value": 228098.0,
+   "change_percent_next_month": 1.35,
+   "confidence": 0.85
+  }
+ ],
+ "anomalies": [
+  {
+   "type": "statistical_outlier",
+   "column": "orders",
+   "score": 3.38,
+   "period": null,
+   "description": "One record reached 2,677.00 for Orders, higher than almost every other record (Month Start Date 2024-12-01, Channel Web, Country United Kingdom)."
+  },
+  {
+   "type": "statistical_outlier",
+   "column": "visitors",
+   "score": 3.2,
+   "period": null,
+   "description": "One record reached 49,508.00 for Visitors, higher than almost every other record (Month Start Date 2024-11-01, Channel Web, Country United Kingdom)."
+  },
+  {
+   "type": "time_series_spike",
+   "column": "orders",
+   "score": 2.54,
+   "period": "2024-11-01",
+   "description": "orders reached 16,181.00 in 2024-11-01, unusually far from the monthly pattern."
+  },
+  {
+   "type": "time_series_spike",
+   "column": "visitors",
+   "score": 2.52,
+   "period": "2024-11-01",
+   "description": "visitors reached 292,898.00 in 2024-11-01, unusually far from the monthly pattern."
+  }
+ ],
+ "quality_issues": [
+  {
+   "type": "outliers",
+   "column": "orders",
+   "severity": "medium",
+   "description": "2 values fall far outside the typical range (592 to 2,258)",
+   "affected_rows": 2,
+   "bounds": {
+    "lower": 591.75,
+    "upper": 2257.75
+   },
+   "column_label": "Orders"
+  },
+  {
+   "type": "outliers",
+   "column": "visitors",
+   "severity": "medium",
+   "description": "2 values fall far outside the typical range (8,262 to 43,070)",
+   "affected_rows": 2,
+   "bounds": {
+    "lower": 8262.0,
+    "upper": 43070.0
+   },
+   "column_label": "Visitors"
+  }
+ ],
+ "recommendations": [
+  {
+   "source": "rule:anomaly",
+   "confidence": 0.78,
+   "confidence_method": "default",
+   "title": "Review the context behind standout Orders",
+   "problem": "One record reached 2,677.00 for Orders, higher than almost every other record (Month Start Date 2024-12-01, Channel Web, Country United Kingdom).",
+   "evidence": "One record reached 2,677.00 for Orders, higher than almost every other record (Month Start Date 2024-12-01, Channel Web, Country United Kingdom).",
+   "expected_impact": "Helps explain whether this was exceptional performance, a tactical pattern, or a one-off match moment.",
+   "description": "Compare the identified record (Month Start Date 2024-12-01, Channel Web, Country United Kingdom) with similar records to understand the drivers.",
+   "label": {
+    "correct": false,
+    "reason": "No anomaly was planted; the flagged record is ordinary variation.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  }
+ ]
+}

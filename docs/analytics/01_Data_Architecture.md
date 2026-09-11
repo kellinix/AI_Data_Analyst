@@ -90,20 +90,20 @@ If `semantic_categorical_merging` is enabled (default **on**), `SemanticWrangler
 A new `uploaded_files` row is created for the cleaned file; the cleaning report is stashed in `Analysis.metadata["upload_context"]["cleaning"]`.
 
 ### Stage C — Analysis pipeline (asynchronous, Celery `run_analysis` queue)
-`backend/app/workers/tasks.py:48-82` → `backend/app/services/analysis_engine.py:55-217`
+`backend/app/workers/tasks.py:48-82` → `backend/app/services/analysis_engine.py:56-126` (`AnalysisEngine`: the database work — steps 1 and 13) → `compute_analysis`, `analysis_engine.py:317-452` (steps 2–12, no database dependency; the calibration benchmark calls the same function — `10_Confidence_Calibration.md §3.1`)
 
 1. Load `Analysis` + `UploadedFile` from Postgres; mark `PROCESSING`.
-2. Load the (already-cleaned) file into an in-memory DuckDB table named `data` (`analysis_engine.py:86`).
+2. Load the (already-cleaned) file into an in-memory DuckDB table named `data` (`analysis_engine.py:342`).
 3. `StatisticsEngine.describe_all()` (`analytics/statistics.py:28-55`) — internal order: `DESCRIBE` schema → numeric stats → categorical stats → **semantic enrichment** (assigns each column a `semantic_type`/`analysis_role` using the stats just computed) → categorical stats recomputed for numeric columns reclassified as dimension/flag codes → **data quality analysis last** (its outlier/negative-value checks are gated on the semantic role already being assigned) → correlations.
 4. KPI detection (`kpi_detector.py:44`) — keyword-classifies numeric columns, gated on semantic role.
 5. Chart selection (`chart_selector.py:30`) — also gated on semantic role; reuses KPI detector's outcome-column logic.
-6. Chart data populated via DuckDB aggregation queries (`analysis_engine.py:219-238`).
+6. Chart data populated via DuckDB aggregation queries (`analysis_engine.py:455-467`).
 7. Display-label enrichment: a **second, separate** LLM call (chat completion, not embeddings) decodes terse column names into human-readable labels and chart titles (`semantic_wrangler.py:257-324`).
 8. Forecasting (`analytics/forecasting.py`) and anomaly detection (`analytics/anomaly_detection.py`) run against the now-labeled schema.
 9. Deterministic, rule-based recommendations generated — **no LLM involved** (`analytics/recommendations.py`).
 10. Profile JSON built and written to disk (`services/data_profile.py`) — this becomes the **sole** grounding context for the AI analysis call. See `docs/analytics/08_AI_Analytics_and_Guardrails.md`.
 11. `AIService.generate_analysis()` called, three-tier fallback (Responses API → Chat Completions → fully deterministic template).
-12. AI-authored and deterministic recommendations merged and deduplicated by evidence text (`analysis_engine.py:415-436`).
+12. AI-authored and deterministic recommendations merged and deduplicated by evidence text (`analysis_engine.py:470-491`).
 13. Results persisted: old `Insight` rows deleted, new ones written; `Analysis.metadata`/`.charts` (JSONB) updated; status → `COMPLETED`.
 
 Bounded by a 300s soft / 360s hard Celery timeout, retried up to 3× with 30–60s backoff before the analysis is marked `FAILED` (`workers/tasks.py:53-54,79`; `core/config.py:178`).

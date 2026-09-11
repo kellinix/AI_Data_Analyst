@@ -1,0 +1,295 @@
+{
+ "dataset_id": "036_outdoor_retail_monthly",
+ "scenario": {
+  "dataset_id": "036_outdoor_retail_monthly",
+  "domain": "outdoor_retail",
+  "grain": "monthly",
+  "months": 12,
+  "start": "2024-02-01",
+  "growth": 0.03,
+  "seasonality": 0.0,
+  "noise": 0.3,
+  "plant_anomaly": true,
+  "tracking_outage": false,
+  "optional_sparse": false
+ },
+ "truth": {
+  "benchmark_version": "2026-09-11.1",
+  "dataset_id": "036_outdoor_retail_monthly",
+  "scenario": {
+   "dataset_id": "036_outdoor_retail_monthly",
+   "domain": "outdoor_retail",
+   "grain": "monthly",
+   "months": 12,
+   "start": "2024-02-01",
+   "growth": 0.03,
+   "seasonality": 0.0,
+   "noise": 0.3,
+   "plant_anomaly": true,
+   "tracking_outage": false,
+   "optional_sparse": false
+  },
+  "domain_description": "Sales for an outdoor-apparel retailer by region and product category.",
+  "date_column": "month_start_date",
+  "dimensions": [
+   "region",
+   "category"
+  ],
+  "metrics": [
+   "revenue",
+   "units_sold",
+   "new_customers"
+  ],
+  "observed_period": [
+   "2024-02",
+   "2025-01"
+  ],
+  "row_count": 108,
+  "columns": {
+   "month_start_date": "Start date of each month.",
+   "region": "Dimension: North America, Europe, Asia Pacific.",
+   "category": "Dimension: Apparel, Footwear, Camping.",
+   "revenue": "Revenue for the row, in the business's currency.",
+   "units_sold": "Count of units sold for the row.",
+   "new_customers": "Count of new customers for the row."
+  },
+  "generating_process": {
+   "true_monthly_growth_percent": 3.0,
+   "seasonality": "No seasonality.",
+   "noise": "High: individual records vary a lot, and records 3+ standard deviations from the mean occur naturally. Such records are ordinary variation, not errors or events."
+  },
+  "planted_anomaly": {
+   "row_index": 32,
+   "date": "2024-05-01",
+   "month": "2024-05",
+   "dimensions": {
+    "region": "Europe",
+    "category": "Camping"
+   },
+   "columns": [
+    "revenue",
+    "units_sold",
+    "new_customers"
+   ],
+   "kind": "spike",
+   "factor": 15.704,
+   "revenue_z_score": 5.21,
+   "story": "A genuine one-off event: a bulk order made this record's revenue, units_sold, new_customers about 15.70x normal. It is worth investigating."
+  },
+  "no_planted_anomaly_note": null,
+  "defect_columns": [],
+  "defect_story": null,
+  "by_design_sparse_columns": [],
+  "missing_percent_by_column": {},
+  "observed_monthly_totals": {
+   "revenue": {
+    "2024-02": 320549.91,
+    "2024-03": 302072.79,
+    "2024-04": 337775.74,
+    "2024-05": 453183.59,
+    "2024-06": 298455.93,
+    "2024-07": 285755.37,
+    "2024-08": 337142.51,
+    "2024-09": 299792.41,
+    "2024-10": 309088.28,
+    "2024-11": 435444.47,
+    "2024-12": 389511.37,
+    "2025-01": 359156.22
+   },
+   "units_sold": {
+    "2024-02": 4611.0,
+    "2024-03": 4321.0,
+    "2024-04": 5190.0,
+    "2024-05": 7372.0,
+    "2024-06": 4240.0,
+    "2024-07": 4575.0,
+    "2024-08": 5073.0,
+    "2024-09": 4500.0,
+    "2024-10": 4545.0,
+    "2024-11": 5897.0,
+    "2024-12": 5174.0,
+    "2025-01": 5396.0
+   },
+   "new_customers": {
+    "2024-02": 1319.0,
+    "2024-03": 1280.0,
+    "2024-04": 1526.0,
+    "2024-05": 2118.0,
+    "2024-06": 1297.0,
+    "2024-07": 1413.0,
+    "2024-08": 1572.0,
+    "2024-09": 1368.0,
+    "2024-10": 1394.0,
+    "2024-11": 1739.0,
+    "2024-12": 1467.0,
+    "2025-01": 1666.0
+   }
+  },
+  "dimension_totals": {
+   "revenue": {
+    "region": {
+     "North America": 1144701.83,
+     "Europe": 1100943.71,
+     "Asia Pacific": 1882283.05
+    },
+    "category": {
+     "Apparel": 1237560.61,
+     "Footwear": 1247737.35,
+     "Camping": 1642630.63
+    }
+   },
+   "units_sold": {
+    "region": {
+     "North America": 18847.0,
+     "Europe": 21021.0,
+     "Asia Pacific": 21026.0
+    },
+    "category": {
+     "Apparel": 23803.0,
+     "Footwear": 17005.0,
+     "Camping": 20086.0
+    }
+   }
+  },
+  "correlations": {
+   "revenue~units_sold": 0.816,
+   "revenue~new_customers": 0.808,
+   "units_sold~new_customers": 0.981
+  },
+  "holdout": {
+   "month": "2025-02",
+   "totals": {
+    "revenue": 400428.63,
+    "units_sold": 5830.0,
+    "new_customers": 1868.0
+   },
+   "last_observed_month_totals": {
+    "revenue": 359156.22,
+    "units_sold": 5396.0,
+    "new_customers": 1666.0
+   },
+   "change_percent_vs_last_observed_month": {
+    "revenue": 11.49,
+    "units_sold": 8.04,
+    "new_customers": 12.12
+   }
+  }
+ },
+ "ai_recommendation_count": 0,
+ "ai_failed": false,
+ "executive_summary": "",
+ "forecasts": [
+  {
+   "metric": "revenue",
+   "latest_value": 359156.22,
+   "change_percent_next_month": 3.56,
+   "confidence": 0.83
+  },
+  {
+   "metric": "units_sold",
+   "latest_value": 5396.0,
+   "change_percent_next_month": -2.42,
+   "confidence": 0.83
+  },
+  {
+   "metric": "new_customers",
+   "latest_value": 1666.0,
+   "change_percent_next_month": -4.06,
+   "confidence": 0.83
+  }
+ ],
+ "anomalies": [
+  {
+   "type": "statistical_outlier",
+   "column": "units_sold",
+   "score": 6.96,
+   "period": null,
+   "description": "One record reached 3,251.00 for Units Sold, higher than almost every other record (Month Start Date 2024-05-01, Region Europe, Category Camping)."
+  },
+  {
+   "type": "statistical_outlier",
+   "column": "new_customers",
+   "score": 5.93,
+   "period": null,
+   "description": "One record reached 817.00 for New Customers, higher than almost every other record (Month Start Date 2024-05-01, Region Europe, Category Camping)."
+  },
+  {
+   "type": "statistical_outlier",
+   "column": "revenue",
+   "score": 5.21,
+   "period": null,
+   "description": "One record reached 188,136.33 for Revenue, higher than almost every other record (Month Start Date 2024-05-01, Region Europe, Category Camping)."
+  },
+  {
+   "type": "time_series_spike",
+   "column": "units_sold",
+   "score": 2.63,
+   "period": "2024-05-01",
+   "description": "units_sold reached 7,372.00 in 2024-05-01, unusually far from the monthly pattern."
+  },
+  {
+   "type": "time_series_spike",
+   "column": "new_customers",
+   "score": 2.53,
+   "period": "2024-05-01",
+   "description": "new_customers reached 2,118.00 in 2024-05-01, unusually far from the monthly pattern."
+  }
+ ],
+ "quality_issues": [
+  {
+   "type": "outliers",
+   "column": "revenue",
+   "severity": "medium",
+   "description": "2 values fall far outside the typical range (-34,835 to 104,404)",
+   "affected_rows": 2,
+   "bounds": {
+    "lower": -34834.54875,
+    "upper": 104404.38124999999
+   },
+   "column_label": "Revenue"
+  },
+  {
+   "type": "outliers",
+   "column": "units_sold",
+   "severity": "medium",
+   "description": "6 values fall far outside the typical range (-144 to 1,174)",
+   "affected_rows": 6,
+   "bounds": {
+    "lower": -144.25,
+    "upper": 1173.75
+   },
+   "column_label": "Units Sold"
+  },
+  {
+   "type": "outliers",
+   "column": "new_customers",
+   "severity": "medium",
+   "description": "4 values fall far outside the typical range (-88 to 391)",
+   "affected_rows": 4,
+   "bounds": {
+    "lower": -88.375,
+    "upper": 390.625
+   },
+   "column_label": "New Customers"
+  }
+ ],
+ "recommendations": [
+  {
+   "source": "rule:anomaly",
+   "confidence": 0.78,
+   "confidence_method": "default",
+   "title": "Review the context behind standout Units Sold",
+   "problem": "One record reached 3,251.00 for Units Sold, higher than almost every other record (Month Start Date 2024-05-01, Region Europe, Category Camping).",
+   "evidence": "One record reached 3,251.00 for Units Sold, higher than almost every other record (Month Start Date 2024-05-01, Region Europe, Category Camping).",
+   "expected_impact": "Helps explain whether this was exceptional performance, a tactical pattern, or a one-off match moment.",
+   "description": "Compare the identified record (Month Start Date 2024-05-01, Region Europe, Category Camping) with similar records to understand the drivers.",
+   "label": {
+    "correct": true,
+    "reason": "Flagged the planted record.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  }
+ ]
+}

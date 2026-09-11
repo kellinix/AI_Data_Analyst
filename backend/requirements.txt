@@ -41,7 +41,6 @@ openai==1.84.0
 
 # Vector search (for RAG)
 numpy==2.2.6
-scipy==1.15.3
 
 # Authentication / Security
 python-jose[cryptography]==3.3.0

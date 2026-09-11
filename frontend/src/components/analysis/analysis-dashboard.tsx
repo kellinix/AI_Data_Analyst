@@ -213,7 +213,7 @@ export function AnalysisDashboard({ id }: AnalysisDashboardProps) {
               {/* Recommendations */}
               {insights.some((i) => i.type === "recommendation") && (
                 <SectionErrorBoundary title="Recommendations">
-                  <RecommendationsPanel insights={insights} />
+                  <RecommendationsPanel insights={insights} analysisId={id} />
                 </SectionErrorBoundary>
               )}
 

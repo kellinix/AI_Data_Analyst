@@ -1,0 +1,289 @@
+{
+ "dataset_id": "019_hotel_group_weekly",
+ "scenario": {
+  "dataset_id": "019_hotel_group_weekly",
+  "domain": "hotel_group",
+  "grain": "weekly",
+  "months": 12,
+  "start": "2024-06-01",
+  "growth": 0.03,
+  "seasonality": 0.0,
+  "noise": 0.08,
+  "plant_anomaly": false,
+  "tracking_outage": false,
+  "optional_sparse": false
+ },
+ "truth": {
+  "benchmark_version": "2026-09-11.1",
+  "dataset_id": "019_hotel_group_weekly",
+  "scenario": {
+   "dataset_id": "019_hotel_group_weekly",
+   "domain": "hotel_group",
+   "grain": "weekly",
+   "months": 12,
+   "start": "2024-06-01",
+   "growth": 0.03,
+   "seasonality": 0.0,
+   "noise": 0.08,
+   "plant_anomaly": false,
+   "tracking_outage": false,
+   "optional_sparse": false
+  },
+  "domain_description": "Hotel group performance by property and room type.",
+  "date_column": "week_start_date",
+  "dimensions": [
+   "property",
+   "room_type"
+  ],
+  "metrics": [
+   "revenue",
+   "bookings",
+   "customers"
+  ],
+  "observed_period": [
+   "2024-06",
+   "2025-05"
+  ],
+  "row_count": 468,
+  "columns": {
+   "week_start_date": "Start date of each week.",
+   "property": "Dimension: Harbour View, City Centre, Airport.",
+   "room_type": "Dimension: Standard, Deluxe, Suite.",
+   "revenue": "Revenue for the row, in the business's currency.",
+   "bookings": "Count of bookings for the row.",
+   "customers": "Count of customers for the row."
+  },
+  "generating_process": {
+   "true_monthly_growth_percent": 3.0,
+   "seasonality": "No seasonality.",
+   "noise": "Low: records vary modestly around the trend."
+  },
+  "planted_anomaly": null,
+  "no_planted_anomaly_note": "No genuine anomaly exists. Any standout record is ordinary random variation.",
+  "defect_columns": [],
+  "defect_story": null,
+  "by_design_sparse_columns": [],
+  "missing_percent_by_column": {},
+  "observed_monthly_totals": {
+   "revenue": {
+    "2024-06": 783835.99,
+    "2024-07": 1042398.4,
+    "2024-08": 845004.29,
+    "2024-09": 1094049.23,
+    "2024-10": 907401.18,
+    "2024-11": 918602.08,
+    "2024-12": 1192203.52,
+    "2025-01": 981825.81,
+    "2025-02": 991386.14,
+    "2025-03": 1290450.25,
+    "2025-04": 1059236.16,
+    "2025-05": 1090664.69
+   },
+   "bookings": {
+    "2024-06": 2649.0,
+    "2024-07": 3526.0,
+    "2024-08": 2880.0,
+    "2024-09": 3690.0,
+    "2024-10": 3101.0,
+    "2024-11": 3096.0,
+    "2024-12": 4075.0,
+    "2025-01": 3385.0,
+    "2025-02": 3387.0,
+    "2025-03": 4374.0,
+    "2025-04": 3637.0,
+    "2025-05": 3737.0
+   },
+   "customers": {
+    "2024-06": 4347.0,
+    "2024-07": 5638.0,
+    "2024-08": 4598.0,
+    "2024-09": 5914.0,
+    "2024-10": 4892.0,
+    "2024-11": 4944.0,
+    "2024-12": 6622.0,
+    "2025-01": 5349.0,
+    "2025-02": 5611.0,
+    "2025-03": 6822.0,
+    "2025-04": 5867.0,
+    "2025-05": 6005.0
+   }
+  },
+  "dimension_totals": {
+   "revenue": {
+    "property": {
+     "Harbour View": 4695118.99,
+     "City Centre": 4273444.63,
+     "Airport": 3228494.12
+    },
+    "room_type": {
+     "Standard": 5358011.24,
+     "Deluxe": 4019522.04,
+     "Suite": 2819524.46
+    }
+   },
+   "bookings": {
+    "property": {
+     "Harbour View": 14962.0,
+     "City Centre": 14369.0,
+     "Airport": 12206.0
+    },
+    "room_type": {
+     "Standard": 16411.0,
+     "Deluxe": 13125.0,
+     "Suite": 12001.0
+    }
+   }
+  },
+  "correlations": {
+   "revenue~bookings": 0.85,
+   "revenue~customers": 0.813,
+   "bookings~customers": 0.948
+  },
+  "holdout": {
+   "month": "2025-06",
+   "totals": {
+    "revenue": 1439151.42,
+    "bookings": 4904.0,
+    "customers": 7706.0
+   },
+   "last_observed_month_totals": {
+    "revenue": 1090664.69,
+    "bookings": 3737.0,
+    "customers": 6005.0
+   },
+   "change_percent_vs_last_observed_month": {
+    "revenue": 31.95,
+    "bookings": 31.23,
+    "customers": 28.33
+   }
+  }
+ },
+ "ai_recommendation_count": 0,
+ "ai_failed": false,
+ "executive_summary": "",
+ "forecasts": [
+  {
+   "metric": "revenue",
+   "latest_value": 1090664.69,
+   "change_percent_next_month": 7.0,
+   "confidence": 0.85
+  },
+  {
+   "metric": "bookings",
+   "latest_value": 3737.0,
+   "change_percent_next_month": 7.06,
+   "confidence": 0.85
+  },
+  {
+   "metric": "customers",
+   "latest_value": 6005.0,
+   "change_percent_next_month": 6.59,
+   "confidence": 0.85
+  }
+ ],
+ "anomalies": [
+  {
+   "type": "statistical_outlier",
+   "column": "customers",
+   "score": 3.69,
+   "period": null,
+   "description": "One record reached 311.00 for Customers, higher than almost every other record (Week Start Date 2025-05-19, Property Airport, Room Type Standard)."
+  }
+ ],
+ "quality_issues": [
+  {
+   "type": "outliers",
+   "column": "bookings",
+   "severity": "medium",
+   "description": "4 values fall far outside the typical range (18 to 158)",
+   "affected_rows": 4,
+   "bounds": {
+    "lower": 18.5,
+    "upper": 158.5
+   },
+   "column_label": "Bookings"
+  },
+  {
+   "type": "outliers",
+   "column": "customers",
+   "severity": "medium",
+   "description": "5 values fall far outside the typical range (23 to 261)",
+   "affected_rows": 5,
+   "bounds": {
+    "lower": 23.25,
+    "upper": 261.25
+   },
+   "column_label": "Customers"
+  }
+ ],
+ "recommendations": [
+  {
+   "source": "rule:forecast",
+   "confidence": 0.85,
+   "confidence_method": "default",
+   "title": "Prepare for Revenue increase",
+   "problem": "Revenue is projected to move materially next month.",
+   "evidence": "Latest value 1,090,664.69; forecast 1,167,065.50.",
+   "expected_impact": "Better capacity, budget, and commercial planning before the change lands.",
+   "description": "The next-month forecast suggests revenue may increase by 7.0%.",
+   "label": {
+    "correct": true,
+    "reason": "Predicted +7.0% next month; the held-back month moved +32.0%.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  },
+  {
+   "source": "rule:forecast",
+   "confidence": 0.85,
+   "confidence_method": "default",
+   "title": "Prepare for Bookings increase",
+   "problem": "Bookings is projected to move materially next month.",
+   "evidence": "Latest value 3,737.00; forecast 4,000.98.",
+   "expected_impact": "Better capacity, budget, and commercial planning before the change lands.",
+   "description": "The next-month forecast suggests bookings may increase by 7.1%.",
+   "label": {
+    "correct": true,
+    "reason": "Predicted +7.1% next month; the held-back month moved +31.2%.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  },
+  {
+   "source": "rule:forecast",
+   "confidence": 0.85,
+   "confidence_method": "default",
+   "title": "Prepare for Customers increase",
+   "problem": "Customers is projected to move materially next month.",
+   "evidence": "Latest value 6,005.00; forecast 6,400.77.",
+   "expected_impact": "Better capacity, budget, and commercial planning before the change lands.",
+   "description": "The next-month forecast suggests customers may increase by 6.6%.",
+   "label": {
+    "correct": true,
+    "reason": "Predicted +6.6% next month; the held-back month moved +28.3%.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  },
+  {
+   "source": "rule:anomaly",
+   "confidence": 0.78,
+   "confidence_method": "default",
+   "title": "Review the context behind standout Customers",
+   "problem": "One record reached 311.00 for Customers, higher than almost every other record (Week Start Date 2025-05-19, Property Airport, Room Type Standard).",
+   "evidence": "One record reached 311.00 for Customers, higher than almost every other record (Week Start Date 2025-05-19, Property Airport, Room Type Standard).",
+   "expected_impact": "Helps explain whether this was exceptional performance, a tactical pattern, or a one-off match moment.",
+   "description": "Compare the identified record (Week Start Date 2025-05-19, Property Airport, Room Type Standard) with similar records to understand the drivers.",
+   "label": {
+    "correct": false,
+    "reason": "No anomaly was planted; the flagged record is ordinary variation.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  }
+ ]
+}

@@ -12,6 +12,7 @@ import json
 import re
 from typing import Any
 
+from app.analytics.calibration import AI_SOURCE_BY_PRIORITY, confidence_fields
 from app.core.config import settings
 from app.core.logging import get_logger
 
@@ -647,7 +648,7 @@ def _normalize_recommendation(rec: dict[str, Any]) -> dict[str, Any]:
         "financial_opportunity": financial_value if show_financial else 0,
         "show_financial_opportunity": show_financial,
         "importance": priority.lower(),
-        "confidence": {"High": 0.85, "Medium": 0.7, "Low": 0.55}[priority],
+        **confidence_fields(AI_SOURCE_BY_PRIORITY[priority]),
         "data": {
             "difficulty": difficulty.lower(),
             "owner": owner,
@@ -669,19 +670,38 @@ def _allowed_title_case(value: Any, allowed: set[str], fallback: str) -> str:
     return fallback
 
 
+_FINANCIAL_AMOUNT = re.compile(
+    r"(-?\d+(?:,\d{3})*(?:\.\d+)?)(?:\s*(thousand|million|billion|bn|mn|mm|k|m|b)\b)?",
+    re.IGNORECASE,
+)
+_FINANCIAL_MULTIPLIERS = {
+    "k": 1e3,
+    "thousand": 1e3,
+    "m": 1e6,
+    "mm": 1e6,
+    "mn": 1e6,
+    "million": 1e6,
+    "b": 1e9,
+    "bn": 1e9,
+    "billion": 1e9,
+}
+
+
 def _parse_financial_opportunity(value: Any) -> float | None:
     if isinstance(value, int | float):
         return float(value)
     text = str(value or "").strip()
     if not text or text.upper() == "NA":
         return None
-    match = re.search(r"-?\d+(?:,\d{3})*(?:\.\d+)?|-?\d+(?:\.\d+)?", text)
+    match = _FINANCIAL_AMOUNT.search(text)
     if not match:
         return None
     try:
-        return float(match.group(0).replace(",", ""))
+        amount = float(match.group(1).replace(",", ""))
     except ValueError:
         return None
+    suffix = (match.group(2) or "").lower()
+    return amount * _FINANCIAL_MULTIPLIERS.get(suffix, 1)
 
 
 def _safe_chart_id(value: Any) -> str:
@@ -690,22 +710,17 @@ def _safe_chart_id(value: Any) -> str:
     return chart_id or "chart"
 
 
+# Matches JS syntax and non-JSON literals as whole tokens, so ordinary labels
+# such as "Finance", "Maintenance", or "Renew date" are not mistaken for them.
+_UNSAFE_CHART_VALUE = re.compile(
+    r"=>|\bfunction\s*\(|\bnew\s+date\s*\(|\bregexp\b|\bundefined\b|\bnan\b|\binfinity\b",
+    re.IGNORECASE,
+)
+
+
 def _contains_unsafe_chart_value(value: Any) -> bool:
     if isinstance(value, str):
-        lowered = value.lower()
-        return any(
-            token in lowered
-            for token in (
-                "function",
-                "() =>",
-                "=>",
-                "new date",
-                "regexp",
-                "undefined",
-                "nan",
-                "infinity",
-            )
-        )
+        return _UNSAFE_CHART_VALUE.search(value) is not None
     if isinstance(value, dict):
         return any(_contains_unsafe_chart_value(child) for child in value.values())
     if isinstance(value, list):

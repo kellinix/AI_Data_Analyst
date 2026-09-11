@@ -13,6 +13,7 @@ Pipeline:
 from __future__ import annotations
 
 import uuid
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any
 
@@ -80,140 +81,48 @@ class AnalysisEngine:
         # Mark processing
         await self._update_progress(db, analysis, AnalysisStatus.PROCESSING, 5)
 
-        # Step 1: Load into DuckDB
-        conn = duckdb.connect(":memory:")
-        extension = Path(uploaded_file.storage_path).suffix.lower()
-        row_count, truncated = await self.file_processor.read_to_duckdb_ex(
-            conn, uploaded_file.storage_path, extension
-        )
-        await self._update_progress(db, analysis, AnalysisStatus.PROCESSING, 15)
+        async def report_progress(progress: int) -> None:
+            await self._update_progress(db, analysis, AnalysisStatus.PROCESSING, progress)
 
-        # Step 2: Compute statistics
-        stats_engine = StatisticsEngine(conn)
-        statistics = stats_engine.describe_all()
-        statistics["parser"] = self.file_processor._parser_metadata(
-            uploaded_file.storage_path,
-            extension,
+        # Steps 1-6: load, compute, and generate (shared with the offline eval)
+        computed = await compute_analysis(
+            file_processor=self.file_processor,
+            ai_service=self.ai_service,
+            storage_path=uploaded_file.storage_path,
+            file_name=uploaded_file.original_filename,
+            analysis_id=analysis_id,
+            upload_context=upload_context,
+            on_progress=report_progress,
         )
-        if truncated:
-            statistics["sample_truncated"] = True
-            statistics["sample_row_limit"] = self.file_processor.SAMPLE_ROWS
-        _adjust_portfolio_data_quality(statistics, upload_context)
-        uploaded_file.row_count = row_count
+        statistics = computed["statistics"]
+        ai_result = computed["ai_result"]
+        uploaded_file.row_count = computed["row_count"]
         uploaded_file.column_count = len(statistics["schema"])
         uploaded_file.columns = statistics["schema"]
-        await self._update_progress(db, analysis, AnalysisStatus.PROCESSING, 35)
-
-        # Step 3: Detect KPIs
-        kpis = detect_kpis(
-            schema=statistics["schema"],
-            numeric_stats=statistics["numeric_stats"],
-        )
-        await self._update_progress(db, analysis, AnalysisStatus.PROCESSING, 50)
-
-        # Step 4: Select charts
-        charts = select_charts(
-            schema=statistics["schema"],
-            numeric_stats=statistics["numeric_stats"],
-            categorical_stats=statistics["categorical_stats"],
-            date_range=statistics["date_range"],
-            correlations=statistics["correlations"],
-        )
-
-        # Populate chart data from DuckDB
-        charts = await self._populate_chart_data(conn, charts)
-        semantic_display = await SemanticWrangler().build_display_metadata(
-            file_name=uploaded_file.original_filename,
-            statistics=statistics,
-            charts=charts,
-            upload_context=upload_context,
-        )
-        statistics = apply_display_metadata_to_statistics(statistics, semantic_display)
-        charts = apply_display_metadata_to_charts(charts, semantic_display)
-        charts = attach_visual_specs(charts)
-        await self._update_progress(db, analysis, AnalysisStatus.PROCESSING, 65)
-
-        # Step 5: Forecasting, anomalies, and deterministic recommendations
-        forecasts = generate_forecasts(conn, statistics["schema"], kpis)
-        anomalies = detect_anomalies(conn, statistics["schema"], statistics["numeric_stats"])
-        deterministic_recommendations = generate_recommendations(
-            kpis=kpis,
-            data_quality=statistics["data_quality"],
-            anomalies=anomalies,
-            forecasts=forecasts,
-        )
-        profile_json = build_data_profile_schema(
-            analysis_id=analysis_id,
-            file_name=uploaded_file.original_filename,
-            statistics={
-                **statistics,
-                "forecasts": forecasts,
-                "anomalies": anomalies,
-                "deterministic_recommendations": deterministic_recommendations,
-                "upload_context": upload_context,
-                "semantic_display": semantic_display,
-            },
-            kpis=kpis,
-            charts=charts,
-            forecasts=forecasts,
-            anomalies=anomalies,
-            recommendations=deterministic_recommendations,
-            upload_context=upload_context,
-        )
-        profile_json_path = write_data_profile_schema(
-            profile_json,
-            Path(uploaded_file.storage_path).with_name(f"{analysis_id}.profile.json"),
-        )
-        await self._update_progress(db, analysis, AnalysisStatus.PROCESSING, 75)
-
-        # Step 6: AI generation grounded in computed metrics
-        ai_result = await self.ai_service.generate_analysis(
-            file_name=uploaded_file.original_filename,
-            statistics={
-                **statistics,
-                "forecasts": forecasts,
-                "anomalies": anomalies,
-                "deterministic_recommendations": deterministic_recommendations,
-                "upload_context": upload_context,
-                "profile_json": profile_json,
-                "profile_json_path": profile_json_path,
-                "semantic_display": semantic_display,
-            },
-            kpis=kpis,
-        )
-        await self._update_progress(db, analysis, AnalysisStatus.PROCESSING, 85)
-
-        ai_recommendations = ai_result.get("recommendations", [])
-        recommendations = _merge_recommendations(
-            ai_recommendations,
-            deterministic_recommendations,
-        )
-        await self._update_progress(db, analysis, AnalysisStatus.PROCESSING, 90)
 
         # Step 7: Persist
         await self._persist_results(
             db=db,
             analysis=analysis,
-            row_count=row_count,
+            row_count=computed["row_count"],
             column_count=len(statistics["schema"]),
             summary=ai_result.get("executive_summary", ""),
-            charts=charts,
-            kpis=kpis,
+            charts=computed["charts"],
+            kpis=computed["kpis"],
             ai_insights=ai_result.get("insights", []),
-            ai_recommendations=recommendations,
+            ai_recommendations=computed["recommendations"],
             metadata={
                 **statistics,
-                "forecasts": forecasts,
-                "anomalies": anomalies,
+                "forecasts": computed["forecasts"],
+                "anomalies": computed["anomalies"],
                 "upload_context": upload_context,
-                "profile_json": profile_json,
-                "profile_json_path": profile_json_path,
-                "semantic_display": semantic_display,
+                "profile_json": computed["profile_json"],
+                "profile_json_path": computed["profile_json_path"],
+                "semantic_display": computed["semantic_display"],
                 "ai_layout_grid": ai_result.get("layout_grid", []),
             },
         )
 
-        conn.close()
         logger.info("Analysis completed", analysis_id=analysis_id)
 
     async def _populate_chart_data(
@@ -226,16 +135,7 @@ class AnalysisEngine:
         reuses it to re-run this exact same aggregation with a WHERE clause,
         so a filtered view can never drift from how this chart was built.
         """
-        populated = []
-        for chart in charts:
-            try:
-                populate_chart_option(conn, chart)
-                populated.append(chart)
-            except Exception as exc:
-                logger.warning("Chart data population failed", chart_type=chart.get("type"), exc=str(exc))
-                populated.append(chart)
-
-        return populated
+        return _populate_charts(conn, charts)
 
     async def _persist_results(
         self,
@@ -357,6 +257,8 @@ class AnalysisEngine:
                 "difficulty": rec.get("difficulty"),
                 "owner": rec.get("owner"),
                 "estimated_completion": rec.get("estimated_completion"),
+                "confidence_source": rec.get("confidence_source"),
+                "confidence_method": rec.get("confidence_method"),
                 **rec_data,
             }
             insight = Insight(
@@ -410,6 +312,159 @@ class AnalysisEngine:
             analysis.status = AnalysisStatus.FAILED.value
             analysis.error_message = error[:1024]
             await db.flush()
+
+
+async def compute_analysis(
+    *,
+    file_processor: FileProcessor,
+    ai_service: AIService,
+    storage_path: str,
+    file_name: str,
+    analysis_id: str,
+    upload_context: Any = None,
+    on_progress: Callable[[int], Awaitable[None]] | None = None,
+) -> dict[str, Any]:
+    """Pipeline steps 1-6: everything between reading the file and persisting.
+
+    Has no database dependency, so the offline calibration eval
+    (`backend/evals/calibration/`) runs exactly the code production runs.
+    `on_progress` receives the same percentages the dashboard polls.
+    """
+
+    async def progress(value: int) -> None:
+        if on_progress is not None:
+            await on_progress(value)
+
+    conn = duckdb.connect(":memory:")
+    try:
+        # Step 1: Load into DuckDB
+        extension = Path(storage_path).suffix.lower()
+        row_count, truncated = await file_processor.read_to_duckdb_ex(conn, storage_path, extension)
+        await progress(15)
+
+        # Step 2: Compute statistics
+        statistics = StatisticsEngine(conn).describe_all()
+        statistics["parser"] = file_processor._parser_metadata(storage_path, extension)
+        if truncated:
+            statistics["sample_truncated"] = True
+            statistics["sample_row_limit"] = file_processor.SAMPLE_ROWS
+        _adjust_portfolio_data_quality(statistics, upload_context)
+        await progress(35)
+
+        # Step 3: Detect KPIs
+        kpis = detect_kpis(
+            schema=statistics["schema"],
+            numeric_stats=statistics["numeric_stats"],
+        )
+        await progress(50)
+
+        # Step 4: Select charts, populate them from DuckDB, apply display labels
+        charts = select_charts(
+            schema=statistics["schema"],
+            numeric_stats=statistics["numeric_stats"],
+            categorical_stats=statistics["categorical_stats"],
+            date_range=statistics["date_range"],
+            correlations=statistics["correlations"],
+        )
+        charts = _populate_charts(conn, charts)
+        semantic_display = await SemanticWrangler().build_display_metadata(
+            file_name=file_name,
+            statistics=statistics,
+            charts=charts,
+            upload_context=upload_context,
+        )
+        statistics = apply_display_metadata_to_statistics(statistics, semantic_display)
+        charts = apply_display_metadata_to_charts(charts, semantic_display)
+        charts = attach_visual_specs(charts)
+        await progress(65)
+
+        # Step 5: Forecasting, anomalies, and deterministic recommendations
+        forecasts = generate_forecasts(conn, statistics["schema"], kpis)
+        anomalies = detect_anomalies(conn, statistics["schema"], statistics["numeric_stats"])
+        deterministic_recommendations = generate_recommendations(
+            kpis=kpis,
+            data_quality=statistics["data_quality"],
+            anomalies=anomalies,
+            forecasts=forecasts,
+        )
+        profile_json = build_data_profile_schema(
+            analysis_id=analysis_id,
+            file_name=file_name,
+            statistics={
+                **statistics,
+                "forecasts": forecasts,
+                "anomalies": anomalies,
+                "deterministic_recommendations": deterministic_recommendations,
+                "upload_context": upload_context,
+                "semantic_display": semantic_display,
+            },
+            kpis=kpis,
+            charts=charts,
+            forecasts=forecasts,
+            anomalies=anomalies,
+            recommendations=deterministic_recommendations,
+            upload_context=upload_context,
+        )
+        profile_json_path = write_data_profile_schema(
+            profile_json,
+            Path(storage_path).with_name(f"{analysis_id}.profile.json"),
+        )
+        await progress(75)
+
+        # Step 6: AI generation grounded in computed metrics
+        ai_result = await ai_service.generate_analysis(
+            file_name=file_name,
+            statistics={
+                **statistics,
+                "forecasts": forecasts,
+                "anomalies": anomalies,
+                "deterministic_recommendations": deterministic_recommendations,
+                "upload_context": upload_context,
+                "profile_json": profile_json,
+                "profile_json_path": profile_json_path,
+                "semantic_display": semantic_display,
+            },
+            kpis=kpis,
+        )
+        await progress(85)
+
+        recommendations = _merge_recommendations(
+            ai_result.get("recommendations", []),
+            deterministic_recommendations,
+        )
+        await progress(90)
+    finally:
+        conn.close()
+
+    return {
+        "row_count": row_count,
+        "statistics": statistics,
+        "kpis": kpis,
+        "charts": charts,
+        "semantic_display": semantic_display,
+        "forecasts": forecasts,
+        "anomalies": anomalies,
+        "deterministic_recommendations": deterministic_recommendations,
+        "profile_json": profile_json,
+        "profile_json_path": profile_json_path,
+        "ai_result": ai_result,
+        "recommendations": recommendations,
+    }
+
+
+def _populate_charts(
+    conn: duckdb.DuckDBPyConnection, charts: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    populated = []
+    for chart in charts:
+        try:
+            populate_chart_option(conn, chart)
+            populated.append(chart)
+        except Exception as exc:
+            logger.warning("Chart data population failed", chart_type=chart.get("type"), exc=str(exc))
+            populated.append(chart)
+
+    return populated
 
 
 def _merge_recommendations(

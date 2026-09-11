@@ -205,6 +205,15 @@ export interface Insight {
   data: Record<string, unknown>
   chart_config: ChartConfig | null
   created_at: string
+  // The viewing owner's verdict on a recommendation; absent on shared views.
+  user_feedback?: RecommendationFeedbackVerdict | null
+}
+
+export type RecommendationFeedbackVerdict = "helpful" | "not_helpful"
+
+export interface RecommendationFeedbackResponse {
+  insight_id: string
+  verdict: RecommendationFeedbackVerdict
 }
 
 // ---- Charts ------------------------------------------------

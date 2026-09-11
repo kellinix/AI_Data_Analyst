@@ -1,0 +1,256 @@
+{
+ "dataset_id": "028_outdoor_retail_monthly",
+ "scenario": {
+  "dataset_id": "028_outdoor_retail_monthly",
+  "domain": "outdoor_retail",
+  "grain": "monthly",
+  "months": 22,
+  "start": "2022-02-01",
+  "growth": 0.0,
+  "seasonality": 0.0,
+  "noise": 0.08,
+  "plant_anomaly": false,
+  "tracking_outage": false,
+  "optional_sparse": false
+ },
+ "truth": {
+  "benchmark_version": "2026-09-11.1",
+  "dataset_id": "028_outdoor_retail_monthly",
+  "scenario": {
+   "dataset_id": "028_outdoor_retail_monthly",
+   "domain": "outdoor_retail",
+   "grain": "monthly",
+   "months": 22,
+   "start": "2022-02-01",
+   "growth": 0.0,
+   "seasonality": 0.0,
+   "noise": 0.08,
+   "plant_anomaly": false,
+   "tracking_outage": false,
+   "optional_sparse": false
+  },
+  "domain_description": "Sales for an outdoor-apparel retailer by region and product category.",
+  "date_column": "month_start_date",
+  "dimensions": [
+   "region",
+   "category"
+  ],
+  "metrics": [
+   "revenue",
+   "units_sold",
+   "new_customers"
+  ],
+  "observed_period": [
+   "2022-02",
+   "2023-11"
+  ],
+  "row_count": 198,
+  "columns": {
+   "month_start_date": "Start date of each month.",
+   "region": "Dimension: North America, Europe, Asia Pacific.",
+   "category": "Dimension: Apparel, Footwear, Camping.",
+   "revenue": "Revenue for the row, in the business's currency.",
+   "units_sold": "Count of units sold for the row.",
+   "new_customers": "Count of new customers for the row."
+  },
+  "generating_process": {
+   "true_monthly_growth_percent": 0.0,
+   "seasonality": "No seasonality.",
+   "noise": "Low: records vary modestly around the trend."
+  },
+  "planted_anomaly": null,
+  "no_planted_anomaly_note": "No genuine anomaly exists. Any standout record is ordinary random variation.",
+  "defect_columns": [],
+  "defect_story": null,
+  "by_design_sparse_columns": [],
+  "missing_percent_by_column": {},
+  "observed_monthly_totals": {
+   "revenue": {
+    "2022-02": 359364.71,
+    "2022-03": 358704.82,
+    "2022-04": 359850.69,
+    "2022-05": 353928.18,
+    "2022-06": 368352.1,
+    "2022-07": 395378.84,
+    "2022-08": 364695.99,
+    "2022-09": 333603.7,
+    "2022-10": 361342.49,
+    "2022-11": 360545.42,
+    "2022-12": 358686.84,
+    "2023-01": 381831.83,
+    "2023-02": 355407.7,
+    "2023-03": 364432.2,
+    "2023-04": 376708.48,
+    "2023-05": 380663.49,
+    "2023-06": 344284.83,
+    "2023-07": 349424.8,
+    "2023-08": 354268.66,
+    "2023-09": 344727.71,
+    "2023-10": 347446.37,
+    "2023-11": 359416.58
+   },
+   "units_sold": {
+    "2022-02": 4212.0,
+    "2022-03": 4116.0,
+    "2022-04": 4041.0,
+    "2022-05": 4198.0,
+    "2022-06": 4097.0,
+    "2022-07": 4434.0,
+    "2022-08": 4147.0,
+    "2022-09": 3948.0,
+    "2022-10": 4149.0,
+    "2022-11": 4270.0,
+    "2022-12": 4247.0,
+    "2023-01": 4316.0,
+    "2023-02": 4128.0,
+    "2023-03": 4316.0,
+    "2023-04": 4297.0,
+    "2023-05": 4244.0,
+    "2023-06": 3933.0,
+    "2023-07": 4031.0,
+    "2023-08": 4132.0,
+    "2023-09": 4104.0,
+    "2023-10": 4095.0,
+    "2023-11": 4102.0
+   },
+   "new_customers": {
+    "2022-02": 1388.0,
+    "2022-03": 1197.0,
+    "2022-04": 1320.0,
+    "2022-05": 1360.0,
+    "2022-06": 1247.0,
+    "2022-07": 1370.0,
+    "2022-08": 1244.0,
+    "2022-09": 1183.0,
+    "2022-10": 1263.0,
+    "2022-11": 1225.0,
+    "2022-12": 1229.0,
+    "2023-01": 1274.0,
+    "2023-02": 1350.0,
+    "2023-03": 1279.0,
+    "2023-04": 1359.0,
+    "2023-05": 1327.0,
+    "2023-06": 1190.0,
+    "2023-07": 1232.0,
+    "2023-08": 1164.0,
+    "2023-09": 1278.0,
+    "2023-10": 1218.0,
+    "2023-11": 1285.0
+   }
+  },
+  "dimension_totals": {
+   "revenue": {
+    "region": {
+     "North America": 2809410.78,
+     "Europe": 2749473.22,
+     "Asia Pacific": 2374182.43
+    },
+    "category": {
+     "Apparel": 3098710.59,
+     "Footwear": 2406521.09,
+     "Camping": 2427834.75
+    }
+   },
+   "units_sold": {
+    "region": {
+     "North America": 31121.0,
+     "Europe": 29193.0,
+     "Asia Pacific": 31243.0
+    },
+    "category": {
+     "Apparel": 34122.0,
+     "Footwear": 27496.0,
+     "Camping": 29939.0
+    }
+   }
+  },
+  "correlations": {
+   "revenue~units_sold": 0.792,
+   "revenue~new_customers": 0.745,
+   "units_sold~new_customers": 0.942
+  },
+  "holdout": {
+   "month": "2023-12",
+   "totals": {
+    "revenue": 350838.97,
+    "units_sold": 4047.0,
+    "new_customers": 1172.0
+   },
+   "last_observed_month_totals": {
+    "revenue": 359416.58,
+    "units_sold": 4102.0,
+    "new_customers": 1285.0
+   },
+   "change_percent_vs_last_observed_month": {
+    "revenue": -2.39,
+    "units_sold": -1.34,
+    "new_customers": -8.79
+   }
+  }
+ },
+ "ai_recommendation_count": 0,
+ "ai_failed": false,
+ "executive_summary": "",
+ "forecasts": [
+  {
+   "metric": "revenue",
+   "latest_value": 359416.58,
+   "change_percent_next_month": -1.13,
+   "confidence": 0.88
+  },
+  {
+   "metric": "units_sold",
+   "latest_value": 4102.0,
+   "change_percent_next_month": 0.63,
+   "confidence": 0.89
+  },
+  {
+   "metric": "new_customers",
+   "latest_value": 1285.0,
+   "change_percent_next_month": -3.6,
+   "confidence": 0.88
+  }
+ ],
+ "anomalies": [
+  {
+   "type": "statistical_outlier",
+   "column": "new_customers",
+   "score": 3.69,
+   "period": null,
+   "description": "One record reached 330.00 for New Customers, higher than almost every other record (Month Start Date 2022-02-01, Region Europe, Category Apparel)."
+  }
+ ],
+ "quality_issues": [
+  {
+   "type": "outliers",
+   "column": "new_customers",
+   "severity": "medium",
+   "description": "1 value fall far outside the typical range (-18 to 300)",
+   "affected_rows": 1,
+   "bounds": {
+    "lower": -18.0,
+    "upper": 300.0
+   },
+   "column_label": "New Customers"
+  }
+ ],
+ "recommendations": [
+  {
+   "source": "rule:anomaly",
+   "confidence": 0.78,
+   "confidence_method": "default",
+   "title": "Review the context behind standout New Customers",
+   "problem": "One record reached 330.00 for New Customers, higher than almost every other record (Month Start Date 2022-02-01, Region Europe, Category Apparel).",
+   "evidence": "One record reached 330.00 for New Customers, higher than almost every other record (Month Start Date 2022-02-01, Region Europe, Category Apparel).",
+   "expected_impact": "Helps explain whether this was exceptional performance, a tactical pattern, or a one-off match moment.",
+   "description": "Compare the identified record (Month Start Date 2022-02-01, Region Europe, Category Apparel) with similar records to understand the drivers.",
+   "label": {
+    "correct": false,
+    "reason": "No anomaly was planted; the flagged record is ordinary variation.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  }
+ ]
+}

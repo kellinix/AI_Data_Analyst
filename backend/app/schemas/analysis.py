@@ -76,6 +76,18 @@ class InsightResponse(BaseModel):
     data: dict[str, Any] | None
     chart_config: dict[str, Any] | None
     created_at: datetime
+    # The requesting owner's verdict on a recommendation; always None on
+    # shared/public views.
+    user_feedback: Literal["helpful", "not_helpful"] | None = None
+
+
+class RecommendationFeedbackRequest(BaseModel):
+    verdict: Literal["helpful", "not_helpful"]
+
+
+class RecommendationFeedbackResponse(BaseModel):
+    insight_id: uuid.UUID
+    verdict: Literal["helpful", "not_helpful"]
 
 
 class FilterableColumn(BaseModel):

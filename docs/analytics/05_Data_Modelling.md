@@ -27,6 +27,9 @@ erDiagram
     ANALYSES ||--o{ INSIGHTS : contains
     ANALYSES ||--o{ CHAT_SESSIONS : has
     CHAT_SESSIONS ||--o{ CHAT_MESSAGES : contains
+    USERS ||--o{ RECOMMENDATION_FEEDBACK : gives
+    ANALYSES ||--o{ RECOMMENDATION_FEEDBACK : "collects"
+    INSIGHTS |o--o{ RECOMMENDATION_FEEDBACK : "rated in (nulled on re-run)"
 
     USERS {
         uuid id PK
@@ -108,11 +111,25 @@ erDiagram
         string current_period_end "stored as string, not timestamptz"
         boolean cancel_at_period_end
     }
+    RECOMMENDATION_FEEDBACK {
+        uuid id PK
+        uuid user_id FK "-> users.id, ON DELETE CASCADE, indexed"
+        uuid analysis_id FK "-> analyses.id, ON DELETE CASCADE, indexed"
+        uuid insight_id FK "-> insights.id, ON DELETE SET NULL, nullable"
+        string verdict "helpful|not_helpful, CHECK-enforced"
+        string recommendation_title "snapshot"
+        string importance "snapshot"
+        float confidence "snapshot: the confidence shown"
+        string confidence_source "snapshot, e.g. ai:high, indexed"
+        string confidence_method "snapshot: measured|default"
+    }
 ```
 
-Every table also carries `id` (UUID, PK), `created_at`, `updated_at` via a shared `UUIDMixin`/`TimestampMixin` (`backend/app/db/mixins.py:11-34`). Source: `backend/app/models/*.py`, migrations `backend/alembic/versions/001_initial.py` + `002_add_share_token.py`.
+Every table also carries `id` (UUID, PK), `created_at`, `updated_at` via a shared `UUIDMixin`/`TimestampMixin` (`backend/app/db/mixins.py:11-34`). Source: `backend/app/models/*.py`, migrations `backend/alembic/versions/001_initial.py`, `002_add_share_token.py`, `003_recommendation_feedback.py`.
 
-There are **no many-to-many relationships anywhere** in this schema — every relationship is a plain one-to-many (or one-to-one for `users↔subscriptions`), each via a single foreign-key column with `ON DELETE CASCADE`. No junction tables exist.
+There are **no many-to-many relationships anywhere** in this schema — every relationship is a plain one-to-many (or one-to-one for `users↔subscriptions`), each via a single foreign-key column. No junction tables exist. Every foreign key is `ON DELETE CASCADE` except one, deliberately: `recommendation_feedback.insight_id` is `ON DELETE SET NULL`, because a re-run deletes and regenerates an analysis's insights and the verdict must outlive the card it was given on. Its snapshot columns (`confidence`, `confidence_source`, …) are intentional denormalization for the same reason — see `10_Confidence_Calibration.md §6`.
+
+Migration 003 also adds the schema's first **view**, `recommendation_calibration`: per confidence source, the count, mean confidence shown, helpful rate, and Brier score of owner feedback.
 
 ---
 
@@ -127,6 +144,7 @@ There are **no many-to-many relationships anywhere** in this schema — every re
 | `chat_sessions` | One conversation thread attached to an analysis | many per analysis |
 | `chat_messages` | One turn in a chat session | many per session |
 | `subscriptions` | One billing record per user | exactly 0 or 1 per user |
+| `recommendation_feedback` | One owner's helpful / not-helpful verdict on one recommendation, with a snapshot of the confidence it was shown with | many per analysis; at most one per (insight, user) |
 
 **A note on `uploaded_files`**: this table is not "the raw file" in a 1:1 sense — cleaning, semantic wrangling, and multi-file combination each produce a *new* Parquet/CSV file and a *new* `uploaded_files` row (`docs/analytics/01_Data_Architecture.md §3`, Stage B). A single upload interaction from the user's perspective can produce 2-3 `uploaded_files` rows before an `Analysis` ever exists. This is worth knowing when reasoning about storage growth.
 
@@ -148,13 +166,17 @@ There are **no many-to-many relationships anywhere** in this schema — every re
 | *(implicit)* | `subscriptions.user_id` | Yes (unique constraint) |
 | *(implicit)* | `subscriptions.stripe_customer_id` | Yes |
 | *(implicit)* | `subscriptions.stripe_subscription_id` | Yes |
+| `ix_recommendation_feedback_user_id` | `recommendation_feedback.user_id` | No |
+| `ix_recommendation_feedback_analysis_id` | `recommendation_feedback.analysis_id` | No |
+| `ix_recommendation_feedback_confidence_source` | `recommendation_feedback.confidence_source` | No |
+| `uq_recommendation_feedback_insight_user` | `recommendation_feedback.(insight_id, user_id)` | **Yes** — the upsert target |
 
 ### Modelling review notes
 
 - **`analyses.file_id` has a foreign key but no index.** Every join from an analysis back to its source file (`analyses.py`'s file-reuse checks, the `/rerun` path) does an unindexed lookup on this column. Conventionally, FK columns used in joins are indexed — this one isn't, in either the model or the migration. Flagged, not changed, to keep this pass behavior-neutral; it's a one-line `op.create_index` if picked up.
 - **`users.supabase_id` and `users.email` carry a redundant second index.** Each is declared `unique=True, index=True` on the same column, which produces *two* indexes: an implicit unique-constraint index plus an explicit non-unique `ix_...` index covering the same column. Harmless, but duplicate.
 - **`subscriptions.user_id` is missing its explicit index.** The model declares `index=True` (implying an `ix_subscriptions_user_id` should exist), but the migration only creates the `unique=True` constraint, with no matching `op.create_index` call — unlike every other indexed column in the same migration file. Functionally fine (a unique constraint is backed by an index in PostgreSQL), but the schema the migrations actually produce isn't byte-for-byte what the ORM models describe — a real, minor model/migration drift.
-- **No DB-level `ENUM` or `CHECK` constraints anywhere.** `AnalysisStatus`, `SubscriptionPlan`, and `chat_messages.role` are all Python-only enums; the columns are plain `VARCHAR`. A hand-crafted `UPDATE analyses SET status = 'compelted'` would insert silently. Worth a `CHECK` constraint or native `ENUM` if this schema were hardening for production multi-tenant use.
+- **Almost no DB-level `ENUM` or `CHECK` constraints.** `AnalysisStatus`, `SubscriptionPlan`, and `chat_messages.role` are all Python-only enums; the columns are plain `VARCHAR`. A hand-crafted `UPDATE analyses SET status = 'compelted'` would insert silently. Worth a `CHECK` constraint or native `ENUM` if this schema were hardening for production multi-tenant use. The one exception is the newest table: `recommendation_feedback.verdict` carries `ck_recommendation_feedback_verdict` (migration 003) — the pattern the older enum columns could follow.
 
 ---
 
@@ -170,11 +192,11 @@ The JSONB columns (`uploaded_files.columns`, `analyses.metadata`, `analyses.char
 
 ## 5. The DuckDB analytical layer — why it isn't a star schema
 
-Every uploaded file becomes exactly **one wide table, named `data`, in an in-memory DuckDB connection** (`backend/app/services/file_processor.py:977-999`, confirmed as the only table name used anywhere: `analytics/statistics.py:24-26`, `analysis_engine.py:84`, `analyses.py:610`). There is no separate fact table, no dimension tables, and no DuckDB-level joins — multi-file "combination" is resolved to a single physical Parquet file **before** DuckDB ever sees it (Polars-level concat/join, `docs/analytics/01_Data_Architecture.md §6`).
+Every uploaded file becomes exactly **one wide table, named `data`, in an in-memory DuckDB connection** (`backend/app/services/file_processor.py:977-999`, confirmed as the only table name used anywhere: `analytics/statistics.py:24-26`, `analysis_engine.py:338`, `analyses.py:610`). There is no separate fact table, no dimension tables, and no DuckDB-level joins — multi-file "combination" is resolved to a single physical Parquet file **before** DuckDB ever sees it (Polars-level concat/join, `docs/analytics/01_Data_Architecture.md §6`).
 
 This is the correct design for what the product does: a single uploaded spreadsheet **is** naturally a flat table — it has no separate grain for "customer" vs. "order" vs. "date" the way an operational data warehouse would. Building a star schema over a single flat file would add modelling overhead with no query benefit, since DuckDB already answers every aggregate query the dashboard needs directly against that one table.
 
-The connection itself is fully ephemeral: created fresh per Celery task run or per live-filter HTTP request, never persisted to disk, closed at the end of the request (`analysis_engine.py:84,216`; `analyses.py:610,648-649`). Nothing about the analytical layer survives between requests except the JSON already written back to Postgres.
+The connection itself is fully ephemeral: created fresh per Celery task run or per live-filter HTTP request, never persisted to disk, closed at the end of the request (`analysis_engine.py:338`, closed in `compute_analysis`'s `finally`; `analyses.py:610,648-649`). Nothing about the analytical layer survives between requests except the JSON already written back to Postgres.
 
 ---
 

@@ -13,6 +13,7 @@ from app.db.base import Base
 from app.models.analysis import Analysis, UploadedFile  # noqa: F401
 from app.models.chat import ChatMessage, ChatSession  # noqa: F401
 from app.models.insight import Insight  # noqa: F401
+from app.models.recommendation_feedback import RecommendationFeedback  # noqa: F401
 from app.models.subscription import Subscription  # noqa: F401
 from app.models.user import User  # noqa: F401
 

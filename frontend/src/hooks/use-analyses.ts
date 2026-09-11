@@ -9,6 +9,7 @@ import type {
   Analysis,
   CreateCombinedAnalysisRequest,
   CreateAnalysisRequest,
+  RecommendationFeedbackVerdict,
 } from "@/types"
 
 export const analysisKeys = {
@@ -109,6 +110,46 @@ export function useRenameAnalysis() {
     onSuccess: (updated) => {
       queryClient.setQueryData(analysisKeys.detail(updated.id), updated)
       queryClient.invalidateQueries({ queryKey: analysisKeys.lists() })
+    },
+  })
+}
+
+/** Set (or clear, with `verdict: null`) the owner's verdict on a recommendation.
+ * Updates the cached analysis optimistically and rolls back on failure. */
+export function useRecommendationFeedback(analysisId: string) {
+  const queryClient = useQueryClient()
+  const detailKey = analysisKeys.detail(analysisId)
+
+  return useMutation<
+    void,
+    Error,
+    { insightId: string; verdict: RecommendationFeedbackVerdict | null },
+    { previous?: Analysis }
+  >({
+    mutationFn: async ({ insightId, verdict }) => {
+      if (verdict) {
+        await analysesApi.setRecommendationFeedback(analysisId, insightId, verdict)
+      } else {
+        await analysesApi.clearRecommendationFeedback(analysisId, insightId)
+      }
+    },
+    onMutate: async ({ insightId, verdict }) => {
+      await queryClient.cancelQueries({ queryKey: detailKey })
+      const previous = queryClient.getQueryData<Analysis>(detailKey)
+      if (previous) {
+        queryClient.setQueryData<Analysis>(detailKey, {
+          ...previous,
+          insights: previous.insights.map((insight) =>
+            insight.id === insightId ? { ...insight, user_feedback: verdict } : insight
+          ),
+        })
+      }
+      return { previous }
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(detailKey, context.previous)
+      }
     },
   })
 }

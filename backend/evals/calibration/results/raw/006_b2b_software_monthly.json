@@ -1,0 +1,332 @@
+{
+ "dataset_id": "006_b2b_software_monthly",
+ "scenario": {
+  "dataset_id": "006_b2b_software_monthly",
+  "domain": "b2b_software",
+  "grain": "monthly",
+  "months": 12,
+  "start": "2024-07-01",
+  "growth": 0.0,
+  "seasonality": 0.25,
+  "noise": 0.3,
+  "plant_anomaly": true,
+  "tracking_outage": false,
+  "optional_sparse": false
+ },
+ "truth": {
+  "benchmark_version": "2026-09-11.1",
+  "dataset_id": "006_b2b_software_monthly",
+  "scenario": {
+   "dataset_id": "006_b2b_software_monthly",
+   "domain": "b2b_software",
+   "grain": "monthly",
+   "months": 12,
+   "start": "2024-07-01",
+   "growth": 0.0,
+   "seasonality": 0.25,
+   "noise": 0.3,
+   "plant_anomaly": true,
+   "tracking_outage": false,
+   "optional_sparse": false
+  },
+  "domain_description": "B2B software sales by customer segment and region.",
+  "date_column": "month_start_date",
+  "dimensions": [
+   "segment",
+   "region"
+  ],
+  "metrics": [
+   "sales",
+   "deals",
+   "leads"
+  ],
+  "observed_period": [
+   "2024-07",
+   "2025-06"
+  ],
+  "row_count": 108,
+  "columns": {
+   "month_start_date": "Start date of each month.",
+   "segment": "Dimension: SMB, Mid-Market, Enterprise.",
+   "region": "Dimension: Americas, EMEA, APAC.",
+   "sales": "Revenue for the row, in the business's currency.",
+   "deals": "Count of deals for the row.",
+   "leads": "Count of leads for the row."
+  },
+  "generating_process": {
+   "true_monthly_growth_percent": 0.0,
+   "seasonality": "Nov-Dec demand about 25% above baseline, Jan-Feb slightly below.",
+   "noise": "High: individual records vary a lot, and records 3+ standard deviations from the mean occur naturally. Such records are ordinary variation, not errors or events."
+  },
+  "planted_anomaly": {
+   "row_index": 66,
+   "date": "2025-02-01",
+   "month": "2025-02",
+   "dimensions": {
+    "segment": "Mid-Market",
+    "region": "Americas"
+   },
+   "columns": [
+    "sales",
+    "deals",
+    "leads"
+   ],
+   "kind": "spike",
+   "factor": 5.461,
+   "revenue_z_score": 5.92,
+   "story": "A genuine one-off event: a bulk order made this record's sales, deals, leads about 5.46x normal. It is worth investigating."
+  },
+  "no_planted_anomaly_note": null,
+  "defect_columns": [],
+  "defect_story": null,
+  "by_design_sparse_columns": [],
+  "missing_percent_by_column": {},
+  "observed_monthly_totals": {
+   "sales": {
+    "2024-07": 5242488.51,
+    "2024-08": 4732538.4,
+    "2024-09": 4771869.0,
+    "2024-10": 4748034.72,
+    "2024-11": 5966170.46,
+    "2024-12": 4103948.61,
+    "2025-01": 3704154.73,
+    "2025-02": 6048328.74,
+    "2025-03": 3833741.52,
+    "2025-04": 4266850.79,
+    "2025-05": 4306651.79,
+    "2025-06": 5595688.55
+   },
+   "deals": {
+    "2024-07": 586.0,
+    "2024-08": 556.0,
+    "2024-09": 564.0,
+    "2024-10": 526.0,
+    "2024-11": 671.0,
+    "2024-12": 495.0,
+    "2025-01": 423.0,
+    "2025-02": 640.0,
+    "2025-03": 442.0,
+    "2025-04": 473.0,
+    "2025-05": 511.0,
+    "2025-06": 601.0
+   },
+   "leads": {
+    "2024-07": 3444.0,
+    "2024-08": 3383.0,
+    "2024-09": 3229.0,
+    "2024-10": 3149.0,
+    "2024-11": 3935.0,
+    "2024-12": 2882.0,
+    "2025-01": 2550.0,
+    "2025-02": 3852.0,
+    "2025-03": 2545.0,
+    "2025-04": 2966.0,
+    "2025-05": 3132.0,
+    "2025-06": 3857.0
+   }
+  },
+  "dimension_totals": {
+   "sales": {
+    "segment": {
+     "SMB": 13050243.61,
+     "Mid-Market": 24075467.35,
+     "Enterprise": 20194754.86
+    },
+    "region": {
+     "Americas": 27339989.63,
+     "EMEA": 10617519.96,
+     "APAC": 19362956.23
+    }
+   },
+   "deals": {
+    "segment": {
+     "SMB": 1799.0,
+     "Mid-Market": 2246.0,
+     "Enterprise": 2443.0
+    },
+    "region": {
+     "Americas": 2575.0,
+     "EMEA": 1839.0,
+     "APAC": 2074.0
+    }
+   }
+  },
+  "correlations": {
+   "sales~deals": 0.84,
+   "sales~leads": 0.827,
+   "deals~leads": 0.981
+  },
+  "holdout": {
+   "month": "2025-07",
+   "totals": {
+    "sales": 4759425.74,
+    "deals": 573.0,
+    "leads": 3547.0
+   },
+   "last_observed_month_totals": {
+    "sales": 5595688.55,
+    "deals": 601.0,
+    "leads": 3857.0
+   },
+   "change_percent_vs_last_observed_month": {
+    "sales": -14.94,
+    "deals": -4.66,
+    "leads": -8.04
+   }
+  }
+ },
+ "ai_recommendation_count": 0,
+ "ai_failed": false,
+ "executive_summary": "",
+ "forecasts": [
+  {
+   "metric": "sales",
+   "latest_value": 5595688.55,
+   "change_percent_next_month": -17.97,
+   "confidence": 0.83
+  },
+  {
+   "metric": "deals",
+   "latest_value": 601.0,
+   "change_percent_next_month": -15.57,
+   "confidence": 0.84
+  },
+  {
+   "metric": "leads",
+   "latest_value": 3857.0,
+   "change_percent_next_month": -17.76,
+   "confidence": 0.84
+  }
+ ],
+ "anomalies": [
+  {
+   "type": "statistical_outlier",
+   "column": "deals",
+   "score": 6.97,
+   "period": null,
+   "description": "One record reached 262.00 for Deals, higher than almost every other record (Month Start Date 2025-02-01, Segment Mid-Market, Region Americas)."
+  },
+  {
+   "type": "statistical_outlier",
+   "column": "leads",
+   "score": 6.62,
+   "period": null,
+   "description": "One record reached 1,540.00 for Leads, higher than almost every other record (Month Start Date 2025-02-01, Segment Mid-Market, Region Americas)."
+  },
+  {
+   "type": "statistical_outlier",
+   "column": "sales",
+   "score": 5.92,
+   "period": null,
+   "description": "One record reached 3,041,186.58 for Sales, higher than almost every other record (Month Start Date 2025-02-01, Segment Mid-Market, Region Americas)."
+  }
+ ],
+ "quality_issues": [
+  {
+   "type": "outliers",
+   "column": "sales",
+   "severity": "medium",
+   "description": "6 values fall far outside the typical range (-326,872 to 1,215,726)",
+   "affected_rows": 6,
+   "bounds": {
+    "lower": -326871.65375000006,
+    "upper": 1215726.21625
+   },
+   "column_label": "Sales"
+  },
+  {
+   "type": "outliers",
+   "column": "deals",
+   "severity": "medium",
+   "description": "3 values fall far outside the typical range (9 to 106)",
+   "affected_rows": 3,
+   "bounds": {
+    "lower": 8.625,
+    "upper": 105.625
+   },
+   "column_label": "Deals"
+  },
+  {
+   "type": "outliers",
+   "column": "leads",
+   "severity": "medium",
+   "description": "3 values fall far outside the typical range (34 to 633)",
+   "affected_rows": 3,
+   "bounds": {
+    "lower": 34.125,
+    "upper": 633.125
+   },
+   "column_label": "Leads"
+  }
+ ],
+ "recommendations": [
+  {
+   "source": "rule:forecast",
+   "confidence": 0.83,
+   "confidence_method": "default",
+   "title": "Prepare for Sales decline",
+   "problem": "Sales is projected to move materially next month.",
+   "evidence": "Latest value 5,595,688.55; forecast 4,590,167.04.",
+   "expected_impact": "Better capacity, budget, and commercial planning before the change lands.",
+   "description": "The next-month forecast suggests sales may decline by 18.0%.",
+   "label": {
+    "correct": true,
+    "reason": "Predicted -18.0% next month; the held-back month moved -14.9%.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  },
+  {
+   "source": "rule:forecast",
+   "confidence": 0.84,
+   "confidence_method": "default",
+   "title": "Prepare for Deals decline",
+   "problem": "Deals is projected to move materially next month.",
+   "evidence": "Latest value 601.00; forecast 507.44.",
+   "expected_impact": "Better capacity, budget, and commercial planning before the change lands.",
+   "description": "The next-month forecast suggests deals may decline by 15.6%.",
+   "label": {
+    "correct": false,
+    "reason": "Predicted -15.6% next month; the held-back month moved -4.7%.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  },
+  {
+   "source": "rule:forecast",
+   "confidence": 0.84,
+   "confidence_method": "default",
+   "title": "Prepare for Leads decline",
+   "problem": "Leads is projected to move materially next month.",
+   "evidence": "Latest value 3,857.00; forecast 3,171.89.",
+   "expected_impact": "Better capacity, budget, and commercial planning before the change lands.",
+   "description": "The next-month forecast suggests leads may decline by 17.8%.",
+   "label": {
+    "correct": true,
+    "reason": "Predicted -17.8% next month; the held-back month moved -8.0%.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  },
+  {
+   "source": "rule:anomaly",
+   "confidence": 0.78,
+   "confidence_method": "default",
+   "title": "Review the context behind standout Deals",
+   "problem": "One record reached 262.00 for Deals, higher than almost every other record (Month Start Date 2025-02-01, Segment Mid-Market, Region Americas).",
+   "evidence": "One record reached 262.00 for Deals, higher than almost every other record (Month Start Date 2025-02-01, Segment Mid-Market, Region Americas).",
+   "expected_impact": "Helps explain whether this was exceptional performance, a tactical pattern, or a one-off match moment.",
+   "description": "Compare the identified record (Month Start Date 2025-02-01, Segment Mid-Market, Region Americas) with similar records to understand the drivers.",
+   "label": {
+    "correct": true,
+    "reason": "Flagged the planted record.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  }
+ ]
+}

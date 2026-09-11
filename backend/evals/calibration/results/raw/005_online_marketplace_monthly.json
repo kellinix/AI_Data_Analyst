@@ -1,0 +1,331 @@
+{
+ "dataset_id": "005_online_marketplace_monthly",
+ "scenario": {
+  "dataset_id": "005_online_marketplace_monthly",
+  "domain": "online_marketplace",
+  "grain": "monthly",
+  "months": 14,
+  "start": "2024-03-01",
+  "growth": -0.04,
+  "seasonality": 0.0,
+  "noise": 0.3,
+  "plant_anomaly": false,
+  "tracking_outage": true,
+  "optional_sparse": false
+ },
+ "truth": {
+  "benchmark_version": "2026-09-11.1",
+  "dataset_id": "005_online_marketplace_monthly",
+  "scenario": {
+   "dataset_id": "005_online_marketplace_monthly",
+   "domain": "online_marketplace",
+   "grain": "monthly",
+   "months": 14,
+   "start": "2024-03-01",
+   "growth": -0.04,
+   "seasonality": 0.0,
+   "noise": 0.3,
+   "plant_anomaly": false,
+   "tracking_outage": true,
+   "optional_sparse": false
+  },
+  "domain_description": "Marketplace activity by sales channel and country.",
+  "date_column": "month_start_date",
+  "dimensions": [
+   "channel",
+   "country"
+  ],
+  "metrics": [
+   "gmv",
+   "orders",
+   "visitors"
+  ],
+  "observed_period": [
+   "2024-03",
+   "2025-04"
+  ],
+  "row_count": 126,
+  "columns": {
+   "month_start_date": "Start date of each month.",
+   "channel": "Dimension: Web, iOS, Android.",
+   "country": "Dimension: United Kingdom, Germany, France.",
+   "gmv": "Revenue for the row, in the business's currency.",
+   "orders": "Count of orders for the row.",
+   "visitors": "Count of visitors for the row."
+  },
+  "generating_process": {
+   "true_monthly_growth_percent": -4.0,
+   "seasonality": "No seasonality.",
+   "noise": "High: individual records vary a lot, and records 3+ standard deviations from the mean occur naturally. Such records are ordinary variation, not errors or events."
+  },
+  "planted_anomaly": null,
+  "no_planted_anomaly_note": "No genuine anomaly exists. Any standout record is ordinary random variation.",
+  "defect_columns": [
+   "visitors"
+  ],
+  "defect_story": "The tracking feed for visitors broke in 2024-06; every visitors value from then on is blank. This is a real data defect and visitors totals after 2024-06 are not trustworthy.",
+  "by_design_sparse_columns": [],
+  "missing_percent_by_column": {
+   "visitors": 78.6
+  },
+  "observed_monthly_totals": {
+   "gmv": {
+    "2024-03": 555725.47,
+    "2024-04": 437357.09,
+    "2024-05": 496821.32,
+    "2024-06": 508855.36,
+    "2024-07": 560797.49,
+    "2024-08": 495470.81,
+    "2024-09": 443586.46,
+    "2024-10": 385951.78,
+    "2024-11": 370672.77,
+    "2024-12": 313446.85,
+    "2025-01": 346509.74,
+    "2025-02": 330822.05,
+    "2025-03": 303099.59,
+    "2025-04": 309136.29
+   },
+   "orders": {
+    "2024-03": 14220.0,
+    "2024-04": 10974.0,
+    "2024-05": 13042.0,
+    "2024-06": 13160.0,
+    "2024-07": 13667.0,
+    "2024-08": 13887.0,
+    "2024-09": 11096.0,
+    "2024-10": 10085.0,
+    "2024-11": 9110.0,
+    "2024-12": 7896.0,
+    "2025-01": 8623.0,
+    "2025-02": 8302.0,
+    "2025-03": 7699.0,
+    "2025-04": 7700.0
+   },
+   "visitors": {
+    "2024-03": 274195.0,
+    "2024-04": 196252.0,
+    "2024-05": 258758.0,
+    "2024-06": null,
+    "2024-07": null,
+    "2024-08": null,
+    "2024-09": null,
+    "2024-10": null,
+    "2024-11": null,
+    "2024-12": null,
+    "2025-01": null,
+    "2025-02": null,
+    "2025-03": null,
+    "2025-04": null
+   }
+  },
+  "dimension_totals": {
+   "gmv": {
+    "channel": {
+     "Web": 2123101.2,
+     "iOS": 2246044.84,
+     "Android": 1489107.03
+    },
+    "country": {
+     "United Kingdom": 2540827.04,
+     "Germany": 2022730.89,
+     "France": 1294695.14
+    }
+   },
+   "orders": {
+    "channel": {
+     "Web": 46058.0,
+     "iOS": 69367.0,
+     "Android": 34036.0
+    },
+    "country": {
+     "United Kingdom": 59162.0,
+     "Germany": 53644.0,
+     "France": 36655.0
+    }
+   }
+  },
+  "correlations": {
+   "gmv~orders": 0.847,
+   "gmv~visitors": 0.875,
+   "orders~visitors": 0.977
+  },
+  "holdout": {
+   "month": "2025-05",
+   "totals": {
+    "gmv": 332089.33,
+    "orders": 7950.0,
+    "visitors": null
+   },
+   "last_observed_month_totals": {
+    "gmv": 309136.29,
+    "orders": 7700.0,
+    "visitors": null
+   },
+   "change_percent_vs_last_observed_month": {
+    "gmv": 7.42,
+    "orders": 3.25,
+    "visitors": null
+   }
+  }
+ },
+ "ai_recommendation_count": 0,
+ "ai_failed": false,
+ "executive_summary": "",
+ "forecasts": [
+  {
+   "metric": "gmv",
+   "latest_value": 309136.29,
+   "change_percent_next_month": -12.53,
+   "confidence": 0.86
+  },
+  {
+   "metric": "orders",
+   "latest_value": 7700.0,
+   "change_percent_next_month": -12.6,
+   "confidence": 0.85
+  },
+  {
+   "metric": "visitors",
+   "latest_value": 258758.0,
+   "change_percent_next_month": -12.03,
+   "confidence": 0.55
+  }
+ ],
+ "anomalies": [
+  {
+   "type": "statistical_outlier",
+   "column": "orders",
+   "score": 4.52,
+   "period": null,
+   "description": "One record reached 4,568.00 for Orders, higher than almost every other record (Month Start Date 2024-08-01, Channel iOS, Country Germany)."
+  },
+  {
+   "type": "statistical_outlier",
+   "column": "gmv",
+   "score": 3.82,
+   "period": null,
+   "description": "One record reached 142,419.95 for Gmv, higher than almost every other record (Month Start Date 2024-06-01, Channel iOS, Country United Kingdom)."
+  }
+ ],
+ "quality_issues": [
+  {
+   "type": "outliers",
+   "column": "gmv",
+   "severity": "medium",
+   "description": "4 values fall far outside the typical range (-20,079 to 106,547)",
+   "affected_rows": 4,
+   "bounds": {
+    "lower": -20079.23874999999,
+    "upper": 106547.15125
+   },
+   "column_label": "Gmv"
+  },
+  {
+   "type": "outliers",
+   "column": "orders",
+   "severity": "medium",
+   "description": "9 values fall far outside the typical range (-375 to 2,478)",
+   "affected_rows": 9,
+   "bounds": {
+    "lower": -374.875,
+    "upper": 2478.125
+   },
+   "column_label": "Orders"
+  },
+  {
+   "type": "missing_values",
+   "column": "visitors",
+   "severity": "critical",
+   "description": "78.6% of values are missing",
+   "affected_rows": 99,
+   "column_label": "Visitors"
+  }
+ ],
+ "recommendations": [
+  {
+   "source": "rule:data_quality",
+   "confidence": 0.9,
+   "confidence_method": "default",
+   "title": "Clean high-impact data quality issues",
+   "problem": "Visitors: 78.6% of values are missing",
+   "evidence": "Quality score is 78/100 with 3 detected issues.",
+   "expected_impact": "Higher confidence in KPIs, forecasts, and executive reporting.",
+   "description": "Resolve the most severe data quality gaps before making operational decisions from this dataset.",
+   "label": {
+    "correct": true,
+    "reason": "Flagged visitors, which has a planted tracking outage.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  },
+  {
+   "source": "rule:forecast",
+   "confidence": 0.86,
+   "confidence_method": "default",
+   "title": "Prepare for Gmv decline",
+   "problem": "Gmv is projected to move materially next month.",
+   "evidence": "Latest value 309,136.29; forecast 270,396.87.",
+   "expected_impact": "Better capacity, budget, and commercial planning before the change lands.",
+   "description": "The next-month forecast suggests gmv may decline by 12.5%.",
+   "label": {
+    "correct": false,
+    "reason": "Predicted -12.5% next month; the held-back month moved +7.4%.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  },
+  {
+   "source": "rule:forecast",
+   "confidence": 0.85,
+   "confidence_method": "default",
+   "title": "Prepare for Orders decline",
+   "problem": "Orders is projected to move materially next month.",
+   "evidence": "Latest value 7,700.00; forecast 6,729.62.",
+   "expected_impact": "Better capacity, budget, and commercial planning before the change lands.",
+   "description": "The next-month forecast suggests orders may decline by 12.6%.",
+   "label": {
+    "correct": false,
+    "reason": "Predicted -12.6% next month; the held-back month moved +3.2%.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  },
+  {
+   "source": "rule:forecast",
+   "confidence": 0.55,
+   "confidence_method": "default",
+   "title": "Prepare for Visitors decline",
+   "problem": "Visitors is projected to move materially next month.",
+   "evidence": "Latest value 258,758.00; forecast 227,631.33.",
+   "expected_impact": "Better capacity, budget, and commercial planning before the change lands.",
+   "description": "The next-month forecast suggests visitors may decline by 12.0%.",
+   "label": {
+    "correct": null,
+    "reason": "visitors has a broken tracking feed; no trustworthy actual.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  },
+  {
+   "source": "rule:anomaly",
+   "confidence": 0.78,
+   "confidence_method": "default",
+   "title": "Review the context behind standout Orders",
+   "problem": "One record reached 4,568.00 for Orders, higher than almost every other record (Month Start Date 2024-08-01, Channel iOS, Country Germany).",
+   "evidence": "One record reached 4,568.00 for Orders, higher than almost every other record (Month Start Date 2024-08-01, Channel iOS, Country Germany).",
+   "expected_impact": "Helps explain whether this was exceptional performance, a tactical pattern, or a one-off match moment.",
+   "description": "Compare the identified record (Month Start Date 2024-08-01, Channel iOS, Country Germany) with similar records to understand the drivers.",
+   "label": {
+    "correct": false,
+    "reason": "No anomaly was planted; the flagged record is ordinary variation.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  }
+ ]
+}
