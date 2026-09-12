@@ -1,3 +1,15 @@
+/**
+ * NOT LOADED. Tailwind v4 (this project is on 4.3.x, via @tailwindcss/postcss)
+ * ignores a v3-style config unless a stylesheet opts in with `@config`, and
+ * nothing here does. Every mapping below was silently inert: `bg-popover`,
+ * `bg-accent`, `border-border` and the rest emitted no CSS, so dropdown menus
+ * and dialogs rendered with no background and the page showed through them.
+ *
+ * Colours now live in `src/app/globals.css` under `@theme inline`, which is
+ * the v4 idiom — change them there. This file is kept only as a record of the
+ * original intent; adding `@config` to load it would also repoint `font-sans`
+ * at an undefined `--font-geist-sans` and drop the app off Inter.
+ */
 import type { Config } from "tailwindcss";
 
 const config: Config = {

@@ -35,10 +35,14 @@ function SlicerDropdown({ column }: { column: FilterableColumn }) {
           )}
         </Button>
       </DropdownMenuTrigger>
+      {/* A value can be a whole sentence — "Exempt under Section 43 of the
+          Freedom of Information Act 2000 (Commercial Interests)" — so without a
+          height cap the menu grew past the viewport and ran down over the
+          charts. Cap it and scroll; the base sets overflow-hidden. */}
       <DropdownMenuContent
         align="start"
         sideOffset={8}
-        className="z-[70] w-56 border-zinc-200 shadow-lg dark:border-zinc-700"
+        className="z-[70] max-h-[60vh] w-72 overflow-y-auto border-zinc-200 shadow-lg dark:border-zinc-700"
       >
         {topValues.map((v) => (
           <DropdownMenuCheckboxItem
@@ -47,8 +51,12 @@ function SlicerDropdown({ column }: { column: FilterableColumn }) {
             onCheckedChange={() => toggleValue(column.column, v.value)}
             onSelect={(e) => e.preventDefault()}
           >
-            {v.value}
-            <span className="ml-auto pl-3 text-xs text-zinc-400">{v.count.toLocaleString()}</span>
+            <span className="min-w-0 flex-1 truncate" title={v.value}>
+              {v.value}
+            </span>
+            <span className="ml-auto shrink-0 pl-3 text-xs text-zinc-400">
+              {v.count.toLocaleString()}
+            </span>
           </DropdownMenuCheckboxItem>
         ))}
         {hasMore && (

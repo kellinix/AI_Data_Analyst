@@ -270,7 +270,10 @@ function seriesWithReadableLabels(
     const label = asObject(series.label)
     const dataLength = seriesDataLength(series)
 
-    if (type === "bar" && dataLength <= 15) {
+    // A stacked series labels the inside of its own segment, and a segment can
+    // be a few pixels tall — four of them overprinted each other on the
+    // cost-by-department-and-RAG chart. The tooltip carries those values.
+    if (type === "bar" && !series.stack && dataLength <= 15) {
       return {
         ...series,
         label: {
@@ -393,6 +396,8 @@ function ChartCard({ chart, index }: ChartCardProps) {
   const xAxis = asObject(chartOption.xAxis)
   const yAxis = asObject(chartOption.yAxis)
   const horizontalBar = isHorizontalBar(chart, chartOption)
+  // Read off the series rather than the chart type: only a stacked bar sets it.
+  const stackedBar = asArray(chartOption.series).some((item) => Boolean(asObject(item).stack))
   const xAxisLabel = asObject(xAxis.axisLabel)
   const yAxisLabel = asObject(yAxis.axisLabel)
   const currency = effectiveChart.currency ?? null
@@ -498,7 +503,9 @@ function ChartCard({ chart, index }: ChartCardProps) {
             margin: horizontalBar ? 10 : 8,
             ...yAxisLabel,
           },
-          splitLine: { lineStyle: { color: "#f4f4f5", type: "dashed" } },
+          // The stacked bars carry their own segment boundaries; gridlines
+          // behind them read as extra divisions that aren't in the data.
+          splitLine: { show: !stackedBar, lineStyle: { color: "#f4f4f5", type: "dashed" } },
         }
       : undefined,
     series: dimmedSeries ?? chartOption.series,
