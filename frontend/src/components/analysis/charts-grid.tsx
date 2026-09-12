@@ -196,10 +196,20 @@ function optionFromVisualSpec(chart: ChartConfig): Record<string, unknown> | nul
     const xField = fieldName(encoding.x)
     const yField = fieldName(encoding.y)
     if (!xField || !yField) return null
+    // The backend flags an axis spanning orders of magnitude; on a linear
+    // scale those points all pile into one corner.
+    const axisScale = (channel: unknown): string =>
+      asObject(asObject(channel).scale).type === "log" ? "log" : "value"
     return {
       tooltip: { trigger: "item" },
-      xAxis: { type: "value", name: specTitle(encoding.x, axisLabel(chart, "xAxis") ?? chart.xAxis) },
-      yAxis: { type: "value", name: specTitle(encoding.y, axisLabel(chart, "yAxis") ?? chart.yAxis) },
+      xAxis: {
+        type: axisScale(encoding.x),
+        name: specTitle(encoding.x, axisLabel(chart, "xAxis") ?? chart.xAxis),
+      },
+      yAxis: {
+        type: axisScale(encoding.y),
+        name: specTitle(encoding.y, axisLabel(chart, "yAxis") ?? chart.yAxis),
+      },
       series: [
         {
           type: "scatter",

@@ -176,6 +176,18 @@ class AnalysisEngine:
             elif is_total:
                 title = kpi_label
                 description = f"{kpi_label}: {kpi['value']:,}"
+            elif kpi.get("weighted_by"):
+                # Say so on the card. A cost-weighted average is not the plain
+                # average a reader assumes from "Avg", and the two can point in
+                # opposite directions on a portfolio of very unequal records.
+                weight_column = str(kpi["weighted_by"])
+                weight_label = display_labels.get(
+                    weight_column, weight_column.replace("_", " ").title()
+                )
+                title = f"Weighted Avg {kpi_label}"
+                description = (
+                    f"Average {kpi_label}, weighted by {weight_label}: {kpi['value']:,.2f}"
+                )
             else:
                 title = f"Avg {kpi_label}"
                 description = f"Average {kpi_label}: {kpi['value']:,.2f}"
@@ -199,6 +211,7 @@ class AnalysisEngine:
                     "mean": kpi.get("mean"),
                     "column": kpi["column"],
                     "is_total": is_total,
+                    "weighted_by": kpi.get("weighted_by"),
                 },
             )
             db.add(insight)
@@ -237,19 +250,25 @@ class AnalysisEngine:
             )
             db.add(insight)
 
-        # Anomaly insights
-        for i, anomaly in enumerate(metadata.get("anomalies", [])[:5]):
-            insight = Insight(
-                analysis_id=analysis.id,
-                type="anomaly",
-                title=anomaly.get("title", "Anomaly detected"),
-                description=anomaly.get("description", ""),
-                importance="high",
-                confidence=min(float(anomaly.get("score", 0)) / 5, 0.95),
-                sort_order=175 + i,
-                data=anomaly,
+        # One consolidated card. Five "Standout <measure>" cards each said a
+        # single record was higher than almost every other record — the same
+        # sentence five times over, for a reader who wants to know what to look
+        # at rather than to page through near-identical alerts.
+        anomalies = metadata.get("anomalies", [])[:5]
+        if anomalies:
+            title, description = consolidated_anomaly_card(anomalies)
+            db.add(
+                Insight(
+                    analysis_id=analysis.id,
+                    type="anomaly",
+                    title=title,
+                    description=description,
+                    importance="high",
+                    confidence=min(float(anomalies[0].get("score", 0)) / 5, 0.95),
+                    sort_order=175,
+                    data={**anomalies[0], "anomalies": anomalies},
+                )
             )
-            db.add(insight)
 
         # AI recommendations
         for i, rec in enumerate(ai_recommendations[:8]):
@@ -545,6 +564,38 @@ def _merge_recommendations(
             seen_evidence.add(evidence)
         merged.append(recommendation)
     return merged[:8]
+
+
+def consolidated_anomaly_card(anomalies: list[dict[str, Any]]) -> tuple[str, str]:
+    """One title and description for every standout record found.
+
+    Five "Standout <measure>" cards each said a single record was higher than
+    almost every other record — the same sentence five times, at a reader who
+    wants to know what to look at.
+    """
+    strongest = anomalies[0]
+    other_labels = [
+        label
+        for label in (
+            str(item.get("title", "")).removeprefix("Standout ").strip()
+            for item in anomalies[1:]
+        )
+        if label
+    ]
+    description = str(strongest.get("description", ""))
+    if other_labels:
+        joined = (
+            other_labels[0]
+            if len(other_labels) == 1
+            else ", ".join(other_labels[:-1]) + " and " + other_labels[-1]
+        )
+        description = f"{description} Single records also stand out in {joined}."
+    title = (
+        str(strongest.get("title", "Anomaly detected"))
+        if len(anomalies) == 1
+        else f"Standout records in {len(anomalies)} measures"
+    )
+    return title, description
 
 
 def _adjust_portfolio_data_quality(

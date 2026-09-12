@@ -20,6 +20,23 @@ def conn():
     conn.close()
 
 
+def test_percentage_average_is_weighted_by_the_money_it_applies_to():
+    """One project at 100% variance on £1m and one at 0% on £99m average to 50%
+    unweighted, which describes neither the portfolio nor anything in it."""
+    weighted_conn = duckdb.connect(":memory:")
+    weighted_conn.register(
+        "data",
+        pd.DataFrame({"variance_pct": [100.0, 0.0], "whole_life_cost": [1.0, 99.0]}),
+    )
+
+    stats = StatisticsEngine(weighted_conn).describe_all()["numeric_stats"]["variance_pct"]
+
+    assert stats["mean"] == pytest.approx(50.0)
+    assert stats["weighted_mean"] == pytest.approx(1.0)
+    assert stats["weight_column"] == "whole_life_cost"
+    weighted_conn.close()
+
+
 def test_describe_all_structure(conn):
     engine = StatisticsEngine(conn)
     result = engine.describe_all()

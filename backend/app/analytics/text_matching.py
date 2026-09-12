@@ -54,6 +54,28 @@ def is_unreported_category(text: str) -> bool:
     return bool(_BLANK_CATEGORY_RE.match(stripped)) or is_withheld_value(stripped)
 
 
+def shorten_label(text: str, limit: int = 48) -> str:
+    """Trim a column label to something that fits on one line.
+
+    Government and survey exports name a column with its whole definition: the
+    GMPP delivery-confidence column runs to 200 characters, which is unreadable
+    in a chart title and worse inside a sentence. Cuts on a word boundary and
+    marks the cut, so a reader can tell the name was shortened.
+    """
+    cleaned = " ".join(str(text).split())
+    if len(cleaned) <= limit:
+        return cleaned
+    kept: list[str] = []
+    length = 0
+    for word in cleaned.split(" "):
+        extra = len(word) + (1 if kept else 0)
+        if length + extra > limit:
+            break
+        kept.append(word)
+        length += extra
+    return f"{' '.join(kept)}…" if kept else f"{cleaned[:limit]}…"
+
+
 def contains_keyword(value: str, keywords: Iterable[str]) -> bool:
     """True when any keyword appears in `value` as whole token(s).
 

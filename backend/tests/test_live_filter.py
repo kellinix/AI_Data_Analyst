@@ -5,6 +5,8 @@ import pytest
 
 from app.analytics.live_filter import (
     FilterValidationError,
+    _histogram_edges,
+    _is_log_worthy,
     build_where_clause,
     populate_chart_option,
     recompute_kpi,
@@ -78,6 +80,40 @@ def test_build_where_clause_no_filters_is_empty():
     sql, params = build_where_clause([])
     assert sql == ""
     assert params == []
+
+
+def test_histogram_bands_widen_for_a_skewed_distribution():
+    """Regression: 84 of 118 government projects landed in a single bar,
+    because a handful run to thousands of millions while most are under 400."""
+    values = [50.0] * 80 + [300.0] * 20 + [1200.0, 2600.0, 5118.0]
+
+    edges = _histogram_edges(values, min(values), max(values))
+
+    assert edges[0] == 0.0
+    # Bands step 1-2-5, so the bulk of the records are separated rather than
+    # pooled into the first bar with everything else.
+    assert 100.0 in edges
+    assert 1000.0 in edges
+    assert len(edges) > 4
+
+
+def test_histogram_bands_stay_even_when_the_data_is_not_skewed():
+    values = [float(value) for value in range(120)]
+
+    edges = _histogram_edges(values, 0.0, 119.0)
+    widths = {round(edges[i + 1] - edges[i], 6) for i in range(len(edges) - 1)}
+
+    assert len(widths) == 1
+
+
+def test_log_scale_only_for_positive_data_spanning_orders_of_magnitude():
+    assert _is_log_worthy([1.0] * 10 + [5000.0])
+    # A log axis is undefined at zero and below.
+    assert not _is_log_worthy([0.0] + [1.0] * 10 + [5000.0])
+    # A narrow spread reads fine on a linear axis.
+    assert not _is_log_worthy([float(value) for value in range(1, 30)])
+    # Too few points to be worth the reader's effort.
+    assert not _is_log_worthy([1.0, 5000.0])
 
 
 def _connect_with_portfolio_table() -> duckdb.DuckDBPyConnection:

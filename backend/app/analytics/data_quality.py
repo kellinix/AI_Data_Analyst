@@ -105,13 +105,32 @@ def _numeric_quality_issues(
                 """,
             )
             if count > 0:
+                # A right-skewed metric is the subject matter, not a defect. A
+                # portfolio holding HS2 always has values far above the IQR
+                # fence, and calling that a medium-severity quality issue told
+                # a non-technical reader their data was faulty and docked the
+                # score for it. Values only *below* a fence the column can
+                # actually reach are still worth flagging as odd.
+                below = _single_int(
+                    conn,
+                    f"SELECT COUNT(*) FROM {_quote_identifier(table)} WHERE {quoted} < {lower}",
+                )
+                high_side_only = below == 0
+                # Never quote a bound the column cannot reach: cost columns
+                # were shown a "typical range" starting at -300.
+                display_lower = max(lower, minimum) if minimum is not None and minimum >= 0 else lower
                 issues.append({
-                    "type": "outliers",
+                    "type": "wide_spread" if high_side_only else "outliers",
                     "column": column,
-                    "severity": "medium",
+                    "severity": "low" if high_side_only else "medium",
                     "description": (
-                        f"{count:,} value{'s' if count != 1 else ''} fall far outside "
-                        f"the typical range ({lower:,.0f} to {upper:,.0f})"
+                        f"{count:,} value{'s' if count != 1 else ''} sit well above the rest "
+                        f"(most fall between {display_lower:,.0f} and {upper:,.0f})"
+                        if high_side_only
+                        else (
+                            f"{count:,} value{'s' if count != 1 else ''} fall far outside "
+                            f"the typical range ({display_lower:,.0f} to {upper:,.0f})"
+                        )
                     ),
                     "affected_rows": count,
                     "bounds": {"lower": lower, "upper": upper},

@@ -296,6 +296,20 @@ def _populate_donut(
     return True
 
 
+def _is_log_worthy(values: list[float]) -> bool:
+    """Whether an axis spans orders of magnitude and needs a log scale.
+
+    116 of 118 projects sat on the origin next to two running to thousands,
+    so the chart showed a blob and two dots. A log axis needs strictly
+    positive values, and needs enough points to be worth the reader's effort.
+    """
+    if len(values) < 8 or any(value <= 0 for value in values):
+        return False
+    ordered = sorted(values)
+    median = ordered[len(ordered) // 2]
+    return median > 0 and max(ordered) / median > 50
+
+
 def _populate_scatter(
     conn: duckdb.DuckDBPyConnection,
     opt: dict[str, Any],
@@ -316,10 +330,50 @@ def _populate_scatter(
         """,
         filter_params,
     ).fetchall()
-    opt["series"][0]["data"] = [
+    points = [
         [float(r[0]), float(r[1])] for r in rows if r[0] is not None and r[1] is not None
     ]
+    opt["series"][0]["data"] = points
+    opt["_scale"] = {
+        axis: _is_log_worthy([point[index] for point in points])
+        for index, axis in enumerate(("x", "y"))
+    }
     return True
+
+
+def _histogram_edges(values: list[float], min_value: float, max_value: float) -> list[float]:
+    """Band edges for a histogram, widening with the data when it is skewed.
+
+    Equal-width bands hid the distribution: 84 of 118 government projects
+    landed in a single bar because a handful run to thousands of millions
+    while most are under 400. When the largest value dwarfs the middle of the
+    distribution, step the bands 1-2-5 so the bulk of the records spread out.
+    """
+    ordered = sorted(values)
+    median = ordered[len(ordered) // 2]
+    if not (median > 0 and max_value / median > 20):
+        bucket_count = min(12, max(1, len(set(values))))
+        width = (max_value - min_value) / bucket_count
+        return [min_value + i * width for i in range(bucket_count + 1)]
+
+    edges = [0.0 if min_value >= 0 else min_value]
+    step = 1.0
+    while step <= max_value:
+        for multiplier in (1, 2, 5):
+            edge = step * multiplier
+            if min_value < edge < max_value:
+                edges.append(edge)
+        step *= 10
+    edges.append(max_value)
+    return sorted(set(edges))
+
+
+def _format_band_value(value: float) -> str:
+    if abs(value) >= 1_000_000:
+        return f"{value / 1_000_000:,.0f}M"
+    if abs(value) >= 1_000:
+        return f"{value / 1_000:,.0f}K"
+    return f"{value:,.0f}"
 
 
 def _populate_histogram(
@@ -346,19 +400,26 @@ def _populate_histogram(
     if not values:
         return True
     min_value, max_value = min(values), max(values)
-    bucket_count = min(12, max(1, len(set(values))))
     if min_value == max_value:
-        opt["xAxis"]["data"] = [f"{min_value:.0f}"]
+        opt["xAxis"]["data"] = [_format_band_value(min_value)]
         opt["series"][0]["data"] = [len(values)]
         return True
-    bucket_size = (max_value - min_value) / bucket_count
-    counts = [0 for _ in range(bucket_count)]
+
+    edges = _histogram_edges(values, min_value, max_value)
+    counts = [0 for _ in range(len(edges) - 1)]
     for value in values:
-        index = min(int((value - min_value) / bucket_size), bucket_count - 1)
-        counts[index] += 1
+        for index in range(len(counts)):
+            # The final band owns its upper edge, so the maximum is counted.
+            if value < edges[index + 1] or index == len(counts) - 1:
+                counts[index] += 1
+                break
+    # The top band ends at the largest value, which formats to the same rounded
+    # label as its start ("5K-5K" for 5,000 to 5,118). Read it as open-ended.
     opt["xAxis"]["data"] = [
-        f"{min_value + (i * bucket_size):.0f}-{min_value + ((i + 1) * bucket_size):.0f}"
-        for i in range(bucket_count)
+        f"{_format_band_value(edges[i])}+"
+        if _format_band_value(edges[i]) == _format_band_value(edges[i + 1])
+        else f"{_format_band_value(edges[i])}-{_format_band_value(edges[i + 1])}"
+        for i in range(len(counts))
     ]
     opt["series"][0]["data"] = counts
     return True

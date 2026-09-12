@@ -28,6 +28,39 @@ def test_classify_column_matches_whole_words_only(column, expected):
     assert _classify_column(column) == expected
 
 
+def test_a_percentage_kpi_uses_the_cost_weighted_average_when_one_exists():
+    """An unweighted mean of 118 project variances gives a £5bn scheme exactly
+    the same say as a £75m one, so the headline can point the opposite way to
+    the portfolio it summarises."""
+    schema = [
+        {
+            "name": "financial_year_variance_pct",
+            "is_numeric": True,
+            "is_date": False,
+            "analysis_role": "metric",
+        }
+    ]
+    numeric_stats = {
+        "financial_year_variance_pct": {
+            "mean": -4.4144,
+            "count": 118,
+            "total": -520.9,
+            "weighted_mean": 12.5,
+            "weight_column": "total_baseline_whole_life_costs",
+        }
+    }
+
+    kpi = next(
+        k for k in detect_kpis(schema, numeric_stats)
+        if k["column"] == "financial_year_variance_pct"
+    )
+
+    assert kpi["value"] == 12.5
+    assert kpi["weighted_by"] == "total_baseline_whole_life_costs"
+    # The plain mean is still carried, so nothing downstream loses it.
+    assert kpi["mean"] == -4.4144
+
+
 @pytest.mark.parametrize(
     ("column", "expected"),
     [

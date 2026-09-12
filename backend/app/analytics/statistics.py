@@ -12,11 +12,17 @@ from typing import Any
 import duckdb
 
 from app.analytics.data_quality import analyze_data_quality
+from app.analytics.kpi_detector import CURRENCY_KEYWORDS
 from app.analytics.semantic_detector import enrich_schema_with_semantics
 from app.analytics.sql_utils import quote_identifier as _quote_identifier
+from app.analytics.text_matching import contains_keyword
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def _is_percentage_column(name: str) -> bool:
+    return "%" in name or contains_keyword(name, ["pct", "percent", "percentage"])
 
 
 class StatisticsEngine:
@@ -42,6 +48,7 @@ class StatisticsEngine:
             if c["is_numeric"] and c.get("analysis_role") in {"dimension", "flag"}
         ]
         categorical_stats.update(self._categorical_stats(coded_cols))
+        self._add_weighted_means(numeric_stats)
 
         result: dict[str, Any] = {
             "row_count": self._row_count(),
@@ -54,6 +61,49 @@ class StatisticsEngine:
             "correlations": self._correlations(numeric_cols) if len(numeric_cols) >= 2 else {},
         }
         return result
+
+    def _add_weighted_means(self, numeric_stats: dict[str, Any]) -> None:
+        """Weight a percentage column's average by the money it applies to.
+
+        An unweighted mean of 118 project variances gives a £5bn scheme the
+        same say as a £75m one, so the headline figure can point the opposite
+        way to the portfolio it claims to summarise.
+        """
+        weight_column = self._dominant_currency_column(numeric_stats)
+        if weight_column is None:
+            return
+        for column, stats in numeric_stats.items():
+            if column == weight_column or not _is_percentage_column(column):
+                continue
+            weighted = self._weighted_mean(column, weight_column)
+            if weighted is not None:
+                stats["weighted_mean"] = weighted
+                stats["weight_column"] = weight_column
+
+    def _dominant_currency_column(self, numeric_stats: dict[str, Any]) -> str | None:
+        """The money column the percentages are a percentage *of*."""
+        candidates = [
+            (abs(float(stats.get("total") or 0)), name)
+            for name, stats in numeric_stats.items()
+            if contains_keyword(name, CURRENCY_KEYWORDS) and stats.get("total")
+        ]
+        return max(candidates)[1] if candidates else None
+
+    def _weighted_mean(self, column: str, weight_column: str) -> float | None:
+        col = _quote_identifier(column)
+        weight = _quote_identifier(weight_column)
+        try:
+            row = self.conn.execute(
+                f"""
+                SELECT SUM({col} * {weight}) / NULLIF(SUM({weight}), 0)
+                FROM {_quote_identifier(self.table)}
+                WHERE {col} IS NOT NULL AND {weight} IS NOT NULL AND {weight} > 0
+                """
+            ).fetchone()
+        except Exception as exc:
+            logger.debug("Weighted mean failed", col=column, exc=str(exc))
+            return None
+        return float(row[0]) if row and row[0] is not None else None
 
     def _row_count(self) -> int:
         r = self.conn.execute(f"SELECT COUNT(*) FROM {_quote_identifier(self.table)}").fetchone()

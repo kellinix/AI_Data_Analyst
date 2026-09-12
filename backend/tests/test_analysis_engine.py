@@ -3,7 +3,32 @@ from __future__ import annotations
 import pytest
 
 from app.services import analysis_engine
-from app.services.analysis_engine import AnalysisEngine
+from app.services.analysis_engine import AnalysisEngine, consolidated_anomaly_card
+
+
+def test_a_single_anomaly_keeps_its_own_title():
+    title, description = consolidated_anomaly_card(
+        [{"title": "Standout Cost", "description": "One record reached 5,118.30 for Cost."}]
+    )
+
+    assert title == "Standout Cost"
+    assert description == "One record reached 5,118.30 for Cost."
+
+
+def test_several_anomalies_become_one_card():
+    """Regression: five "Standout <measure>" cards each said a single record
+    was higher than almost every other record — the same sentence five times."""
+    anomalies = [
+        {"title": "Standout Cost", "description": "One record reached 5,118.30 for Cost."},
+        {"title": "Standout Variance", "description": "One record reached 733.00 for Variance."},
+        {"title": "Standout Benefits", "description": "One record reached 40,967.00 for Benefits."},
+    ]
+
+    title, description = consolidated_anomaly_card(anomalies)
+
+    assert title == "Standout records in 3 measures"
+    assert description.startswith("One record reached 5,118.30 for Cost.")
+    assert description.endswith("Single records also stand out in Variance and Benefits.")
 
 
 def test_only_money_charts_are_tagged_with_the_currency():

@@ -19,6 +19,7 @@ from typing import Any
 import polars as pl
 from openai import AsyncOpenAI
 
+from app.analytics.text_matching import shorten_label
 from app.core.config import settings
 from app.core.logging import get_logger
 
@@ -595,25 +596,13 @@ _STACKED_TITLE_PART = 24
 
 
 def _short_label(text: str, limit: int = 48) -> str:
-    """Trim a column label to something that fits on one line of a chart title.
+    """Chart-title view of the shared shortener.
 
-    Survey-style exports name a column with its whole question: the GMPP
-    delivery-confidence column is 200 characters, which produced a stacked-chart
-    title several times wider than the chart. Cuts on a word boundary and marks
-    the cut, so the reader can tell the name was shortened.
+    The same trimming is needed in insight sentences, so the implementation
+    lives in `analytics/text_matching.py` rather than in two copies that can
+    drift apart.
     """
-    cleaned = " ".join(str(text).split())
-    if len(cleaned) <= limit:
-        return cleaned
-    kept: list[str] = []
-    length = 0
-    for word in cleaned.split(" "):
-        extra = len(word) + (1 if kept else 0)
-        if length + extra > limit:
-            break
-        kept.append(word)
-        length += extra
-    return f"{' '.join(kept)}…" if kept else f"{cleaned[:limit]}…"
+    return shorten_label(text, limit)
 
 
 def _friendly_chart_title(chart: dict[str, Any], labels: dict[str, str]) -> str:

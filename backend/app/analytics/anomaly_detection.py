@@ -9,6 +9,7 @@ from typing import Any
 import duckdb
 
 from app.analytics.sql_utils import quote_identifier as _quote_identifier
+from app.analytics.text_matching import shorten_label
 from app.analytics.time_series import is_dense_monthly_series
 
 
@@ -41,6 +42,24 @@ def detect_anomalies(
     return sorted(anomalies, key=lambda item: item["score"], reverse=True)[:max_anomalies]
 
 
+def _is_identifier_column(item: dict[str, Any]) -> bool:
+    """An identifier explains nothing about why a record stands out.
+
+    The GMPP id column is typed as a dimension, so insight text read
+    "(GMPP ID Number DFT_0027_1617-Q1, Project Name Midland Main Line ...)" —
+    a reference number quoted at someone who wants to know what happened.
+    """
+    if item.get("analysis_role") == "identifier":
+        return True
+    normalized = str(item.get("name", "")).lower().replace(" ", "_")
+    return (
+        normalized == "id"
+        or normalized.endswith("_id")
+        or normalized.startswith("id_")
+        or "id_number" in normalized
+    )
+
+
 def _distribution_anomalies(
     conn: duckdb.DuckDBPyConnection,
     table: str,
@@ -63,6 +82,7 @@ def _distribution_anomalies(
         item["name"] for item in schema
         if item["name"] != column
         and (item.get("is_date") or item.get("analysis_role") in {"dimension", "temporal_dimension"})
+        and not _is_identifier_column(item)
     ][:4]
     context_select = "".join(f", {_quote_identifier(name)}" for name in context_columns)
     # Percentile must be computed over every non-null row BEFORE filtering to
@@ -91,8 +111,13 @@ def _distribution_anomalies(
             if row[index + 2] is not None
         }
         percentile = float(row[-1])
+        # Shortened: a government export names a column with its whole
+        # definition, so this sentence carried 200 characters of "Ipa Delivery
+        # Confidence Assessment A Delivery Confidence Assessment Of The
+        # Project At A Fixed Point In Time..." before reaching the value.
         context_text = ", ".join(
-            f"{display_labels.get(name, _humanize(name))} {_format_context_value(value)}"
+            f"{shorten_label(display_labels.get(name, _humanize(name)), 40)} "
+            f"{_format_context_value(value)}"
             for name, value in context.items()
         )
         label = display_labels.get(column, _humanize(column))

@@ -39,6 +39,64 @@ def test_low_outlier_percentile_ranks_against_all_rows():
     assert "lower than almost every other record" in outlier["description"]
 
 
+CONTEXT_SCHEMA = [
+    {"name": "gmpp_id_number", "is_numeric": False, "is_date": False, "analysis_role": "dimension"},
+    {"name": "department", "is_numeric": False, "is_date": False, "analysis_role": "dimension"},
+    {"name": "thalach", "is_numeric": True, "is_date": False, "analysis_role": "metric"},
+]
+
+
+def test_identifier_columns_are_left_out_of_the_context():
+    """Regression: an id column is typed as a dimension, so the insight read
+    "(GMPP ID Number DFT_0027_1617-Q1, Project Name Midland Main Line ...)" —
+    a reference number quoted at a reader who wants to know what happened."""
+    values = [140.0, 145.0, 150.0, 155.0, 160.0] * 40 + [71.0]
+    conn = duckdb.connect()
+    conn.execute("CREATE TABLE data (gmpp_id_number VARCHAR, department VARCHAR, thalach DOUBLE)")
+    conn.executemany(
+        "INSERT INTO data VALUES (?, ?, ?)",
+        [(f"ID_{index}", "MOD", value) for index, value in enumerate(values)],
+    )
+
+    anomalies = detect_anomalies(conn, CONTEXT_SCHEMA, _stats(values))
+
+    assert anomalies
+    context = anomalies[0]["context"]
+    assert "gmpp_id_number" not in context
+    # The dimension that actually explains the record is still there.
+    assert context.get("department") == "MOD"
+
+
+LONG_COLUMN = (
+    "ipa_delivery_confidence_assessment_a_delivery_confidence_assessment_of_the_"
+    "project_at_a_fixed_point_in_time_using_a_three_point_scale_red_amber_green"
+)
+
+
+def test_a_paragraph_long_context_label_is_shortened():
+    """Regression: a government export names a column with its whole
+    definition, so the insight sentence carried 200 characters of column name
+    before reaching the value the reader actually wanted."""
+    values = [140.0, 145.0, 150.0, 155.0, 160.0] * 40 + [71.0]
+    conn = duckdb.connect()
+    conn.execute(f'CREATE TABLE data ("{LONG_COLUMN}" VARCHAR, thalach DOUBLE)')
+    conn.executemany(
+        "INSERT INTO data VALUES (?, ?)", [("Amber", value) for value in values]
+    )
+    schema = [
+        {"name": LONG_COLUMN, "is_numeric": False, "is_date": False, "analysis_role": "dimension"},
+        {"name": "thalach", "is_numeric": True, "is_date": False, "analysis_role": "metric"},
+    ]
+
+    anomalies = detect_anomalies(conn, schema, _stats(values))
+
+    description = anomalies[0]["description"]
+    assert "…" in description
+    assert "Of The Project At A Fixed Point" not in description
+    # The value itself is still there — only the column's name was trimmed.
+    assert "Amber" in description
+
+
 def _dated_table(rows: list[tuple[date, float]]) -> duckdb.DuckDBPyConnection:
     conn = duckdb.connect()
     conn.execute("CREATE TABLE data (period_date DATE, revenue DOUBLE)")

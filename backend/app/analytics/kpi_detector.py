@@ -77,14 +77,25 @@ def detect_kpis(
         if kpi_type and col not in matched_cols:
             matched_cols.add(col)
             use_mean = _uses_average(col_lower, kpi_type)
+            # A percentage averaged over records lets a tiny record outvote a
+            # huge one; the statistics layer weights it by the money it
+            # applies to when it can work out which column that is.
+            weighted = stats.get("weighted_mean") if use_mean else None
+            if weighted is not None:
+                value = weighted
+            elif use_mean and mean is not None:
+                value = mean
+            else:
+                value = total if total is not None else mean
             kpis.append({
                 "column": col,
                 "kpi_type": kpi_type,
-                "value": mean if use_mean and mean is not None else total if total is not None else mean,
+                "value": value,
                 "is_total": not use_mean and total is not None,
                 "is_currency": _is_currency(col_lower),
                 "mean": mean,
                 "count": count,
+                "weighted_by": stats.get("weight_column") if weighted is not None else None,
             })
 
     if not [kpi for kpi in kpis if kpi["kpi_type"] != "outcome_rate"]:
@@ -240,7 +251,11 @@ def _fallback_kpis(
         # No keyword matched, so we don't know the column is additive —
         # a raw SUM of e.g. blood pressures or 0/1 codes is meaningless.
         # The average is the only safe headline value for an unknown metric.
-        value = stats.get("mean")
+        # Weighted by the money it applies to where the statistics layer could
+        # establish it: an unweighted mean of percentages misreports a
+        # portfolio whose records differ in size by orders of magnitude.
+        weighted = stats.get("weighted_mean")
+        value = weighted if weighted is not None else stats.get("mean")
         if value is None:
             continue
         ranked.append({
@@ -251,6 +266,7 @@ def _fallback_kpis(
             "is_currency": _is_currency(col.lower().replace(" ", "_")),
             "mean": stats.get("mean"),
             "count": stats.get("count", 0),
+            "weighted_by": stats.get("weight_column") if weighted is not None else None,
             "score": _fallback_score(col_lower, stats),
             "fallback_reason": "Average of a numeric column with no recognized business meaning",
         })

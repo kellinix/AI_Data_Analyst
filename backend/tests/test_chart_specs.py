@@ -91,6 +91,29 @@ def test_stacked_bar_spec_carries_a_colour_encoding() -> None:
     ]
 
 
+def test_scatter_spec_carries_a_log_scale_when_the_populator_asks_for_one() -> None:
+    """Regression: 116 of 118 projects sat on the origin beside two running to
+    thousands, so the scatter showed a blob and two dots."""
+    chart = {
+        "type": "scatter",
+        "title": "Baseline vs forecast",
+        "xAxis": "baseline",
+        "yAxis": "forecast",
+        "series": ["baseline"],
+        "echarts_option": {
+            "xAxis": {"type": "value"},
+            "yAxis": {"type": "value"},
+            "series": [{"type": "scatter", "data": [[1, 2], [3000, 4000]]}],
+            "_scale": {"x": True, "y": False},
+        },
+    }
+
+    spec = build_visual_spec(chart)
+
+    assert spec["encoding"]["x"]["scale"] == {"type": "log"}
+    assert "scale" not in spec["encoding"]["y"]
+
+
 def test_spec_axis_titles_fall_back_to_the_column_name() -> None:
     chart = {
         "type": "scatter",

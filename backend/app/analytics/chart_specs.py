@@ -179,9 +179,22 @@ def _scatter_spec(chart: dict[str, Any]) -> dict[str, Any]:
         if isinstance(point, list) and len(point) >= 2
     ]
     spec = _base_spec(chart, {"type": "point", "tooltip": True}, rows)
+    x_encoding: dict[str, Any] = {
+        "field": "x", "type": "quantitative", "title": _axis_title(chart, "x")
+    }
+    y_encoding: dict[str, Any] = {
+        "field": "y", "type": "quantitative", "title": _axis_title(chart, "y")
+    }
+    # The populator decides this: an axis spanning orders of magnitude draws
+    # every point in one corner on a linear scale.
+    scale = _object(opt.get("_scale"))
+    if scale.get("x"):
+        x_encoding["scale"] = {"type": "log"}
+    if scale.get("y"):
+        y_encoding["scale"] = {"type": "log"}
     spec["encoding"] = {
-        "x": {"field": "x", "type": "quantitative", "title": _axis_title(chart, "x")},
-        "y": {"field": "y", "type": "quantitative", "title": _axis_title(chart, "y")},
+        "x": x_encoding,
+        "y": y_encoding,
         "tooltip": [
             {"field": "x", "type": "quantitative"},
             {"field": "y", "type": "quantitative"},
