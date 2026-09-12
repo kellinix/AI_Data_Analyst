@@ -19,13 +19,40 @@ from app.analytics.kpi_detector import _classify_column, _is_currency, detect_kp
         ("whole_life_costs", "cost"),
         ("units_sold", "orders"),
         ("new_customers", "customers"),
-        ("avg_order_value", "revenue"),
+        ("avg_order_value", "average"),
         ("customer_satisfaction_rating", "average"),
         ("annual_recurring_revenue", "arr"),
     ],
 )
 def test_classify_column_matches_whole_words_only(column, expected):
     assert _classify_column(column) == expected
+
+
+@pytest.mark.parametrize(
+    ("column", "expected"),
+    [
+        ("total_profit", "sum"),
+        ("total_orders", "sum"),
+        ("mrr", "sum"),
+        ("arr", "sum"),
+        ("gmv", "sum"),
+        ("revenue", "sum"),
+        ("units_sold", "sum"),
+        ("avg_order_value", "average"),
+        ("conversion_rate", "average"),
+        ("customer_satisfaction_rating", "average"),
+        ("trestbps", "average"),
+    ],
+)
+def test_kpi_tiles_and_charts_agree_on_aggregation(column, expected):
+    """Regression: the two used different keyword lists, so `total_profit`
+    (and mrr, arr, gmv) was summed on its KPI tile and averaged on its own
+    chart — the same metric showing two different numbers."""
+    from app.analytics.chart_selector import _aggregation
+    from app.analytics.kpi_detector import uses_average_aggregation
+
+    assert _aggregation(column) == expected
+    assert uses_average_aggregation(column) is (expected == "average")
 
 
 def test_narrative_columns_are_not_currency():

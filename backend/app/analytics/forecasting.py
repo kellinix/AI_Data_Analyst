@@ -64,6 +64,8 @@ def _forecast_metric(
     ).fetchall()
     if len(rows) < 3:
         return None
+    if _monthly_density([row[0] for row in rows]) < _MIN_MONTHLY_DENSITY:
+        return None
 
     y = np.array([float(row[1]) for row in rows], dtype=float)
     x = np.arange(len(y), dtype=float)
@@ -97,6 +99,26 @@ def _forecast_metric(
         "predictions": predictions,
         "confidence": _confidence(len(rows), residual_std, float(np.mean(y))),
     }
+
+
+# A trend line only means something if the months form a series. Below this
+# share of the months between the first and last observation, the column is a
+# scatter of dates rather than a periodic measure.
+_MIN_MONTHLY_DENSITY = 0.6
+
+
+def _monthly_density(periods: list[Any]) -> float:
+    """Share of the months between the first and last observation that have data.
+
+    Guards against forecasting from date columns that aren't reporting periods:
+    a project portfolio's start dates spanning 1997-2024 gave 41 observations
+    across 27 years, and the product projected "next month" from them.
+    """
+    if not periods:
+        return 0.0
+    first, last = periods[0], periods[-1]
+    span_months = (last.year - first.year) * 12 + (last.month - first.month) + 1
+    return len(periods) / span_months if span_months > 0 else 0.0
 
 
 def _confidence(observations: int, residual_std: float, mean_value: float) -> float:

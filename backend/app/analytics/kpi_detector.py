@@ -30,6 +30,9 @@ DURATION_KEYWORDS = ["duration", "hours", "minutes", "distance", "time_to_hire",
 AVERAGE_METRIC_KEYWORDS = [
     "accuracy", "rating", "score", "percentage", "percent", "pct", "rate",
     "ratio", "speed", "impact", "satisfaction", "nps",
+    # Already-averaged measures: summing them compounds an average, which is
+    # how a demo dashboard showed "Avg Order Value $46,919.50".
+    "avg", "average", "mean", "median", "aov",
 ]
 NON_KPI_NUMERIC_KEYWORDS = [
     "date", "time", "timestamp", "age", "latitude", "longitude", "coord",
@@ -148,6 +151,21 @@ def _uses_average(col: str, kpi_type: str) -> bool:
     return kpi_type in {
         "margin", "conversion", "growth", "retention", "churn", "return", "average"
     } or contains_keyword(col, _AVERAGE_NAME_KEYWORDS)
+
+
+def uses_average_aggregation(column: str, kpi_type: str | None = None) -> bool:
+    """Whether a column should be averaged rather than summed.
+
+    The single source of truth for KPI tiles and for charts. They used separate
+    keyword lists, so `total_profit` (or `mrr`, `arr`, `gmv`) was summed on its
+    tile and averaged on its own chart — the same metric, two different numbers.
+    A column with no recognised business meaning is averaged, matching what the
+    KPI fallback already does with it.
+    """
+    resolved = kpi_type or _classify_column(column)
+    if resolved is None:
+        return True
+    return _uses_average(column, resolved)
 
 
 def _is_metric_role(col_info: dict[str, Any]) -> bool:

@@ -151,4 +151,11 @@ Six IPA *Government Major Projects Portfolio* spreadsheets (MOD, DFT, HO, DFE, D
 | Chart time axis | the RAG rating | `project_start_date` |
 | Currency | assumed USD | `GBP`, from the header `Financial Year Baseline (£m)` |
 
-**Still open on this dataset** (not regressions, and outside the approved fixes): forecasting treats project start dates spanning 1997–2024 as 41 monthly observations and projects "next month" from them, which is meaningless for a project portfolio; and a text column can still carry `analysis_role=metric` from its name alone (harmless, since KPI detection requires numbers). Existing analyses keep their old numbers until re-analysed.
+**Fixed in a follow-up the same day:**
+
+| Problem | Fix |
+|---|---|
+| Forecasting treated project start dates spanning 1997–2024 as 41 monthly observations and projected "next month" from them | A monthly series must now cover at least 60% of the months between its first and last observation (`forecasting._monthly_density`). The demo dataset's 18 consecutive months still forecast; a scatter of dates across years no longer does. Tests: `test_forecasting.py` |
+| A KPI tile and its own chart could disagree on SUM vs AVERAGE (roadmap item 4) | `chart_selector._aggregation()` delegates to the new `kpi_detector.uses_average_aggregation()`. Already-averaged names (`avg`, `mean`, `median`, `aov`) average on both sides — the demo dashboard's "Avg Order Value $46,919.50" was a sum of averages |
+
+**Still open on this dataset** (not regressions): a text column can carry `analysis_role=metric` from its name alone — harmless, since KPI detection requires numbers — and monthly *anomaly* detection has no density guard of its own yet. Existing analyses keep their old numbers until re-analysed.
