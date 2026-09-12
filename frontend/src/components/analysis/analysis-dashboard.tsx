@@ -111,6 +111,8 @@ export function AnalysisDashboard({ id }: AnalysisDashboardProps) {
   const insights = Array.isArray(analysis.insights) ? analysis.insights : []
   const charts = Array.isArray(analysis.charts) ? analysis.charts : []
   const hasGeneratedContent = Boolean(analysis.summary) || insights.length > 0 || charts.length > 0
+  const aiGeneration = analysis.metadata?.ai_generation as { status?: string } | null | undefined
+  const aiFellBack = !isProcessing && aiGeneration?.status === "fallback"
 
   async function handleRetry() {
     try {
@@ -169,6 +171,17 @@ export function AnalysisDashboard({ id }: AnalysisDashboardProps) {
                 </section>
               )}
 
+              {aiFellBack && (
+                <section className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+                  <AlertTriangle className="mt-0.5 h-4 w-4 flex-shrink-0" />
+                  <p>
+                    The AI service was unavailable for this analysis, so the summary and
+                    recommendations below were generated automatically from the statistics.
+                    Re-analyse to try the AI narrative again.
+                  </p>
+                </section>
+              )}
+
               {/* Executive summary */}
               {analysis.summary && (
                 <SectionErrorBoundary title="Executive summary">
@@ -213,7 +226,7 @@ export function AnalysisDashboard({ id }: AnalysisDashboardProps) {
               {/* Recommendations */}
               {insights.some((i) => i.type === "recommendation") && (
                 <SectionErrorBoundary title="Recommendations">
-                  <RecommendationsPanel insights={insights} />
+                  <RecommendationsPanel insights={insights} analysisId={id} />
                 </SectionErrorBoundary>
               )}
 

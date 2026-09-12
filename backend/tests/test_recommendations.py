@@ -24,6 +24,31 @@ def test_quality_issue_creates_specific_recommendation():
     assert "35.0%" in recs[0]["problem"]
 
 
+def test_quality_recommendation_names_the_affected_column():
+    """Regression: "78.2% of values are missing" alone didn't say which field,
+    for users reading the card or for the calibration benchmark's judge."""
+    recs = generate_recommendations(
+        kpis=[],
+        data_quality={
+            "score": 60,
+            "issues": [
+                {
+                    "type": "missing_values",
+                    "column": "new_customers",
+                    "severity": "critical",
+                    "description": "78.2% of values are missing",
+                }
+            ],
+        },
+        anomalies=[],
+        forecasts=[],
+    )
+
+    assert recs[0]["problem"] == "New Customers: 78.2% of values are missing"
+    assert recs[0]["data"]["evidence"] == recs[0]["problem"]
+    assert recs[0]["data"]["column"] == "new_customers"
+
+
 def test_forecast_recommendation_uses_metric_evidence():
     recs = generate_recommendations(
         kpis=[{"column": "revenue", "value": 100000}],

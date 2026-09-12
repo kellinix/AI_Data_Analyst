@@ -7,7 +7,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from app.analytics.kpi_detector import is_outcome_column
+from app.analytics.kpi_detector import is_outcome_column, uses_average_aggregation
 
 # A numeric column null on more than this fraction of rows is sparse/
 # optional data (e.g. a field only some records ever populate), not a
@@ -206,9 +206,8 @@ def _chart_id() -> str:
 
 
 def _aggregation(column: str) -> str:
-    normalized = _normalize(column)
-    additive = ("revenue", "sales", "cost", "amount", "distance", "quantity", "units", "spend")
-    return "sum" if any(term in normalized for term in additive) else "average"
+    """Shared with the KPI tiles, so a chart never averages what its tile sums."""
+    return "average" if uses_average_aggregation(column) else "sum"
 
 
 def _comparable_scales(columns: list[str], numeric_stats: dict[str, Any]) -> bool:

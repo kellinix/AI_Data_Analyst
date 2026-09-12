@@ -21,6 +21,7 @@ from app.core.config import settings
 from app.core.limiter import limiter
 from app.core.logging import get_logger
 from app.models.analysis import Analysis, AnalysisStatus, UploadedFile
+from app.models.recommendation_feedback import RecommendationFeedback
 from app.schemas.analysis import (
     AnalysisDetailResponse,
     AnalysisListResponse,
@@ -550,7 +551,20 @@ async def get_analysis(
         raise HTTPException(status_code=404, detail="Analysis not found")
 
     charts = [ChartConfig(**c) for c in (analysis.charts or [])]
-    insights = [InsightResponse.model_validate(i) for i in analysis.insights]
+    feedback_rows = await db.execute(
+        select(RecommendationFeedback.insight_id, RecommendationFeedback.verdict).where(
+            RecommendationFeedback.analysis_id == analysis.id,
+            RecommendationFeedback.user_id == current_user.id,
+            RecommendationFeedback.insight_id.is_not(None),
+        )
+    )
+    feedback_by_insight = {row.insight_id: row.verdict for row in feedback_rows}
+    insights = [
+        InsightResponse.model_validate(i).model_copy(
+            update={"user_feedback": feedback_by_insight.get(i.id)}
+        )
+        for i in analysis.insights
+    ]
 
     return AnalysisDetailResponse(
         id=analysis.id,

@@ -1,0 +1,343 @@
+{
+ "dataset_id": "012_outdoor_retail_monthly",
+ "scenario": {
+  "dataset_id": "012_outdoor_retail_monthly",
+  "domain": "outdoor_retail",
+  "grain": "monthly",
+  "months": 12,
+  "start": "2023-10-01",
+  "growth": 0.03,
+  "seasonality": 0.25,
+  "noise": 0.3,
+  "plant_anomaly": false,
+  "tracking_outage": false,
+  "optional_sparse": true
+ },
+ "truth": {
+  "benchmark_version": "2026-09-11.1",
+  "dataset_id": "012_outdoor_retail_monthly",
+  "scenario": {
+   "dataset_id": "012_outdoor_retail_monthly",
+   "domain": "outdoor_retail",
+   "grain": "monthly",
+   "months": 12,
+   "start": "2023-10-01",
+   "growth": 0.03,
+   "seasonality": 0.25,
+   "noise": 0.3,
+   "plant_anomaly": false,
+   "tracking_outage": false,
+   "optional_sparse": true
+  },
+  "domain_description": "Sales for an outdoor-apparel retailer by region and product category.",
+  "date_column": "month_start_date",
+  "dimensions": [
+   "region",
+   "category"
+  ],
+  "metrics": [
+   "revenue",
+   "units_sold",
+   "new_customers"
+  ],
+  "observed_period": [
+   "2023-10",
+   "2024-09"
+  ],
+  "row_count": 108,
+  "columns": {
+   "month_start_date": "Start date of each month.",
+   "region": "Dimension: North America, Europe, Asia Pacific.",
+   "category": "Dimension: Apparel, Footwear, Camping.",
+   "revenue": "Revenue for the row, in the business's currency.",
+   "units_sold": "Count of units sold for the row.",
+   "new_customers": "Count of new customers for the row.",
+   "promo_discount": "promo_discount is only recorded for rows where a promotion ran; a blank means no promotion that period, not missing data."
+  },
+  "generating_process": {
+   "true_monthly_growth_percent": 3.0,
+   "seasonality": "Nov-Dec demand about 25% above baseline, Jan-Feb slightly below.",
+   "noise": "High: individual records vary a lot, and records 3+ standard deviations from the mean occur naturally. Such records are ordinary variation, not errors or events."
+  },
+  "planted_anomaly": null,
+  "no_planted_anomaly_note": "No genuine anomaly exists. Any standout record is ordinary random variation.",
+  "defect_columns": [],
+  "defect_story": null,
+  "by_design_sparse_columns": [
+   "promo_discount"
+  ],
+  "missing_percent_by_column": {
+   "promo_discount": 84.3
+  },
+  "observed_monthly_totals": {
+   "revenue": {
+    "2023-10": 325802.0,
+    "2023-11": 398235.79,
+    "2023-12": 419953.34,
+    "2024-01": 302104.6,
+    "2024-02": 318450.89,
+    "2024-03": 375467.14,
+    "2024-04": 313501.1,
+    "2024-05": 353804.04,
+    "2024-06": 341120.0,
+    "2024-07": 349634.47,
+    "2024-08": 404564.15,
+    "2024-09": 332496.75
+   },
+   "units_sold": {
+    "2023-10": 3726.0,
+    "2023-11": 4619.0,
+    "2023-12": 5003.0,
+    "2024-01": 3568.0,
+    "2024-02": 3776.0,
+    "2024-03": 4635.0,
+    "2024-04": 3926.0,
+    "2024-05": 4401.0,
+    "2024-06": 4342.0,
+    "2024-07": 4323.0,
+    "2024-08": 4948.0,
+    "2024-09": 3844.0
+   },
+   "new_customers": {
+    "2023-10": 1091.0,
+    "2023-11": 1433.0,
+    "2023-12": 1536.0,
+    "2024-01": 1092.0,
+    "2024-02": 1114.0,
+    "2024-03": 1335.0,
+    "2024-04": 1186.0,
+    "2024-05": 1354.0,
+    "2024-06": 1254.0,
+    "2024-07": 1269.0,
+    "2024-08": 1535.0,
+    "2024-09": 1166.0
+   }
+  },
+  "dimension_totals": {
+   "revenue": {
+    "region": {
+     "North America": 829333.68,
+     "Europe": 1282944.2,
+     "Asia Pacific": 2122856.39
+    },
+    "category": {
+     "Apparel": 1104122.57,
+     "Footwear": 1549148.87,
+     "Camping": 1581862.83
+    }
+   },
+   "units_sold": {
+    "region": {
+     "North America": 15978.0,
+     "Europe": 14177.0,
+     "Asia Pacific": 20956.0
+    },
+    "category": {
+     "Apparel": 17147.0,
+     "Footwear": 16569.0,
+     "Camping": 17395.0
+    }
+   }
+  },
+  "correlations": {
+   "revenue~units_sold": 0.839,
+   "revenue~new_customers": 0.812,
+   "units_sold~new_customers": 0.974
+  },
+  "holdout": {
+   "month": "2024-10",
+   "totals": {
+    "revenue": 463138.5,
+    "units_sold": 5435.0,
+    "new_customers": 1645.0
+   },
+   "last_observed_month_totals": {
+    "revenue": 332496.75,
+    "units_sold": 3844.0,
+    "new_customers": 1166.0
+   },
+   "change_percent_vs_last_observed_month": {
+    "revenue": 39.29,
+    "units_sold": 41.39,
+    "new_customers": 41.08
+   }
+  }
+ },
+ "ai_recommendation_count": 0,
+ "ai_failed": false,
+ "executive_summary": "",
+ "forecasts": [
+  {
+   "metric": "revenue",
+   "latest_value": 332496.75,
+   "change_percent_next_month": 5.31,
+   "confidence": 0.85
+  },
+  {
+   "metric": "units_sold",
+   "latest_value": 3844.0,
+   "change_percent_next_month": 13.48,
+   "confidence": 0.85
+  },
+  {
+   "metric": "new_customers",
+   "latest_value": 1166.0,
+   "change_percent_next_month": 12.26,
+   "confidence": 0.85
+  }
+ ],
+ "anomalies": [
+  {
+   "type": "statistical_outlier",
+   "column": "units_sold",
+   "score": 3.01,
+   "period": null,
+   "description": "One record reached 1,232.00 for Units Sold, higher than almost every other record (Month Start Date 2023-12-01, Region Asia Pacific, Category Footwear)."
+  }
+ ],
+ "quality_issues": [
+  {
+   "type": "outliers",
+   "column": "revenue",
+   "severity": "medium",
+   "description": "1 value fall far outside the typical range (-33,992 to 107,921)",
+   "affected_rows": 1,
+   "bounds": {
+    "lower": -33991.7475,
+    "upper": 107921.1325
+   },
+   "column_label": "Revenue"
+  },
+  {
+   "type": "outliers",
+   "column": "units_sold",
+   "severity": "medium",
+   "description": "2 values fall far outside the typical range (-177 to 1,078)",
+   "affected_rows": 2,
+   "bounds": {
+    "lower": -177.125,
+    "upper": 1077.875
+   },
+   "column_label": "Units Sold"
+  },
+  {
+   "type": "outliers",
+   "column": "new_customers",
+   "severity": "medium",
+   "description": "3 values fall far outside the typical range (-60 to 335)",
+   "affected_rows": 3,
+   "bounds": {
+    "lower": -60.375,
+    "upper": 334.625
+   },
+   "column_label": "New Customers"
+  },
+  {
+   "type": "missing_values",
+   "column": "promo_discount",
+   "severity": "critical",
+   "description": "84.3% of values are missing",
+   "affected_rows": 91,
+   "column_label": "Promo Discount"
+  },
+  {
+   "type": "outliers",
+   "column": "promo_discount",
+   "severity": "medium",
+   "description": "2 values fall far outside the typical range (-3,481 to 12,210)",
+   "affected_rows": 2,
+   "bounds": {
+    "lower": -3480.695,
+    "upper": 12210.225
+   },
+   "column_label": "Promo Discount"
+  }
+ ],
+ "recommendations": [
+  {
+   "source": "rule:data_quality",
+   "confidence": 0.9,
+   "confidence_method": "default",
+   "title": "Clean high-impact data quality issues",
+   "problem": "Promo Discount: 84.3% of values are missing",
+   "evidence": "Quality score is 76/100 with 5 detected issues.",
+   "expected_impact": "Higher confidence in KPIs, forecasts, and executive reporting.",
+   "description": "Resolve the most severe data quality gaps before making operational decisions from this dataset.",
+   "label": {
+    "correct": false,
+    "reason": "Flagged promo_discount, which is blank by design.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  },
+  {
+   "source": "rule:forecast",
+   "confidence": 0.85,
+   "confidence_method": "default",
+   "title": "Prepare for Revenue increase",
+   "problem": "Revenue is projected to move materially next month.",
+   "evidence": "Latest value 332,496.75; forecast 350,144.58.",
+   "expected_impact": "Better capacity, budget, and commercial planning before the change lands.",
+   "description": "The next-month forecast suggests revenue may increase by 5.3%.",
+   "label": {
+    "correct": true,
+    "reason": "Predicted +5.3% next month; the held-back month moved +39.3%.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  },
+  {
+   "source": "rule:forecast",
+   "confidence": 0.85,
+   "confidence_method": "default",
+   "title": "Prepare for Units Sold increase",
+   "problem": "Units Sold is projected to move materially next month.",
+   "evidence": "Latest value 3,844.00; forecast 4,362.32.",
+   "expected_impact": "Better capacity, budget, and commercial planning before the change lands.",
+   "description": "The next-month forecast suggests units sold may increase by 13.5%.",
+   "label": {
+    "correct": true,
+    "reason": "Predicted +13.5% next month; the held-back month moved +41.4%.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  },
+  {
+   "source": "rule:forecast",
+   "confidence": 0.85,
+   "confidence_method": "default",
+   "title": "Prepare for New Customers increase",
+   "problem": "New Customers is projected to move materially next month.",
+   "evidence": "Latest value 1,166.00; forecast 1,308.94.",
+   "expected_impact": "Better capacity, budget, and commercial planning before the change lands.",
+   "description": "The next-month forecast suggests new customers may increase by 12.3%.",
+   "label": {
+    "correct": true,
+    "reason": "Predicted +12.3% next month; the held-back month moved +41.1%.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  },
+  {
+   "source": "rule:anomaly",
+   "confidence": 0.78,
+   "confidence_method": "default",
+   "title": "Review the context behind standout Units Sold",
+   "problem": "One record reached 1,232.00 for Units Sold, higher than almost every other record (Month Start Date 2023-12-01, Region Asia Pacific, Category Footwear).",
+   "evidence": "One record reached 1,232.00 for Units Sold, higher than almost every other record (Month Start Date 2023-12-01, Region Asia Pacific, Category Footwear).",
+   "expected_impact": "Helps explain whether this was exceptional performance, a tactical pattern, or a one-off match moment.",
+   "description": "Compare the identified record (Month Start Date 2023-12-01, Region Asia Pacific, Category Footwear) with similar records to understand the drivers.",
+   "label": {
+    "correct": false,
+    "reason": "No anomaly was planted; the flagged record is ordinary variation.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  }
+ ]
+}

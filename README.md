@@ -19,7 +19,8 @@ This README covers the product. The **`docs/analytics/`** folder is a from-scrat
 | [`docs/analytics/05_Data_Modelling.md`](docs/analytics/05_Data_Modelling.md) | Full Postgres ER diagram, normalization analysis, why the analytical layer isn't a star schema — plus a proposed dimensional model for a hypothetical cross-analysis feature |
 | [`docs/analytics/06_Dashboard_Specification.md`](docs/analytics/06_Dashboard_Specification.md) | The dashboard that ships, and a specified (not built) executive/ops dashboard for the product itself — every metric checked against the real schema for whether it's actually computable today |
 | [`docs/analytics/07_Business_Insights.md`](docs/analytics/07_Business_Insights.md) | Worked analyst findings — growth, seasonality, an injected anomaly, driver analysis — computed independently against the demo dataset |
-| [`docs/analytics/08_AI_Analytics_and_Guardrails.md`](docs/analytics/08_AI_Analytics_and_Guardrails.md) | Every AI touchpoint, six concrete hallucination-prevention mechanisms, and an honest look at what isn't calibrated yet |
+| [`docs/analytics/08_AI_Analytics_and_Guardrails.md`](docs/analytics/08_AI_Analytics_and_Guardrails.md) | Every AI touchpoint, six concrete hallucination-prevention mechanisms, and where the guardrails stop |
+| [`docs/analytics/10_Confidence_Calibration.md`](docs/analytics/10_Confidence_Calibration.md) | Measuring whether recommendation confidence means anything: a planted-truth benchmark run through the production pipeline, an LLM judge checked against deterministic labels, and a production feedback loop |
 | [`ANALYTICS_PORTFOLIO_REPORT.md`](ANALYTICS_PORTFOLIO_REPORT.md) | Self-assessed maturity scoring and what a top-tier version of this portfolio would still need |
 
 ---
@@ -73,6 +74,7 @@ Full stage-by-stage data flow: [`docs/analytics/01_Data_Architecture.md`](docs/a
 - **Anomaly detection** — statistical z-score outliers (row-level and monthly time-series), verified against a real injected anomaly in this repo's own demo dataset. [Worked example →](docs/analytics/07_Business_Insights.md)
 - **Data quality scoring** — severity-weighted issue detection (missing values, duplicates, outliers, referential "part exceeds whole" checks) baked into every analysis, plus a standalone, dependency-free validation framework you can run against *any* CSV. [Try it →](docs/analytics/02_Data_Quality_Framework.md#running-it)
 - **AI narrative & chat** — grounded exclusively in pre-computed statistics (never raw rows), behind an explicit anti-hallucination system prompt, a JSON schema, server-side sanitization, and a three-tier fallback that degrades to a fully deterministic summary rather than ever forcing a bad answer. [Full breakdown →](docs/analytics/08_AI_Analytics_and_Guardrails.md)
+- **Measured, not claimed, confidence** — a planted-truth benchmark runs synthetic datasets through the production pipeline and scores every recommendation against the truth (held-back months for forecasts). It found every rule-based source overconfident — the data-quality rule claimed 0.90 and was right 49% of the time — and the measured values now replace the hand-set ones. Owners' 👍/👎 on each recommendation feed a production calibration view. AI-tier confidence is still unmeasured, and says so. [Method and results →](docs/analytics/10_Confidence_Calibration.md)
 - **Live cross-filtering** — dashboard slicers re-aggregate via parameterized DuckDB queries with an explicit column-role allowlist, not free-form user-controlled SQL.
 
 ---
@@ -103,7 +105,7 @@ Sample output committed at [`backend/scripts/demo_data/sample_data_quality_repor
 
 ## Validation
 
-**112 tests passing, 0 failing** — 16 files, covering the deterministic analytics pipeline (statistics, KPI detection, chart selection, semantic typing, data quality, live-filter re-aggregation, file cleaning), auth (real JWT signing/verification, not mocked), and, added in this review, the standalone data quality framework (`test_data_quality_checks.py`, 20 tests). Getting a clean run required diagnosing a real Python-3.14/dependency-pin incompatibility — see [`docs/analytics/09_Verification.md`](docs/analytics/09_Verification.md) for the full root cause and reproduction steps, and [`ANALYTICS_PORTFOLIO_REPORT.md`](ANALYTICS_PORTFOLIO_REPORT.md) for how that factors into the maturity scoring.
+**272 backend tests passing, 0 failing** — 23 files, covering the deterministic analytics pipeline (statistics, KPI detection, chart selection, semantic typing, data quality, live-filter re-aggregation, file cleaning), auth (real JWT signing/verification, not mocked), the standalone data quality framework (`test_data_quality_checks.py`), and the AI guardrail layer (`test_ai_service.py`: response parsing, chart allow-listing and executable-value filtering, recommendation normalization, and the Responses API → Chat Completions → deterministic fallback chain, all against a fake OpenAI client). Writing those tests surfaced two real bugs, both now fixed with regression tests: the chart safety filter substring-matched `nan`, silently dropping any chart with a label like "Finance" or "Maintenance", and `"$1.5M"` parsed as `1.5`. Also covered: confidence calibration (`test_calibration.py`), the calibration benchmark harness including one dataset end to end through the real pipeline (`test_calibration_eval.py`), and recommendation feedback against a real Postgres database (`test_recommendation_feedback.py` — CI's service container; skipped when none is reachable). `cd backend && pytest` runs from a clean clone with nothing exported — see [`docs/analytics/09_Verification.md`](docs/analytics/09_Verification.md) for the environment diagnosis behind that, and [`ANALYTICS_PORTFOLIO_REPORT.md`](ANALYTICS_PORTFOLIO_REPORT.md) for how testing factors into the maturity scoring.
 
 ---
 
@@ -111,8 +113,8 @@ Sample output committed at [`backend/scripts/demo_data/sample_data_quality_repor
 
 ### Prerequisites
 - Docker 24+ and Docker Compose
-- Node.js 20+
-- Python 3.12+
+- Node.js 20+ (CI uses 20; on Node 25, `npm run dev` adds the flag Next's dev overlay needs automatically)
+- Python 3.12 (pinned in `backend/.python-version`, matching the Docker image — the pinned dependencies don't build on 3.14)
 
 ### 1. Clone and configure
 ```bash
@@ -121,6 +123,8 @@ cd ai-dashboard-generator
 cp .env.example .env
 ```
 Fill in `.env`: `OPENAI_API_KEY` (from https://platform.openai.com) and `SUPABASE_URL` / `SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY` / `SUPABASE_JWT_SECRET` (from your Supabase project).
+
+Running the frontend outside Docker (`npm run dev` in `frontend/`)? Next.js only reads env files from its own directory, so copy the `NEXT_PUBLIC_*` lines into `frontend/.env.local` (gitignored) — without them every page returns 500.
 
 ### 2. Start everything
 ```bash

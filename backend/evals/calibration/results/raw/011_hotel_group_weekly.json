@@ -1,0 +1,335 @@
+{
+ "dataset_id": "011_hotel_group_weekly",
+ "scenario": {
+  "dataset_id": "011_hotel_group_weekly",
+  "domain": "hotel_group",
+  "grain": "weekly",
+  "months": 13,
+  "start": "2022-04-01",
+  "growth": -0.08,
+  "seasonality": 0.0,
+  "noise": 0.08,
+  "plant_anomaly": true,
+  "tracking_outage": false,
+  "optional_sparse": false
+ },
+ "truth": {
+  "benchmark_version": "2026-09-11.1",
+  "dataset_id": "011_hotel_group_weekly",
+  "scenario": {
+   "dataset_id": "011_hotel_group_weekly",
+   "domain": "hotel_group",
+   "grain": "weekly",
+   "months": 13,
+   "start": "2022-04-01",
+   "growth": -0.08,
+   "seasonality": 0.0,
+   "noise": 0.08,
+   "plant_anomaly": true,
+   "tracking_outage": false,
+   "optional_sparse": false
+  },
+  "domain_description": "Hotel group performance by property and room type.",
+  "date_column": "week_start_date",
+  "dimensions": [
+   "property",
+   "room_type"
+  ],
+  "metrics": [
+   "revenue",
+   "bookings",
+   "customers"
+  ],
+  "observed_period": [
+   "2022-04",
+   "2023-04"
+  ],
+  "row_count": 504,
+  "columns": {
+   "week_start_date": "Start date of each week.",
+   "property": "Dimension: Harbour View, City Centre, Airport.",
+   "room_type": "Dimension: Standard, Deluxe, Suite.",
+   "revenue": "Revenue for the row, in the business's currency.",
+   "bookings": "Count of bookings for the row.",
+   "customers": "Count of customers for the row."
+  },
+  "generating_process": {
+   "true_monthly_growth_percent": -8.0,
+   "seasonality": "No seasonality.",
+   "noise": "Low: records vary modestly around the trend."
+  },
+  "planted_anomaly": {
+   "row_index": 340,
+   "date": "2022-12-19",
+   "month": "2022-12",
+   "dimensions": {
+    "property": "Airport",
+    "room_type": "Deluxe"
+   },
+   "columns": [
+    "revenue",
+    "bookings",
+    "customers"
+   ],
+   "kind": "spike",
+   "factor": 6.848,
+   "revenue_z_score": 5.1,
+   "story": "A genuine one-off event: a bulk order made this record's revenue, bookings, customers about 6.85x normal. It is worth investigating."
+  },
+  "no_planted_anomaly_note": null,
+  "defect_columns": [],
+  "defect_story": null,
+  "by_design_sparse_columns": [],
+  "missing_percent_by_column": {},
+  "observed_monthly_totals": {
+   "revenue": {
+    "2022-04": 524686.31,
+    "2022-05": 593923.37,
+    "2022-06": 441880.94,
+    "2022-07": 406162.32,
+    "2022-08": 457544.02,
+    "2022-09": 352803.87,
+    "2022-10": 399312.73,
+    "2022-11": 293617.4,
+    "2022-12": 300353.72,
+    "2023-01": 308558.14,
+    "2023-02": 233355.51,
+    "2023-03": 206848.35,
+    "2023-04": 194890.42
+   },
+   "bookings": {
+    "2022-04": 2271.0,
+    "2022-05": 2603.0,
+    "2022-06": 1879.0,
+    "2022-07": 1773.0,
+    "2022-08": 2018.0,
+    "2022-09": 1506.0,
+    "2022-10": 1732.0,
+    "2022-11": 1286.0,
+    "2022-12": 1365.0,
+    "2023-01": 1326.0,
+    "2023-02": 1015.0,
+    "2023-03": 885.0,
+    "2023-04": 846.0
+   },
+   "customers": {
+    "2022-04": 3685.0,
+    "2022-05": 4283.0,
+    "2022-06": 3074.0,
+    "2022-07": 2803.0,
+    "2022-08": 3263.0,
+    "2022-09": 2455.0,
+    "2022-10": 2770.0,
+    "2022-11": 2112.0,
+    "2022-12": 2080.0,
+    "2023-01": 2076.0,
+    "2023-02": 1664.0,
+    "2023-03": 1427.0,
+    "2023-04": 1351.0
+   }
+  },
+  "dimension_totals": {
+   "revenue": {
+    "property": {
+     "Harbour View": 1080702.68,
+     "City Centre": 2082467.96,
+     "Airport": 1550766.46
+    },
+    "room_type": {
+     "Standard": 2002532.2,
+     "Deluxe": 1068471.61,
+     "Suite": 1642933.29
+    }
+   },
+   "bookings": {
+    "property": {
+     "Harbour View": 5550.0,
+     "City Centre": 8513.0,
+     "Airport": 6442.0
+    },
+    "room_type": {
+     "Standard": 6018.0,
+     "Deluxe": 7177.0,
+     "Suite": 7310.0
+    }
+   }
+  },
+  "correlations": {
+   "revenue~bookings": 0.542,
+   "revenue~customers": 0.529,
+   "bookings~customers": 0.969
+  },
+  "holdout": {
+   "month": "2023-05",
+   "totals": {
+    "revenue": 220048.39,
+    "bookings": 954.0,
+    "customers": 1524.0
+   },
+   "last_observed_month_totals": {
+    "revenue": 194890.42,
+    "bookings": 846.0,
+    "customers": 1351.0
+   },
+   "change_percent_vs_last_observed_month": {
+    "revenue": 12.91,
+    "bookings": 12.77,
+    "customers": 12.81
+   }
+  }
+ },
+ "ai_recommendation_count": 0,
+ "ai_failed": false,
+ "executive_summary": "",
+ "forecasts": [
+  {
+   "metric": "revenue",
+   "latest_value": 194890.42,
+   "change_percent_next_month": -20.8,
+   "confidence": 0.85
+  },
+  {
+   "metric": "bookings",
+   "latest_value": 846.0,
+   "change_percent_next_month": -20.23,
+   "confidence": 0.85
+  },
+  {
+   "metric": "customers",
+   "latest_value": 1351.0,
+   "change_percent_next_month": -22.36,
+   "confidence": 0.85
+  }
+ ],
+ "anomalies": [
+  {
+   "type": "statistical_outlier",
+   "column": "bookings",
+   "score": 9.52,
+   "period": null,
+   "description": "One record reached 219.00 for Bookings, higher than almost every other record (Week Start Date 2022-12-19, Property Airport, Room Type Deluxe)."
+  },
+  {
+   "type": "statistical_outlier",
+   "column": "customers",
+   "score": 7.66,
+   "period": null,
+   "description": "One record reached 301.00 for Customers, higher than almost every other record (Week Start Date 2022-12-19, Property Airport, Room Type Deluxe)."
+  },
+  {
+   "type": "statistical_outlier",
+   "column": "revenue",
+   "score": 5.1,
+   "period": null,
+   "description": "One record reached 34,855.69 for Revenue, higher than almost every other record (Week Start Date 2022-12-19, Property Airport, Room Type Deluxe)."
+  }
+ ],
+ "quality_issues": [
+  {
+   "type": "outliers",
+   "column": "revenue",
+   "severity": "medium",
+   "description": "17 values fall far outside the typical range (-3,498 to 20,791)",
+   "affected_rows": 17,
+   "bounds": {
+    "lower": -3498.210000000001,
+    "upper": 20790.99
+   },
+   "column_label": "Revenue"
+  },
+  {
+   "type": "outliers",
+   "column": "bookings",
+   "severity": "medium",
+   "description": "12 values fall far outside the typical range (-8 to 84)",
+   "affected_rows": 12,
+   "bounds": {
+    "lower": -7.5,
+    "upper": 84.5
+   },
+   "column_label": "Bookings"
+  },
+  {
+   "type": "outliers",
+   "column": "customers",
+   "severity": "medium",
+   "description": "7 values fall far outside the typical range (-16 to 140)",
+   "affected_rows": 7,
+   "bounds": {
+    "lower": -16.5,
+    "upper": 139.5
+   },
+   "column_label": "Customers"
+  }
+ ],
+ "recommendations": [
+  {
+   "source": "rule:forecast",
+   "confidence": 0.85,
+   "confidence_method": "default",
+   "title": "Prepare for Revenue decline",
+   "problem": "Revenue is projected to move materially next month.",
+   "evidence": "Latest value 194,890.42; forecast 154,355.48.",
+   "expected_impact": "Better capacity, budget, and commercial planning before the change lands.",
+   "description": "The next-month forecast suggests revenue may decline by 20.8%.",
+   "label": {
+    "correct": false,
+    "reason": "Predicted -20.8% next month; the held-back month moved +12.9%.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  },
+  {
+   "source": "rule:forecast",
+   "confidence": 0.85,
+   "confidence_method": "default",
+   "title": "Prepare for Bookings decline",
+   "problem": "Bookings is projected to move materially next month.",
+   "evidence": "Latest value 846.00; forecast 674.88.",
+   "expected_impact": "Better capacity, budget, and commercial planning before the change lands.",
+   "description": "The next-month forecast suggests bookings may decline by 20.2%.",
+   "label": {
+    "correct": false,
+    "reason": "Predicted -20.2% next month; the held-back month moved +12.8%.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  },
+  {
+   "source": "rule:forecast",
+   "confidence": 0.85,
+   "confidence_method": "default",
+   "title": "Prepare for Customers decline",
+   "problem": "Customers is projected to move materially next month.",
+   "evidence": "Latest value 1,351.00; forecast 1,048.92.",
+   "expected_impact": "Better capacity, budget, and commercial planning before the change lands.",
+   "description": "The next-month forecast suggests customers may decline by 22.4%.",
+   "label": {
+    "correct": false,
+    "reason": "Predicted -22.4% next month; the held-back month moved +12.8%.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  },
+  {
+   "source": "rule:anomaly",
+   "confidence": 0.78,
+   "confidence_method": "default",
+   "title": "Review the context behind standout Bookings",
+   "problem": "One record reached 219.00 for Bookings, higher than almost every other record (Week Start Date 2022-12-19, Property Airport, Room Type Deluxe).",
+   "evidence": "One record reached 219.00 for Bookings, higher than almost every other record (Week Start Date 2022-12-19, Property Airport, Room Type Deluxe).",
+   "expected_impact": "Helps explain whether this was exceptional performance, a tactical pattern, or a one-off match moment.",
+   "description": "Compare the identified record (Week Start Date 2022-12-19, Property Airport, Room Type Deluxe) with similar records to understand the drivers.",
+   "label": {
+    "correct": true,
+    "reason": "Flagged the planted record.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  }
+ ]
+}

@@ -1,0 +1,282 @@
+{
+ "dataset_id": "008_outdoor_retail_weekly",
+ "scenario": {
+  "dataset_id": "008_outdoor_retail_weekly",
+  "domain": "outdoor_retail",
+  "grain": "weekly",
+  "months": 12,
+  "start": "2023-08-01",
+  "growth": 0.03,
+  "seasonality": 0.0,
+  "noise": 0.08,
+  "plant_anomaly": false,
+  "tracking_outage": false,
+  "optional_sparse": true
+ },
+ "truth": {
+  "benchmark_version": "2026-09-11.1",
+  "dataset_id": "008_outdoor_retail_weekly",
+  "scenario": {
+   "dataset_id": "008_outdoor_retail_weekly",
+   "domain": "outdoor_retail",
+   "grain": "weekly",
+   "months": 12,
+   "start": "2023-08-01",
+   "growth": 0.03,
+   "seasonality": 0.0,
+   "noise": 0.08,
+   "plant_anomaly": false,
+   "tracking_outage": false,
+   "optional_sparse": true
+  },
+  "domain_description": "Sales for an outdoor-apparel retailer by region and product category.",
+  "date_column": "week_start_date",
+  "dimensions": [
+   "region",
+   "category"
+  ],
+  "metrics": [
+   "revenue",
+   "units_sold",
+   "new_customers"
+  ],
+  "observed_period": [
+   "2023-08",
+   "2024-07"
+  ],
+  "row_count": 468,
+  "columns": {
+   "week_start_date": "Start date of each week.",
+   "region": "Dimension: North America, Europe, Asia Pacific.",
+   "category": "Dimension: Apparel, Footwear, Camping.",
+   "revenue": "Revenue for the row, in the business's currency.",
+   "units_sold": "Count of units sold for the row.",
+   "new_customers": "Count of new customers for the row.",
+   "promo_discount": "promo_discount is only recorded for rows where a promotion ran; a blank means no promotion that period, not missing data."
+  },
+  "generating_process": {
+   "true_monthly_growth_percent": 3.0,
+   "seasonality": "No seasonality.",
+   "noise": "Low: records vary modestly around the trend."
+  },
+  "planted_anomaly": null,
+  "no_planted_anomaly_note": "No genuine anomaly exists. Any standout record is ordinary random variation.",
+  "defect_columns": [],
+  "defect_story": null,
+  "by_design_sparse_columns": [
+   "promo_discount"
+  ],
+  "missing_percent_by_column": {
+   "promo_discount": 81.2
+  },
+  "observed_monthly_totals": {
+   "revenue": {
+    "2023-08": 334873.3,
+    "2023-09": 338233.42,
+    "2023-10": 437307.15,
+    "2023-11": 369017.88,
+    "2023-12": 387065.65,
+    "2024-01": 483249.23,
+    "2024-02": 397908.91,
+    "2024-03": 404976.59,
+    "2024-04": 524931.26,
+    "2024-05": 424132.16,
+    "2024-06": 437009.4,
+    "2024-07": 555242.24
+   },
+   "units_sold": {
+    "2023-08": 3641.0,
+    "2023-09": 3745.0,
+    "2023-10": 4773.0,
+    "2023-11": 3983.0,
+    "2023-12": 4265.0,
+    "2024-01": 5287.0,
+    "2024-02": 4391.0,
+    "2024-03": 4413.0,
+    "2024-04": 5750.0,
+    "2024-05": 4655.0,
+    "2024-06": 4804.0,
+    "2024-07": 6133.0
+   },
+   "new_customers": {
+    "2023-08": 1080.0,
+    "2023-09": 1136.0,
+    "2023-10": 1415.0,
+    "2023-11": 1206.0,
+    "2023-12": 1265.0,
+    "2024-01": 1595.0,
+    "2024-02": 1342.0,
+    "2024-03": 1341.0,
+    "2024-04": 1701.0,
+    "2024-05": 1378.0,
+    "2024-06": 1447.0,
+    "2024-07": 1853.0
+   }
+  },
+  "dimension_totals": {
+   "revenue": {
+    "region": {
+     "North America": 1740370.72,
+     "Europe": 1989843.06,
+     "Asia Pacific": 1363733.41
+    },
+    "category": {
+     "Apparel": 1129188.11,
+     "Footwear": 2006799.88,
+     "Camping": 1957959.2
+    }
+   },
+   "units_sold": {
+    "region": {
+     "North America": 21278.0,
+     "Europe": 19032.0,
+     "Asia Pacific": 15530.0
+    },
+    "category": {
+     "Apparel": 17159.0,
+     "Footwear": 19987.0,
+     "Camping": 18694.0
+    }
+   }
+  },
+  "correlations": {
+   "revenue~units_sold": 0.894,
+   "revenue~new_customers": 0.867,
+   "units_sold~new_customers": 0.964
+  },
+  "holdout": {
+   "month": "2024-08",
+   "totals": {
+    "revenue": 470096.62,
+    "units_sold": 5161.0,
+    "new_customers": 1566.0
+   },
+   "last_observed_month_totals": {
+    "revenue": 555242.24,
+    "units_sold": 6133.0,
+    "new_customers": 1853.0
+   },
+   "change_percent_vs_last_observed_month": {
+    "revenue": -15.33,
+    "units_sold": -15.85,
+    "new_customers": -15.49
+   }
+  }
+ },
+ "ai_recommendation_count": 0,
+ "ai_failed": false,
+ "executive_summary": "",
+ "forecasts": [
+  {
+   "metric": "revenue",
+   "latest_value": 555242.24,
+   "change_percent_next_month": -7.3,
+   "confidence": 0.85
+  },
+  {
+   "metric": "units_sold",
+   "latest_value": 6133.0,
+   "change_percent_next_month": -7.64,
+   "confidence": 0.85
+  },
+  {
+   "metric": "new_customers",
+   "latest_value": 1853.0,
+   "change_percent_next_month": -8.08,
+   "confidence": 0.85
+  }
+ ],
+ "anomalies": [],
+ "quality_issues": [
+  {
+   "type": "missing_values",
+   "column": "promo_discount",
+   "severity": "critical",
+   "description": "81.2% of values are missing",
+   "affected_rows": 380,
+   "column_label": "Promo Discount"
+  },
+  {
+   "type": "outliers",
+   "column": "promo_discount",
+   "severity": "medium",
+   "description": "1 value fall far outside the typical range (-867 to 2,942)",
+   "affected_rows": 1,
+   "bounds": {
+    "lower": -866.7050000000004,
+    "upper": 2942.215
+   },
+   "column_label": "Promo Discount"
+  }
+ ],
+ "recommendations": [
+  {
+   "source": "rule:data_quality",
+   "confidence": 0.9,
+   "confidence_method": "default",
+   "title": "Clean high-impact data quality issues",
+   "problem": "Promo Discount: 81.2% of values are missing",
+   "evidence": "Quality score is 77/100 with 2 detected issues.",
+   "expected_impact": "Higher confidence in KPIs, forecasts, and executive reporting.",
+   "description": "Resolve the most severe data quality gaps before making operational decisions from this dataset.",
+   "label": {
+    "correct": false,
+    "reason": "Flagged promo_discount, which is blank by design.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  },
+  {
+   "source": "rule:forecast",
+   "confidence": 0.85,
+   "confidence_method": "default",
+   "title": "Prepare for Revenue decline",
+   "problem": "Revenue is projected to move materially next month.",
+   "evidence": "Latest value 555,242.24; forecast 514,695.07.",
+   "expected_impact": "Better capacity, budget, and commercial planning before the change lands.",
+   "description": "The next-month forecast suggests revenue may decline by 7.3%.",
+   "label": {
+    "correct": true,
+    "reason": "Predicted -7.3% next month; the held-back month moved -15.3%.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  },
+  {
+   "source": "rule:forecast",
+   "confidence": 0.85,
+   "confidence_method": "default",
+   "title": "Prepare for Units Sold decline",
+   "problem": "Units Sold is projected to move materially next month.",
+   "evidence": "Latest value 6,133.00; forecast 5,664.70.",
+   "expected_impact": "Better capacity, budget, and commercial planning before the change lands.",
+   "description": "The next-month forecast suggests units sold may decline by 7.6%.",
+   "label": {
+    "correct": true,
+    "reason": "Predicted -7.6% next month; the held-back month moved -15.8%.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  },
+  {
+   "source": "rule:forecast",
+   "confidence": 0.85,
+   "confidence_method": "default",
+   "title": "Prepare for New Customers decline",
+   "problem": "New Customers is projected to move materially next month.",
+   "evidence": "Latest value 1,853.00; forecast 1,703.24.",
+   "expected_impact": "Better capacity, budget, and commercial planning before the change lands.",
+   "description": "The next-month forecast suggests new customers may decline by 8.1%.",
+   "label": {
+    "correct": true,
+    "reason": "Predicted -8.1% next month; the held-back month moved -15.5%.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  }
+ ]
+}

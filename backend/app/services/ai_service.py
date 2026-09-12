@@ -12,6 +12,7 @@ import json
 import re
 from typing import Any
 
+from app.analytics.calibration import AI_SOURCE_BY_PRIORITY, confidence_fields
 from app.core.config import settings
 from app.core.logging import get_logger
 
@@ -299,7 +300,7 @@ Before returning the JSON:
                 ),
                 timeout=_AI_ANALYSIS_TIMEOUT_SECONDS,
             )
-            return _coerce_analysis_json(response.output_text)
+            return {**_coerce_analysis_json(response.output_text), "generation": {"status": "ai"}}
         except Exception as exc:
             logger.warning("Responses API generation failed, using chat fallback", exc=str(exc))
 
@@ -318,7 +319,7 @@ Before returning the JSON:
                 timeout=_AI_ANALYSIS_FALLBACK_TIMEOUT_SECONDS,
             )
             content = response.choices[0].message.content or "{}"
-            return _coerce_analysis_json(content)
+            return {**_coerce_analysis_json(content), "generation": {"status": "ai"}}
         except Exception as exc:
             logger.error("AI analysis generation failed", exc=str(exc))
             return {
@@ -326,6 +327,9 @@ Before returning the JSON:
                 "layout_grid": [],
                 "insights": [],
                 "recommendations": statistics.get("deterministic_recommendations", []),
+                # Persisted as analysis metadata so the dashboard can say the
+                # narrative is automatic rather than silently looking plainer.
+                "generation": {"status": "fallback", "error_type": type(exc).__name__},
             }
 
     async def chat(
@@ -411,7 +415,8 @@ When answering:
             for kpi in kpis[:8]:
                 value = kpi.get("value")
                 is_currency = kpi.get("is_currency", False)
-                formatted = f"${value:,.2f}" if is_currency and value is not None else f"{value:,.0f}" if value is not None else "N/A"
+                symbol = kpi.get("currency_symbol") or ""
+                formatted = f"{symbol}{value:,.2f}" if is_currency and value is not None else f"{value:,.0f}" if value is not None else "N/A"
                 lines.append(f"  {_humanize_column_label(kpi['column'])}: {formatted}")
 
         numeric_stats = statistics.get("numeric_stats", {})
@@ -647,7 +652,7 @@ def _normalize_recommendation(rec: dict[str, Any]) -> dict[str, Any]:
         "financial_opportunity": financial_value if show_financial else 0,
         "show_financial_opportunity": show_financial,
         "importance": priority.lower(),
-        "confidence": {"High": 0.85, "Medium": 0.7, "Low": 0.55}[priority],
+        **confidence_fields(AI_SOURCE_BY_PRIORITY[priority]),
         "data": {
             "difficulty": difficulty.lower(),
             "owner": owner,
@@ -669,19 +674,38 @@ def _allowed_title_case(value: Any, allowed: set[str], fallback: str) -> str:
     return fallback
 
 
+_FINANCIAL_AMOUNT = re.compile(
+    r"(-?\d+(?:,\d{3})*(?:\.\d+)?)(?:\s*(thousand|million|billion|bn|mn|mm|k|m|b)\b)?",
+    re.IGNORECASE,
+)
+_FINANCIAL_MULTIPLIERS = {
+    "k": 1e3,
+    "thousand": 1e3,
+    "m": 1e6,
+    "mm": 1e6,
+    "mn": 1e6,
+    "million": 1e6,
+    "b": 1e9,
+    "bn": 1e9,
+    "billion": 1e9,
+}
+
+
 def _parse_financial_opportunity(value: Any) -> float | None:
     if isinstance(value, int | float):
         return float(value)
     text = str(value or "").strip()
     if not text or text.upper() == "NA":
         return None
-    match = re.search(r"-?\d+(?:,\d{3})*(?:\.\d+)?|-?\d+(?:\.\d+)?", text)
+    match = _FINANCIAL_AMOUNT.search(text)
     if not match:
         return None
     try:
-        return float(match.group(0).replace(",", ""))
+        amount = float(match.group(1).replace(",", ""))
     except ValueError:
         return None
+    suffix = (match.group(2) or "").lower()
+    return amount * _FINANCIAL_MULTIPLIERS.get(suffix, 1)
 
 
 def _safe_chart_id(value: Any) -> str:
@@ -690,22 +714,17 @@ def _safe_chart_id(value: Any) -> str:
     return chart_id or "chart"
 
 
+# Matches JS syntax and non-JSON literals as whole tokens, so ordinary labels
+# such as "Finance", "Maintenance", or "Renew date" are not mistaken for them.
+_UNSAFE_CHART_VALUE = re.compile(
+    r"=>|\bfunction\s*\(|\bnew\s+date\s*\(|\bregexp\b|\bundefined\b|\bnan\b|\binfinity\b",
+    re.IGNORECASE,
+)
+
+
 def _contains_unsafe_chart_value(value: Any) -> bool:
     if isinstance(value, str):
-        lowered = value.lower()
-        return any(
-            token in lowered
-            for token in (
-                "function",
-                "() =>",
-                "=>",
-                "new date",
-                "regexp",
-                "undefined",
-                "nan",
-                "infinity",
-            )
-        )
+        return _UNSAFE_CHART_VALUE.search(value) is not None
     if isinstance(value, dict):
         return any(_contains_unsafe_chart_value(child) for child in value.values())
     if isinstance(value, list):
@@ -855,7 +874,9 @@ def _format_metric_value(kpi: dict[str, Any]) -> str:
     if value is None:
         return "not available"
     if kpi.get("is_currency"):
-        return f"${float(value):,.2f}"
+        # No symbol when the file never said which currency it is — better than
+        # printing UK £m figures as US dollars.
+        return f"{kpi.get('currency_symbol') or ''}{float(value):,.2f}"
     numeric = float(value)
     if abs(numeric) >= 1000:
         return f"{numeric:,.0f}" if numeric.is_integer() else f"{numeric:,.2f}"

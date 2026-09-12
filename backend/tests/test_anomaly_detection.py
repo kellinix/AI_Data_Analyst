@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import statistics as pystats
+from datetime import date, timedelta
 
 import duckdb
 
@@ -35,6 +37,30 @@ def test_low_outlier_percentile_ranks_against_all_rows():
     assert outlier["value"] == 71.0
     assert outlier["percentile"] <= 1
     assert "lower than almost every other record" in outlier["description"]
+
+
+def test_context_values_are_json_serializable():
+    """Regression: DuckDB returns DATE cells as datetime.date, which made every
+    cleaned upload with a date column fail to save its anomalies to JSONB (and,
+    with no rollback, stick at "processing" forever)."""
+    conn = duckdb.connect()
+    conn.execute("CREATE TABLE data (week_start_date DATE, region VARCHAR, revenue DOUBLE)")
+    rows = [(date(2025, 1, 6) + timedelta(weeks=i), "Europe", 100.0 + i % 5) for i in range(60)]
+    rows.append((date(2025, 11, 17), "North America", 900.0))
+    conn.executemany("INSERT INTO data VALUES (?, ?, ?)", rows)
+    values = [row[2] for row in rows]
+    schema = [
+        {"name": "week_start_date", "is_numeric": False, "is_date": True, "analysis_role": "temporal_dimension"},
+        {"name": "region", "is_numeric": False, "is_date": False, "analysis_role": "dimension"},
+        {"name": "revenue", "is_numeric": True, "is_date": False, "analysis_role": "metric"},
+    ]
+    stats = {"revenue": {"mean": pystats.mean(values), "std": pystats.stdev(values)}}
+
+    anomalies = detect_anomalies(conn, schema, stats)
+
+    outlier = next(a for a in anomalies if a["type"] == "statistical_outlier")
+    assert outlier["context"] == {"week_start_date": "2025-11-17", "region": "North America"}
+    json.dumps(anomalies)  # raises TypeError if any value can't go into JSONB
 
 
 def test_high_outlier_is_still_described_as_high():

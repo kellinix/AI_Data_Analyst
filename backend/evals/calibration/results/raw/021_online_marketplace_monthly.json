@@ -1,0 +1,334 @@
+{
+ "dataset_id": "021_online_marketplace_monthly",
+ "scenario": {
+  "dataset_id": "021_online_marketplace_monthly",
+  "domain": "online_marketplace",
+  "grain": "monthly",
+  "months": 17,
+  "start": "2023-05-01",
+  "growth": 0.0,
+  "seasonality": 0.25,
+  "noise": 0.08,
+  "plant_anomaly": true,
+  "tracking_outage": false,
+  "optional_sparse": false
+ },
+ "truth": {
+  "benchmark_version": "2026-09-11.1",
+  "dataset_id": "021_online_marketplace_monthly",
+  "scenario": {
+   "dataset_id": "021_online_marketplace_monthly",
+   "domain": "online_marketplace",
+   "grain": "monthly",
+   "months": 17,
+   "start": "2023-05-01",
+   "growth": 0.0,
+   "seasonality": 0.25,
+   "noise": 0.08,
+   "plant_anomaly": true,
+   "tracking_outage": false,
+   "optional_sparse": false
+  },
+  "domain_description": "Marketplace activity by sales channel and country.",
+  "date_column": "month_start_date",
+  "dimensions": [
+   "channel",
+   "country"
+  ],
+  "metrics": [
+   "gmv",
+   "orders",
+   "visitors"
+  ],
+  "observed_period": [
+   "2023-05",
+   "2024-09"
+  ],
+  "row_count": 153,
+  "columns": {
+   "month_start_date": "Start date of each month.",
+   "channel": "Dimension: Web, iOS, Android.",
+   "country": "Dimension: United Kingdom, Germany, France.",
+   "gmv": "Revenue for the row, in the business's currency.",
+   "orders": "Count of orders for the row.",
+   "visitors": "Count of visitors for the row."
+  },
+  "generating_process": {
+   "true_monthly_growth_percent": 0.0,
+   "seasonality": "Nov-Dec demand about 25% above baseline, Jan-Feb slightly below.",
+   "noise": "Low: records vary modestly around the trend."
+  },
+  "planted_anomaly": {
+   "row_index": 46,
+   "date": "2023-10-01",
+   "month": "2023-10",
+   "dimensions": {
+    "channel": "Web",
+    "country": "Germany"
+   },
+   "columns": [
+    "gmv",
+    "orders",
+    "visitors"
+   ],
+   "kind": "spike",
+   "factor": 5.797,
+   "revenue_z_score": 6.88,
+   "story": "A genuine one-off event: a bulk order made this record's gmv, orders, visitors about 5.80x normal. It is worth investigating."
+  },
+  "no_planted_anomaly_note": null,
+  "defect_columns": [],
+  "defect_story": null,
+  "by_design_sparse_columns": [],
+  "missing_percent_by_column": {},
+  "observed_monthly_totals": {
+   "gmv": {
+    "2023-05": 822376.5,
+    "2023-06": 785530.76,
+    "2023-07": 815328.86,
+    "2023-08": 781318.08,
+    "2023-09": 784050.2,
+    "2023-10": 1255963.7,
+    "2023-11": 912264.16,
+    "2023-12": 1040293.87,
+    "2024-01": 796729.57,
+    "2024-02": 739822.8,
+    "2024-03": 805347.83,
+    "2024-04": 809428.4,
+    "2024-05": 794330.6,
+    "2024-06": 794367.57,
+    "2024-07": 806183.28,
+    "2024-08": 802037.38,
+    "2024-09": 807961.25
+   },
+   "orders": {
+    "2023-05": 15190.0,
+    "2023-06": 14590.0,
+    "2023-07": 14955.0,
+    "2023-08": 14618.0,
+    "2023-09": 14830.0,
+    "2023-10": 21688.0,
+    "2023-11": 17335.0,
+    "2023-12": 18779.0,
+    "2024-01": 14536.0,
+    "2024-02": 14343.0,
+    "2024-03": 14882.0,
+    "2024-04": 15300.0,
+    "2024-05": 14455.0,
+    "2024-06": 14474.0,
+    "2024-07": 14884.0,
+    "2024-08": 15187.0,
+    "2024-09": 15277.0
+   },
+   "visitors": {
+    "2023-05": 287314.0,
+    "2023-06": 256002.0,
+    "2023-07": 266971.0,
+    "2023-08": 257537.0,
+    "2023-09": 268833.0,
+    "2023-10": 390520.0,
+    "2023-11": 324180.0,
+    "2023-12": 325324.0,
+    "2024-01": 271271.0,
+    "2024-02": 259141.0,
+    "2024-03": 275942.0,
+    "2024-04": 275121.0,
+    "2024-05": 257949.0,
+    "2024-06": 248095.0,
+    "2024-07": 257275.0,
+    "2024-08": 275083.0,
+    "2024-09": 288084.0
+   }
+  },
+  "dimension_totals": {
+   "gmv": {
+    "channel": {
+     "Web": 3766182.99,
+     "iOS": 7245948.79,
+     "Android": 3341203.03
+    },
+    "country": {
+     "United Kingdom": 5917263.29,
+     "Germany": 5413208.12,
+     "France": 3022863.4
+    }
+   },
+   "orders": {
+    "channel": {
+     "Web": 85856.0,
+     "iOS": 93277.0,
+     "Android": 86190.0
+    },
+    "country": {
+     "United Kingdom": 96491.0,
+     "Germany": 95297.0,
+     "France": 73535.0
+    }
+   }
+  },
+  "correlations": {
+   "gmv~orders": 0.867,
+   "gmv~visitors": 0.847,
+   "orders~visitors": 0.974
+  },
+  "holdout": {
+   "month": "2024-10",
+   "totals": {
+    "gmv": 815483.09,
+    "orders": 14717.0,
+    "visitors": 262711.0
+   },
+   "last_observed_month_totals": {
+    "gmv": 807961.25,
+    "orders": 15277.0,
+    "visitors": 288084.0
+   },
+   "change_percent_vs_last_observed_month": {
+    "gmv": 0.93,
+    "orders": -3.67,
+    "visitors": -8.81
+   }
+  }
+ },
+ "ai_recommendation_count": 0,
+ "ai_failed": false,
+ "executive_summary": "",
+ "forecasts": [
+  {
+   "metric": "gmv",
+   "latest_value": 807961.25,
+   "change_percent_next_month": -0.42,
+   "confidence": 0.84
+  },
+  {
+   "metric": "orders",
+   "latest_value": 15277.0,
+   "change_percent_next_month": -1.63,
+   "confidence": 0.85
+  },
+  {
+   "metric": "visitors",
+   "latest_value": 288084.0,
+   "change_percent_next_month": -6.27,
+   "confidence": 0.85
+  }
+ ],
+ "anomalies": [
+  {
+   "type": "statistical_outlier",
+   "column": "orders",
+   "score": 7.76,
+   "period": null,
+   "description": "One record reached 8,776.00 for Orders, higher than almost every other record (Month Start Date 2023-10-01, Channel Web, Country Germany)."
+  },
+  {
+   "type": "statistical_outlier",
+   "column": "visitors",
+   "score": 6.96,
+   "period": null,
+   "description": "One record reached 143,688.00 for Visitors, higher than almost every other record (Month Start Date 2023-10-01, Channel Web, Country Germany)."
+  },
+  {
+   "type": "statistical_outlier",
+   "column": "gmv",
+   "score": 6.88,
+   "period": null,
+   "description": "One record reached 614,369.33 for Gmv, higher than almost every other record (Month Start Date 2023-10-01, Channel Web, Country Germany)."
+  },
+  {
+   "type": "time_series_spike",
+   "column": "gmv",
+   "score": 3.29,
+   "period": "2023-10-01",
+   "description": "gmv reached 1,255,963.70 in 2023-10-01, unusually far from the monthly pattern."
+  },
+  {
+   "type": "time_series_spike",
+   "column": "orders",
+   "score": 3.14,
+   "period": "2023-10-01",
+   "description": "orders reached 21,688.00 in 2023-10-01, unusually far from the monthly pattern."
+  },
+  {
+   "type": "time_series_spike",
+   "column": "visitors",
+   "score": 3.06,
+   "period": "2023-10-01",
+   "description": "visitors reached 390,520.00 in 2023-10-01, unusually far from the monthly pattern."
+  }
+ ],
+ "quality_issues": [
+  {
+   "type": "outliers",
+   "column": "gmv",
+   "severity": "medium",
+   "description": "18 values fall far outside the typical range (-39,192 to 189,744)",
+   "affected_rows": 18,
+   "bounds": {
+    "lower": -39191.905000000006,
+    "upper": 189743.575
+   },
+   "column_label": "Gmv"
+  },
+  {
+   "type": "outliers",
+   "column": "orders",
+   "severity": "medium",
+   "description": "22 values fall far outside the typical range (310 to 2,750)",
+   "affected_rows": 22,
+   "bounds": {
+    "lower": 310.0,
+    "upper": 2750.0
+   },
+   "column_label": "Orders"
+  },
+  {
+   "type": "outliers",
+   "column": "visitors",
+   "severity": "medium",
+   "description": "11 values fall far outside the typical range (-1,126 to 58,138)",
+   "affected_rows": 11,
+   "bounds": {
+    "lower": -1126.0,
+    "upper": 58138.0
+   },
+   "column_label": "Visitors"
+  }
+ ],
+ "recommendations": [
+  {
+   "source": "rule:forecast",
+   "confidence": 0.85,
+   "confidence_method": "default",
+   "title": "Prepare for Visitors decline",
+   "problem": "Visitors is projected to move materially next month.",
+   "evidence": "Latest value 288,084.00; forecast 270,021.93.",
+   "expected_impact": "Better capacity, budget, and commercial planning before the change lands.",
+   "description": "The next-month forecast suggests visitors may decline by 6.3%.",
+   "label": {
+    "correct": true,
+    "reason": "Predicted -6.3% next month; the held-back month moved -8.8%.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  },
+  {
+   "source": "rule:anomaly",
+   "confidence": 0.78,
+   "confidence_method": "default",
+   "title": "Review the context behind standout Orders",
+   "problem": "One record reached 8,776.00 for Orders, higher than almost every other record (Month Start Date 2023-10-01, Channel Web, Country Germany).",
+   "evidence": "One record reached 8,776.00 for Orders, higher than almost every other record (Month Start Date 2023-10-01, Channel Web, Country Germany).",
+   "expected_impact": "Helps explain whether this was exceptional performance, a tactical pattern, or a one-off match moment.",
+   "description": "Compare the identified record (Month Start Date 2023-10-01, Channel Web, Country Germany) with similar records to understand the drivers.",
+   "label": {
+    "correct": true,
+    "reason": "Flagged the planted record.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  }
+ ]
+}

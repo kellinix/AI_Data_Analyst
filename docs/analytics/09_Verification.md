@@ -26,7 +26,7 @@ Because `pip install -r requirements.txt` resolves and builds every package in o
 
 **A second, separate issue** surfaced once imports succeeded: `app/core/config.py` instantiates `Settings()` at **module import time** (`config.py:214-217`), which requires `SECRET_KEY`, `POSTGRES_PASSWORD`, and `OPENAI_API_KEY` to already be set as environment variables. `backend/tests/conftest.py` sets safe test values for exactly these fields, but via `monkeypatch.setenv` inside an `autouse` **fixture** — which only runs at test-execution time, after collection/import has already happened. And `backend/.env` doesn't exist (only a repo-root `.env`, in a different working directory than where `pytest` is documented to run from). The net effect: **`pytest` cannot even *collect* the test modules that import `app.core.config` without environment variables being set some other way first** — `conftest.py`'s protection doesn't reach far enough back. Worked around here by exporting the same non-secret values `conftest.py` already defines, directly in the shell, before invoking `pytest` — no real credentials were needed or used anywhere in this verification.
 
-### Recommended fixes (not made — out of scope for a behavior-neutral pass)
+### Recommended fixes (not made in this pass — all three since applied, see §5)
 
 1. Either relax the `requirements.txt` pins to ranges that resolve to `cp314`-compatible versions, or pin the project to Python 3.12/3.13 explicitly in a `.python-version` file / CI matrix and document that as the *only* supported version — right now nothing in the repo states a hard upper bound, so a contributor on a newer Python has no signal they're off the supported path until pip fails deep into a build log.
 2. Drop `scipy` from `requirements.txt` — it's unused.
@@ -48,10 +48,114 @@ Because `pip install -r requirements.txt` resolves and builds every package in o
 
 ```bash
 cd backend
-pip install -r requirements.txt -r requirements-dev.txt   # on Python 3.12/3.13; see §2 if using 3.14
-export SECRET_KEY=test POSTGRES_PASSWORD=test OPENAI_API_KEY=sk-test \
-       SUPABASE_URL=https://test.supabase.co SUPABASE_ANON_KEY=test \
-       SUPABASE_SERVICE_ROLE_KEY=test SUPABASE_JWT_SECRET=test-jwt-secret-32-chars-min!! \
-       POSTGRES_SERVER=localhost POSTGRES_USER=test POSTGRES_DB=test REDIS_HOST=localhost
-pytest tests/ -q
+python -m venv .venv && source .venv/bin/activate   # Python 3.12, per backend/.python-version
+pip install -r requirements.txt -r requirements-dev.txt
+pytest -q   # no env vars needed — tests/conftest.py seeds safe test values before collection
 ```
+
+## 5. Follow-up: install/test fixes and `ai_service.py` coverage (2026-09-11)
+
+All three §2 recommendations were applied, and the AI guardrail layer got the test coverage it was missing:
+
+| Change | Detail |
+|---|---|
+| `scipy` removed from `requirements.txt` | Unused — no imports anywhere in `backend/app`. |
+| `backend/.python-version` → `3.12` | Matches `docker/backend.Dockerfile` (`python:3.12-slim`) and CI (`python-version: "3.12"`). This makes the supported version explicit; it does not make the pinned dependencies build on 3.14. |
+| `tests/conftest.py` seeds test env at import time | The same safe values the `isolate_env` fixture already used are written with `os.environ.setdefault` when `conftest.py` loads, which is before test modules are collected — so `Settings()` can be built at import. `setdefault` means CI- or shell-provided values still win. **Before:** with `SECRET_KEY`/`POSTGRES_PASSWORD`/`OPENAI_API_KEY` unset, `pytest` aborted with 8 collection errors. **After:** it collects and runs. |
+| `tests/test_ai_service.py` (new, 67 tests) | Response parsing, chart allow-listing and executable-value filtering, recommendation normalization (including pinning the fixed confidence lookup, §6 of `08_AI_Analytics_and_Guardrails.md`), the Responses API → Chat Completions → deterministic fallback chain, and chat grounding — all against a fake OpenAI client, no network. |
+| Two bugs found by those tests, fixed in `ai_service.py` | (1) `_contains_unsafe_chart_value()` substring-matched its blocklist, so `nan` inside labels like "Finance" or "Maintenance" silently dropped legitimate charts — it now matches JS syntax and literals as whole tokens. (2) `_parse_financial_opportunity("$1.5M")` returned `1.5` — it now honours K/M/B and thousand/million/billion suffixes. Both have regression tests. |
+
+**Verification — fresh venv, Python 3.12.7, pinned `requirements.txt` only (none of the §2 per-package workarounds):**
+
+```
+pip install -r requirements.txt -r requirements-dev.txt   → exit 0
+pip check                                                 → No broken requirements found
+pytest -q          (no env vars exported)                 → 179 passed
+ruff check .                                              → All checks passed!
+mypy app --ignore-missing-imports                         → Success: no issues found in 58 source files
+```
+
+The same suite also passes (179 passed) in the Python 3.14 environment from §2. **Not verified here:** the Docker image build and a CI run on these changes.
+
+## 6. Follow-up: confidence calibration and recommendation feedback (2026-09-11)
+
+What changed is documented in `10_Confidence_Calibration.md`; this section records how it was checked.
+
+| Change | Verified by |
+|---|---|
+| `compute_analysis` extracted from `AnalysisEngine._run_pipeline` | Full suite, including `test_live_filter.py`'s regression test on the engine's chart-population path (kept as a thin wrapper); the benchmark and `test_calibration_eval.py` call the extracted function end to end on real generated files |
+| `app/analytics/calibration.py` + `calibration_table.json` | `tests/test_calibration.py` — defaults without a table, measured values with one, every malformed-entry fallback, source tagging on AI and rule recommendations, and a check that the committed table is valid. An autouse fixture in `conftest.py` points all other tests at an empty table so they stay deterministic whatever the committed table holds |
+| Migration `003_recommendation_feedback` | Against a throwaway Postgres 16 (`postgres:16-alpine` on port 5433): `alembic upgrade head` → `downgrade 002_add_share_token` → `upgrade head`, all clean; `\d recommendation_feedback` shows the CHECK, the unique constraint, and the SET NULL / CASCADE foreign keys |
+| Feedback endpoints, `user_feedback` on `GET /analyses/{id}`, the `recommendation_calibration` view | `tests/test_recommendation_feedback.py` — 9 tests against that real database through the ASGI app (no mocked session): upsert and change, withdrawal, ownership (404), type check (422), invalid verdict, auth required (401), snapshot surviving insight deletion, and the view's arithmetic |
+| Benchmark harness (`backend/evals/calibration/`) | `tests/test_calibration_eval.py` — 27 tests: metrics against hand-computed values, generator determinism and that planted truth really holds (the planted anomaly is the max-\|z\| record; both gap types exceed cleaning's 70% null threshold; the holdout month is absent from the file), every label rule, judge-output parsing, and one dataset end to end through cleaning + `compute_analysis` offline |
+| Frontend feedback control | `npm run type-check`, `npm run lint` (one pre-existing `<img>` warning, unrelated), and `npm run build` — all routes compile |
+
+```
+pytest -q  (Python 3.12 venv, POSTGRES_PORT=5433, nothing else exported)  → 229 passed
+ruff check .                                                             → All checks passed!
+mypy app --ignore-missing-imports                                        → no issues in 61 source files
+```
+
+A bug found while wiring the endpoint: with `from __future__ import annotations`, slowapi's `@limiter.limit` wrapper makes FastAPI resolve annotations against slowapi's module, which broke route registration at import ("204 must not have a response body"). The new endpoint module omits that import, as `analyses.py` already does, and says why in its docstring.
+
+CI on the pull request: backend (229 passed, the 9 feedback tests running against the CI Postgres service, none skipped) and frontend build both green.
+
+## 7. End-to-end test of the running app (2026-09-11)
+
+The full local stack (Docker backend, Celery worker, Postgres, Redis; `next dev` frontend) was driven the way a user would drive it, with the demo CSV and the upload screen's default cleaning.
+
+**API, as a programmatic user** — upload → analyse → rate → withdraw → re-run, checking each step in the API and directly in Postgres: **21/22 checks passed.** Recommendations carried their `confidence_source`; a rule-based forecast recommendation arrived at the measured 0.72; `PUT` upserted without duplicates; invalid verdicts and non-recommendation insights got 422; `DELETE` withdrew; after the re-run both verdicts survived with `insight_id` nulled and the snapshot intact, the regenerated recommendations started unrated, and `recommendation_calibration` aggregated the rows. The one failure was a test artifact (the test user's `@example.test` email — see below).
+
+**Browser, as a logged-in user** (headless Chromium, a temporary Supabase test user) — log in → upload → wait for the dashboard → 👍 one card, 👎 another → reload → withdraw → re-analyse from the header menu: **11/11 checks passed**, no console errors. Both verdicts showed as pressed with "Thanks for the feedback", persisted across the reload, and the re-analysed cards started unrated; Postgres confirmed the verdicts outlived the re-analyse. The test users, their analyses and uploaded files were deleted afterwards.
+
+**Bugs found and fixed** (both present on `main`; regression tests added, suite now 231):
+
+| Bug | Effect | Fix |
+|---|---|---|
+| `anomaly_detection.py` put DuckDB `DATE` cells (`datetime.date`) into anomaly `context`, which is stored in JSONB | **Every cleaned upload with a date column and an outlier failed to save** — the default path, including the repo's own demo CSV | Context values converted with `isoformat()` (`_json_safe`); `test_context_values_are_json_serializable` |
+| `AnalysisEngine.run` called `_mark_failed` on a session left unusable by the failed flush | The failure handler itself raised `PendingRollbackError`, so the analysis **stayed "processing 90%" forever** with no error shown | Roll back before marking failed; `test_analysis_engine.py` |
+
+**Environment problems:** on **Node 25** the server has a `localStorage` object whose methods are undefined, and every `next dev` page returned 500 (`localStorage.getItem is not a function`). A preload script that logged a stack on each server-side `localStorage` read traced it to **Next's own dev overlay** (`react-dev-overlay/…/preferences.js`, `getInitialScale`) — dev-only, not app code. And `next dev` run from `frontend/` reads only `frontend/.env*`, not the repo-root `.env`, so without a `frontend/.env.local` the Supabase middleware had no URL and every page returned 500 (documented in the README).
+
+**Found during testing, then fixed** (regression tests in `test_api_contracts.py` and `test_ai_service.py`):
+
+| Problem | Fix |
+|---|---|
+| **Login and register forms could put credentials in the URL.** `<form onSubmit>` with no `method` meant a submit before React hydrated fell back to a native GET — `/login?email=…&password=…`, into browser history and server logs. Seen for real during testing. | `method="post"` on both forms (`login-form.tsx`, `register-form.tsx`) |
+| **Shared links and `/api/openapi.json` were broken** (500; `/api/docs` didn't load). `public.py` combined `from __future__ import annotations` with `@limiter.limit`, so its `db: DB` dependency became an unresolvable query parameter. Present on `main`. | Drop the future import there, as `analyses.py` does |
+| **`/users/me` returned 500 for reserved-domain emails** (e.g. `@example.test`), which Supabase accepts at sign-up but `EmailStr` rejects. | Response models echo the stored email as `str`; sign-up input is still validated |
+| **AI failures were invisible to users** — the dashboard silently showed the deterministic summary. | `generate_analysis` reports `generation.status` (`ai` / `fallback`), persisted as `metadata.ai_generation`; the dashboard shows a notice on fallback |
+| **Node 25 broke `next dev`** — Next's dev overlay reads Node 25's non-functional server `localStorage`. | `npm run dev` now runs `frontend/scripts/dev.mjs`, which adds `--no-experimental-webstorage` only on Node 25+ (the flag doesn't exist on Node 20, which CI uses). The auth store's `persist` was also made browser-only, defensively |
+
+## 8. Real-data test: UK government major projects portfolio (2026-09-12)
+
+Six IPA *Government Major Projects Portfolio* spreadsheets (MOD, DFT, HO, DFE, DHSC, DCMS; March 2024) were uploaded and combined through the product's own UI with default cleaning — 118 rows, 20 columns. The dashboard it produced was confidently wrong, and every cause sat in the deterministic layer *before* any AI call. This section records the diagnosis; each fix has a regression test built from these files.
+
+**What the dashboard showed:** KPI tiles reading "Departmental Narrative On Schedule ... $8,323" and "Departmental Narrative On Budgeted Whole Life Costs $23,078,507,463.50"; "Key Metrics Over Time" plotted against "Amber"; forecasts of "-29.14, likely between -770.66 and 712.38" citing "73 monthly observations"; £m figures shown in dollars.
+
+| # | Root cause | Evidence | Fix |
+|---|---|---|---|
+| 1 | `_parse_numeric_text_value` **searched** for a number anywhere in a cell, and a column converted to numeric once 85% of rows yielded one | "Compared to financial year 22/23-Q4, the project's end-date…" → `22.0` in 46 of 49 rows; `GMPP ID Number` "MOD_0001_1112-Q1" → a number too | The whole cell must be numeric once symbols, separators and magnitude suffixes are stripped (`re.fullmatch`) |
+| 2 | Withheld values counted as evidence *against* a column being numeric | "Financial Year Baseline (£m)": 33 numeric, 15 "Exempt under Section 43 of the Freedom of Information Act 2000", 1 "Not Available" — after fix 1 the column fell below 85% and the real metric was lost | `_looks_like_withheld_value` treats those rows as missing numbers (null), with a floor so prose columns can't convert |
+| 3 | Keyword vocabularies matched as **substrings** | `"arr"` inside "n**arr**ative" typed three narrative columns as annual recurring revenue — in `kpi_detector`, `semantic_detector` and `recommendations` | New `app/analytics/text_matching.py` matches whole, singularised tokens: `"arr"` no longer matches "narrative", `"cost"` still matches "costs" |
+| 4 | A column counted as a date if its **name** contained "time" | "…assessment of the project at a fixed point in **time**…" made a Red/Amber/Green rating `temporal_dimension`, so it became the x-axis of "Over Time" charts | Date-ish names now need date-ish values (text columns); numeric date names (20260710) keep the old rule |
+| 5 | Currency was hardcoded to USD in the API, the AI summaries and the frontend | UK £m columns displayed as `$23,078,507,463.50` | Detected from the original headers before standardisation rewrites "(£m)" → "currency_m", carried on the cleaning report → statistics → KPI insights → UI; unknown currency now shows no symbol rather than a dollar sign |
+
+**Before → after on the same file** (`MOD_…_March_2024.xlsx`, run offline through `compute_analysis`, no OpenAI spend):
+
+| | Before | After |
+|---|---|---|
+| Columns converted to numeric | 10, including 3 narrative columns, the commentary column and the ID column | 4, all genuinely numeric (33/49, 33/49, 34/49, 25/49 — withheld rows null) |
+| KPI tiles | 4 narrative columns as money, typed `arr` | the real money metrics, typed `cost`, plus the variance percentage |
+| Red/Amber/Green columns | `temporal_dimension` (the charts' time axis) | `dimension` |
+| Chart time axis | the RAG rating | `project_start_date` |
+| Currency | assumed USD | `GBP`, from the header `Financial Year Baseline (£m)` |
+
+**Fixed in a follow-up the same day:**
+
+| Problem | Fix |
+|---|---|
+| Forecasting treated project start dates spanning 1997–2024 as 41 monthly observations and projected "next month" from them | A monthly series must now cover at least 60% of the months between its first and last observation (`forecasting._monthly_density`). The demo dataset's 18 consecutive months still forecast; a scatter of dates across years no longer does. Tests: `test_forecasting.py` |
+| A KPI tile and its own chart could disagree on SUM vs AVERAGE (roadmap item 4) | `chart_selector._aggregation()` delegates to the new `kpi_detector.uses_average_aggregation()`. Already-averaged names (`avg`, `mean`, `median`, `aov`) average on both sides — the demo dashboard's "Avg Order Value $46,919.50" was a sum of averages |
+
+**Still open on this dataset** (not regressions): a text column can carry `analysis_role=metric` from its name alone — harmless, since KPI detection requires numbers — and monthly *anomaly* detection has no density guard of its own yet. Existing analyses keep their old numbers until re-analysed.

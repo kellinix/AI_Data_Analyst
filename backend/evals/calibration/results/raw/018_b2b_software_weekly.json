@@ -1,0 +1,358 @@
+{
+ "dataset_id": "018_b2b_software_weekly",
+ "scenario": {
+  "dataset_id": "018_b2b_software_weekly",
+  "domain": "b2b_software",
+  "grain": "weekly",
+  "months": 15,
+  "start": "2023-12-01",
+  "growth": 0.0,
+  "seasonality": 0.25,
+  "noise": 0.08,
+  "plant_anomaly": false,
+  "tracking_outage": true,
+  "optional_sparse": true
+ },
+ "truth": {
+  "benchmark_version": "2026-09-11.1",
+  "dataset_id": "018_b2b_software_weekly",
+  "scenario": {
+   "dataset_id": "018_b2b_software_weekly",
+   "domain": "b2b_software",
+   "grain": "weekly",
+   "months": 15,
+   "start": "2023-12-01",
+   "growth": 0.0,
+   "seasonality": 0.25,
+   "noise": 0.08,
+   "plant_anomaly": false,
+   "tracking_outage": true,
+   "optional_sparse": true
+  },
+  "domain_description": "B2B software sales by customer segment and region.",
+  "date_column": "week_start_date",
+  "dimensions": [
+   "segment",
+   "region"
+  ],
+  "metrics": [
+   "sales",
+   "deals",
+   "leads"
+  ],
+  "observed_period": [
+   "2023-12",
+   "2025-02"
+  ],
+  "row_count": 585,
+  "columns": {
+   "week_start_date": "Start date of each week.",
+   "segment": "Dimension: SMB, Mid-Market, Enterprise.",
+   "region": "Dimension: Americas, EMEA, APAC.",
+   "sales": "Revenue for the row, in the business's currency.",
+   "deals": "Count of deals for the row.",
+   "leads": "Count of leads for the row.",
+   "partner_commission": "partner_commission is only filled for deals sourced through a reseller partner; a blank means a direct deal, not missing data."
+  },
+  "generating_process": {
+   "true_monthly_growth_percent": 0.0,
+   "seasonality": "Nov-Dec demand about 25% above baseline, Jan-Feb slightly below.",
+   "noise": "Low: records vary modestly around the trend."
+  },
+  "planted_anomaly": null,
+  "no_planted_anomaly_note": "No genuine anomaly exists. Any standout record is ordinary random variation.",
+  "defect_columns": [
+   "leads"
+  ],
+  "defect_story": "The tracking feed for leads broke in 2024-03; every leads value from then on is blank. This is a real data defect and leads totals after 2024-03 are not trustworthy.",
+  "by_design_sparse_columns": [
+   "partner_commission"
+  ],
+  "missing_percent_by_column": {
+   "leads": 80.0,
+   "partner_commission": 78.1
+  },
+  "observed_monthly_totals": {
+   "sales": {
+    "2023-12": 6139022.38,
+    "2024-01": 5598793.96,
+    "2024-02": 4520008.93,
+    "2024-03": 4892148.77,
+    "2024-04": 6247244.3,
+    "2024-05": 4975965.76,
+    "2024-06": 4992741.83,
+    "2024-07": 6287312.06,
+    "2024-08": 5004484.11,
+    "2024-09": 6283009.93,
+    "2024-10": 4845135.8,
+    "2024-11": 6062269.58,
+    "2024-12": 7707822.35,
+    "2025-01": 4581923.83,
+    "2025-02": 4702471.53
+   },
+   "deals": {
+    "2023-12": 701.0,
+    "2024-01": 632.0,
+    "2024-02": 515.0,
+    "2024-03": 564.0,
+    "2024-04": 698.0,
+    "2024-05": 555.0,
+    "2024-06": 567.0,
+    "2024-07": 718.0,
+    "2024-08": 559.0,
+    "2024-09": 712.0,
+    "2024-10": 546.0,
+    "2024-11": 690.0,
+    "2024-12": 861.0,
+    "2025-01": 513.0,
+    "2025-02": 526.0
+   },
+   "leads": {
+    "2023-12": 4368.0,
+    "2024-01": 3794.0,
+    "2024-02": 3060.0,
+    "2024-03": null,
+    "2024-04": null,
+    "2024-05": null,
+    "2024-06": null,
+    "2024-07": null,
+    "2024-08": null,
+    "2024-09": null,
+    "2024-10": null,
+    "2024-11": null,
+    "2024-12": null,
+    "2025-01": null,
+    "2025-02": null
+   }
+  },
+  "dimension_totals": {
+   "sales": {
+    "segment": {
+     "SMB": 17586365.27,
+     "Mid-Market": 53282858.44,
+     "Enterprise": 11971131.41
+    },
+    "region": {
+     "Americas": 33419602.63,
+     "EMEA": 27613961.55,
+     "APAC": 21806790.94
+    }
+   },
+   "deals": {
+    "segment": {
+     "SMB": 2612.0,
+     "Mid-Market": 4122.0,
+     "Enterprise": 2623.0
+    },
+    "region": {
+     "Americas": 3377.0,
+     "EMEA": 3363.0,
+     "APAC": 2617.0
+    }
+   }
+  },
+  "correlations": {
+   "sales~deals": 0.884,
+   "sales~leads": 0.804,
+   "deals~leads": 0.951
+  },
+  "holdout": {
+   "month": "2025-03",
+   "totals": {
+    "sales": 6058716.41,
+    "deals": 694.0,
+    "leads": null
+   },
+   "last_observed_month_totals": {
+    "sales": 4702471.53,
+    "deals": 526.0,
+    "leads": null
+   },
+   "change_percent_vs_last_observed_month": {
+    "sales": 28.84,
+    "deals": 31.94,
+    "leads": null
+   }
+  }
+ },
+ "ai_recommendation_count": 0,
+ "ai_failed": false,
+ "executive_summary": "",
+ "forecasts": [
+  {
+   "metric": "sales",
+   "latest_value": 4702471.53,
+   "change_percent_next_month": 19.19,
+   "confidence": 0.83
+  },
+  {
+   "metric": "deals",
+   "latest_value": 526.0,
+   "change_percent_next_month": 19.38,
+   "confidence": 0.83
+  },
+  {
+   "metric": "leads",
+   "latest_value": 3060.0,
+   "change_percent_next_month": -20.5,
+   "confidence": 0.56
+  }
+ ],
+ "anomalies": [
+  {
+   "type": "statistical_outlier",
+   "column": "deals",
+   "score": 3.44,
+   "period": null,
+   "description": "One record reached 34.00 for Deals, higher than almost every other record (Week Start Date 2023-12-04, Segment Mid-Market, Region EMEA)."
+  },
+  {
+   "type": "time_series_spike",
+   "column": "partner_commission",
+   "score": 2.65,
+   "period": "2024-12-01",
+   "description": "partner_commission reached 221,841.78 in 2024-12-01, unusually far from the monthly pattern."
+  }
+ ],
+ "quality_issues": [
+  {
+   "type": "outliers",
+   "column": "deals",
+   "severity": "medium",
+   "description": "1 value fall far outside the typical range (0 to 32)",
+   "affected_rows": 1,
+   "bounds": {
+    "lower": 0.0,
+    "upper": 32.0
+   },
+   "column_label": "Deals"
+  },
+  {
+   "type": "missing_values",
+   "column": "leads",
+   "severity": "critical",
+   "description": "80.0% of values are missing",
+   "affected_rows": 468,
+   "column_label": "Leads"
+  },
+  {
+   "type": "outliers",
+   "column": "leads",
+   "severity": "medium",
+   "description": "3 values fall far outside the typical range (2 to 186)",
+   "affected_rows": 3,
+   "bounds": {
+    "lower": 2.0,
+    "upper": 186.0
+   },
+   "column_label": "Leads"
+  },
+  {
+   "type": "missing_values",
+   "column": "partner_commission",
+   "severity": "critical",
+   "description": "78.1% of values are missing",
+   "affected_rows": 457,
+   "column_label": "Partner Commission"
+  },
+  {
+   "type": "outliers",
+   "column": "partner_commission",
+   "severity": "medium",
+   "description": "4 values fall far outside the typical range (-15,715 to 39,891)",
+   "affected_rows": 4,
+   "bounds": {
+    "lower": -15714.62125,
+    "upper": 39891.12875
+   },
+   "column_label": "Partner Commission"
+  }
+ ],
+ "recommendations": [
+  {
+   "source": "rule:data_quality",
+   "confidence": 0.9,
+   "confidence_method": "default",
+   "title": "Clean high-impact data quality issues",
+   "problem": "Leads: 80.0% of values are missing",
+   "evidence": "Quality score is 55/100 with 5 detected issues.",
+   "expected_impact": "Higher confidence in KPIs, forecasts, and executive reporting.",
+   "description": "Resolve the most severe data quality gaps before making operational decisions from this dataset.",
+   "label": {
+    "correct": true,
+    "reason": "Flagged leads, which has a planted tracking outage.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  },
+  {
+   "source": "rule:forecast",
+   "confidence": 0.83,
+   "confidence_method": "default",
+   "title": "Prepare for Sales increase",
+   "problem": "Sales is projected to move materially next month.",
+   "evidence": "Latest value 4,702,471.53; forecast 5,605,032.59.",
+   "expected_impact": "Better capacity, budget, and commercial planning before the change lands.",
+   "description": "The next-month forecast suggests sales may increase by 19.2%.",
+   "label": {
+    "correct": true,
+    "reason": "Predicted +19.2% next month; the held-back month moved +28.8%.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  },
+  {
+   "source": "rule:forecast",
+   "confidence": 0.83,
+   "confidence_method": "default",
+   "title": "Prepare for Deals increase",
+   "problem": "Deals is projected to move materially next month.",
+   "evidence": "Latest value 526.00; forecast 627.94.",
+   "expected_impact": "Better capacity, budget, and commercial planning before the change lands.",
+   "description": "The next-month forecast suggests deals may increase by 19.4%.",
+   "label": {
+    "correct": true,
+    "reason": "Predicted +19.4% next month; the held-back month moved +31.9%.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  },
+  {
+   "source": "rule:forecast",
+   "confidence": 0.56,
+   "confidence_method": "default",
+   "title": "Prepare for Leads decline",
+   "problem": "Leads is projected to move materially next month.",
+   "evidence": "Latest value 3,060.00; forecast 2,432.67.",
+   "expected_impact": "Better capacity, budget, and commercial planning before the change lands.",
+   "description": "The next-month forecast suggests leads may decline by 20.5%.",
+   "label": {
+    "correct": null,
+    "reason": "leads has a broken tracking feed; no trustworthy actual.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  },
+  {
+   "source": "rule:anomaly",
+   "confidence": 0.78,
+   "confidence_method": "default",
+   "title": "Review the context behind standout Deals",
+   "problem": "One record reached 34.00 for Deals, higher than almost every other record (Week Start Date 2023-12-04, Segment Mid-Market, Region EMEA).",
+   "evidence": "One record reached 34.00 for Deals, higher than almost every other record (Week Start Date 2023-12-04, Segment Mid-Market, Region EMEA).",
+   "expected_impact": "Helps explain whether this was exceptional performance, a tactical pattern, or a one-off match moment.",
+   "description": "Compare the identified record (Week Start Date 2023-12-04, Segment Mid-Market, Region EMEA) with similar records to understand the drivers.",
+   "label": {
+    "correct": false,
+    "reason": "No anomaly was planted; the flagged record is ordinary variation.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  }
+ ]
+}

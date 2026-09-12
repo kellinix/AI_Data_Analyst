@@ -113,7 +113,9 @@ export function LoginForm() {
       </div>
 
       {/* Email/password form */}
-      <form onSubmit={handleSubmit(onSubmit)} className="space-y-3">
+      {/* method="post": if the form is submitted before React hydrates, the
+          browser's native submit must not put the password in the URL. */}
+      <form method="post" onSubmit={handleSubmit(onSubmit)} className="space-y-3">
         <div className="space-y-1.5">
           <Label htmlFor="email">Email</Label>
           <Input

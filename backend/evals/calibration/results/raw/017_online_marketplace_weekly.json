@@ -1,0 +1,310 @@
+{
+ "dataset_id": "017_online_marketplace_weekly",
+ "scenario": {
+  "dataset_id": "017_online_marketplace_weekly",
+  "domain": "online_marketplace",
+  "grain": "weekly",
+  "months": 19,
+  "start": "2023-01-01",
+  "growth": 0.0,
+  "seasonality": 0.25,
+  "noise": 0.08,
+  "plant_anomaly": false,
+  "tracking_outage": false,
+  "optional_sparse": false
+ },
+ "truth": {
+  "benchmark_version": "2026-09-11.1",
+  "dataset_id": "017_online_marketplace_weekly",
+  "scenario": {
+   "dataset_id": "017_online_marketplace_weekly",
+   "domain": "online_marketplace",
+   "grain": "weekly",
+   "months": 19,
+   "start": "2023-01-01",
+   "growth": 0.0,
+   "seasonality": 0.25,
+   "noise": 0.08,
+   "plant_anomaly": false,
+   "tracking_outage": false,
+   "optional_sparse": false
+  },
+  "domain_description": "Marketplace activity by sales channel and country.",
+  "date_column": "week_start_date",
+  "dimensions": [
+   "channel",
+   "country"
+  ],
+  "metrics": [
+   "gmv",
+   "orders",
+   "visitors"
+  ],
+  "observed_period": [
+   "2023-01",
+   "2024-07"
+  ],
+  "row_count": 747,
+  "columns": {
+   "week_start_date": "Start date of each week.",
+   "channel": "Dimension: Web, iOS, Android.",
+   "country": "Dimension: United Kingdom, Germany, France.",
+   "gmv": "Revenue for the row, in the business's currency.",
+   "orders": "Count of orders for the row.",
+   "visitors": "Count of visitors for the row."
+  },
+  "generating_process": {
+   "true_monthly_growth_percent": 0.0,
+   "seasonality": "Nov-Dec demand about 25% above baseline, Jan-Feb slightly below.",
+   "noise": "Low: records vary modestly around the trend."
+  },
+  "planted_anomaly": null,
+  "no_planted_anomaly_note": "No genuine anomaly exists. Any standout record is ordinary random variation.",
+  "defect_columns": [],
+  "defect_story": null,
+  "by_design_sparse_columns": [],
+  "missing_percent_by_column": {},
+  "observed_monthly_totals": {
+   "gmv": {
+    "2023-01": 785291.03,
+    "2023-02": 632453.8,
+    "2023-03": 699892.55,
+    "2023-04": 678363.55,
+    "2023-05": 850045.57,
+    "2023-06": 687989.6,
+    "2023-07": 843394.25,
+    "2023-08": 668389.51,
+    "2023-09": 688618.45,
+    "2023-10": 836511.26,
+    "2023-11": 833496.47,
+    "2023-12": 824027.65,
+    "2024-01": 806299.17,
+    "2024-02": 624110.89,
+    "2024-03": 682934.44,
+    "2024-04": 862312.68,
+    "2024-05": 671936.01,
+    "2024-06": 683566.62,
+    "2024-07": 865483.47
+   },
+   "orders": {
+    "2023-01": 15645.0,
+    "2023-02": 12591.0,
+    "2023-03": 13469.0,
+    "2023-04": 13518.0,
+    "2023-05": 16932.0,
+    "2023-06": 13562.0,
+    "2023-07": 16578.0,
+    "2023-08": 13306.0,
+    "2023-09": 13557.0,
+    "2023-10": 16635.0,
+    "2023-11": 16684.0,
+    "2023-12": 16464.0,
+    "2024-01": 16130.0,
+    "2024-02": 12489.0,
+    "2024-03": 13620.0,
+    "2024-04": 17194.0,
+    "2024-05": 13547.0,
+    "2024-06": 13393.0,
+    "2024-07": 17272.0
+   },
+   "visitors": {
+    "2023-01": 287172.0,
+    "2023-02": 221076.0,
+    "2023-03": 248233.0,
+    "2023-04": 242246.0,
+    "2023-05": 302251.0,
+    "2023-06": 244559.0,
+    "2023-07": 298159.0,
+    "2023-08": 241835.0,
+    "2023-09": 242662.0,
+    "2023-10": 302495.0,
+    "2023-11": 299657.0,
+    "2023-12": 295571.0,
+    "2024-01": 291183.0,
+    "2024-02": 229835.0,
+    "2024-03": 251163.0,
+    "2024-04": 313021.0,
+    "2024-05": 243684.0,
+    "2024-06": 245444.0,
+    "2024-07": 309399.0
+   }
+  },
+  "dimension_totals": {
+   "gmv": {
+    "channel": {
+     "Web": 5974899.49,
+     "iOS": 4498843.74,
+     "Android": 3751373.74
+    },
+    "country": {
+     "United Kingdom": 6513995.97,
+     "Germany": 3154671.23,
+     "France": 4556449.77
+    }
+   },
+   "orders": {
+    "channel": {
+     "Web": 105279.0,
+     "iOS": 77783.0,
+     "Android": 99524.0
+    },
+    "country": {
+     "United Kingdom": 113139.0,
+     "Germany": 68538.0,
+     "France": 100909.0
+    }
+   }
+  },
+  "correlations": {
+   "gmv~orders": 0.703,
+   "gmv~visitors": 0.664,
+   "orders~visitors": 0.968
+  },
+  "holdout": {
+   "month": "2024-08",
+   "totals": {
+    "gmv": 692860.03,
+    "orders": 13640.0,
+    "visitors": 246601.0
+   },
+   "last_observed_month_totals": {
+    "gmv": 865483.47,
+    "orders": 17272.0,
+    "visitors": 309399.0
+   },
+   "change_percent_vs_last_observed_month": {
+    "gmv": -19.95,
+    "orders": -21.03,
+    "visitors": -20.3
+   }
+  }
+ },
+ "ai_recommendation_count": 0,
+ "ai_failed": false,
+ "executive_summary": "",
+ "forecasts": [
+  {
+   "metric": "gmv",
+   "latest_value": 865483.47,
+   "change_percent_next_month": -10.87,
+   "confidence": 0.85
+  },
+  {
+   "metric": "orders",
+   "latest_value": 17272.0,
+   "change_percent_next_month": -10.75,
+   "confidence": 0.85
+  },
+  {
+   "metric": "visitors",
+   "latest_value": 309399.0,
+   "change_percent_next_month": -9.58,
+   "confidence": 0.85
+  }
+ ],
+ "anomalies": [
+  {
+   "type": "statistical_outlier",
+   "column": "gmv",
+   "score": 3.17,
+   "period": null,
+   "description": "One record reached 43,851.96 for Gmv, higher than almost every other record (Week Start Date 2023-12-11, Channel Web, Country United Kingdom)."
+  }
+ ],
+ "quality_issues": [
+  {
+   "type": "outliers",
+   "column": "gmv",
+   "severity": "medium",
+   "description": "3 values fall far outside the typical range (-2,975 to 39,999)",
+   "affected_rows": 3,
+   "bounds": {
+    "lower": -2974.8375000000015,
+    "upper": 39998.5425
+   },
+   "column_label": "Gmv"
+  },
+  {
+   "type": "outliers",
+   "column": "visitors",
+   "severity": "medium",
+   "description": "1 value fall far outside the typical range (-2,495 to 15,423)",
+   "affected_rows": 1,
+   "bounds": {
+    "lower": -2495.25,
+    "upper": 15422.75
+   },
+   "column_label": "Visitors"
+  }
+ ],
+ "recommendations": [
+  {
+   "source": "rule:forecast",
+   "confidence": 0.85,
+   "confidence_method": "default",
+   "title": "Prepare for Gmv decline",
+   "problem": "Gmv is projected to move materially next month.",
+   "evidence": "Latest value 865,483.47; forecast 771,364.61.",
+   "expected_impact": "Better capacity, budget, and commercial planning before the change lands.",
+   "description": "The next-month forecast suggests gmv may decline by 10.9%.",
+   "label": {
+    "correct": true,
+    "reason": "Predicted -10.9% next month; the held-back month moved -19.9%.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  },
+  {
+   "source": "rule:forecast",
+   "confidence": 0.85,
+   "confidence_method": "default",
+   "title": "Prepare for Orders decline",
+   "problem": "Orders is projected to move materially next month.",
+   "evidence": "Latest value 17,272.00; forecast 15,415.19.",
+   "expected_impact": "Better capacity, budget, and commercial planning before the change lands.",
+   "description": "The next-month forecast suggests orders may decline by 10.8%.",
+   "label": {
+    "correct": true,
+    "reason": "Predicted -10.8% next month; the held-back month moved -21.0%.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  },
+  {
+   "source": "rule:forecast",
+   "confidence": 0.85,
+   "confidence_method": "default",
+   "title": "Prepare for Visitors decline",
+   "problem": "Visitors is projected to move materially next month.",
+   "evidence": "Latest value 309,399.00; forecast 279,753.19.",
+   "expected_impact": "Better capacity, budget, and commercial planning before the change lands.",
+   "description": "The next-month forecast suggests visitors may decline by 9.6%.",
+   "label": {
+    "correct": true,
+    "reason": "Predicted -9.6% next month; the held-back month moved -20.3%.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  },
+  {
+   "source": "rule:anomaly",
+   "confidence": 0.78,
+   "confidence_method": "default",
+   "title": "Review the context behind standout Gmv",
+   "problem": "One record reached 43,851.96 for Gmv, higher than almost every other record (Week Start Date 2023-12-11, Channel Web, Country United Kingdom).",
+   "evidence": "One record reached 43,851.96 for Gmv, higher than almost every other record (Week Start Date 2023-12-11, Channel Web, Country United Kingdom).",
+   "expected_impact": "Helps explain whether this was exceptional performance, a tactical pattern, or a one-off match moment.",
+   "description": "Compare the identified record (Week Start Date 2023-12-11, Channel Web, Country United Kingdom) with similar records to understand the drivers.",
+   "label": {
+    "correct": false,
+    "reason": "No anomaly was planted; the flagged record is ordinary variation.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  }
+ ]
+}

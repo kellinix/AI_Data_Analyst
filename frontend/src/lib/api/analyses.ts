@@ -1,4 +1,4 @@
-import { apiClient, get, post, del, patch } from "@/lib/api/client"
+import { apiClient, get, post, put, del, patch } from "@/lib/api/client"
 import type {
   ActiveFilter,
   Analysis,
@@ -8,6 +8,8 @@ import type {
   CreateAnalysisRequest,
   LiveQueryResponse,
   PaginatedResponse,
+  RecommendationFeedbackResponse,
+  RecommendationFeedbackVerdict,
   ShareLinkResponse,
 } from "@/types"
 
@@ -97,5 +99,20 @@ export const analysesApi = {
 
   revokeShareLink(id: string): Promise<void> {
     return del<void>(`/analyses/${id}/share`)
+  },
+
+  setRecommendationFeedback(
+    analysisId: string,
+    insightId: string,
+    verdict: RecommendationFeedbackVerdict
+  ): Promise<RecommendationFeedbackResponse> {
+    return put<RecommendationFeedbackResponse>(
+      `/analyses/${analysisId}/insights/${insightId}/feedback`,
+      { verdict }
+    )
+  },
+
+  clearRecommendationFeedback(analysisId: string, insightId: string): Promise<void> {
+    return del<void>(`/analyses/${analysisId}/insights/${insightId}/feedback`)
   },
 }

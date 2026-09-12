@@ -1,6 +1,15 @@
 import { create } from "zustand"
-import { persist } from "zustand/middleware"
+import { createJSONStorage, persist, type StateStorage } from "zustand/middleware"
 import type { User, UserProfile } from "@/types"
+
+// Node 25+ defines a server-side `localStorage` whose methods are undefined, so
+// zustand's default storage passes its availability check during server
+// rendering and then throws on getItem. Only touch storage in the browser.
+const serverSafeStorage: StateStorage = {
+  getItem: () => null,
+  setItem: () => {},
+  removeItem: () => {},
+}
 
 interface AuthState {
   user: User | null
@@ -25,6 +34,9 @@ export const useAuthStore = create<AuthState>()(
     }),
     {
       name: "auth-store",
+      storage: createJSONStorage(() =>
+        typeof window === "undefined" ? serverSafeStorage : window.localStorage
+      ),
       partialize: (state) => ({ user: state.user }),
     }
   )

@@ -1,0 +1,376 @@
+{
+ "dataset_id": "010_b2b_software_weekly",
+ "scenario": {
+  "dataset_id": "010_b2b_software_weekly",
+  "domain": "b2b_software",
+  "grain": "weekly",
+  "months": 16,
+  "start": "2022-12-01",
+  "growth": -0.08,
+  "seasonality": 0.25,
+  "noise": 0.08,
+  "plant_anomaly": false,
+  "tracking_outage": false,
+  "optional_sparse": true
+ },
+ "truth": {
+  "benchmark_version": "2026-09-11.1",
+  "dataset_id": "010_b2b_software_weekly",
+  "scenario": {
+   "dataset_id": "010_b2b_software_weekly",
+   "domain": "b2b_software",
+   "grain": "weekly",
+   "months": 16,
+   "start": "2022-12-01",
+   "growth": -0.08,
+   "seasonality": 0.25,
+   "noise": 0.08,
+   "plant_anomaly": false,
+   "tracking_outage": false,
+   "optional_sparse": true
+  },
+  "domain_description": "B2B software sales by customer segment and region.",
+  "date_column": "week_start_date",
+  "dimensions": [
+   "segment",
+   "region"
+  ],
+  "metrics": [
+   "sales",
+   "deals",
+   "leads"
+  ],
+  "observed_period": [
+   "2022-12",
+   "2024-03"
+  ],
+  "row_count": 621,
+  "columns": {
+   "week_start_date": "Start date of each week.",
+   "segment": "Dimension: SMB, Mid-Market, Enterprise.",
+   "region": "Dimension: Americas, EMEA, APAC.",
+   "sales": "Revenue for the row, in the business's currency.",
+   "deals": "Count of deals for the row.",
+   "leads": "Count of leads for the row.",
+   "partner_commission": "partner_commission is only filled for deals sourced through a reseller partner; a blank means a direct deal, not missing data."
+  },
+  "generating_process": {
+   "true_monthly_growth_percent": -8.0,
+   "seasonality": "Nov-Dec demand about 25% above baseline, Jan-Feb slightly below.",
+   "noise": "Low: records vary modestly around the trend."
+  },
+  "planted_anomaly": null,
+  "no_planted_anomaly_note": "No genuine anomaly exists. Any standout record is ordinary random variation.",
+  "defect_columns": [],
+  "defect_story": null,
+  "by_design_sparse_columns": [
+   "partner_commission"
+  ],
+  "missing_percent_by_column": {
+   "partner_commission": 76.8
+  },
+  "observed_monthly_totals": {
+   "sales": {
+    "2022-12": 5444079.21,
+    "2023-01": 4626847.98,
+    "2023-02": 3420757.47,
+    "2023-03": 3447953.19,
+    "2023-04": 3123376.1,
+    "2023-05": 3645677.08,
+    "2023-06": 2698862.78,
+    "2023-07": 3062050.77,
+    "2023-08": 2256293.72,
+    "2023-09": 2088121.71,
+    "2023-10": 2373639.89,
+    "2023-11": 2248505.1,
+    "2023-12": 2056072.97,
+    "2024-01": 1733667.36,
+    "2024-02": 1270960.01,
+    "2024-03": 1287179.43
+   },
+   "deals": {
+    "2022-12": 676.0,
+    "2023-01": 571.0,
+    "2023-02": 429.0,
+    "2023-03": 422.0,
+    "2023-04": 384.0,
+    "2023-05": 457.0,
+    "2023-06": 333.0,
+    "2023-07": 377.0,
+    "2023-08": 280.0,
+    "2023-09": 260.0,
+    "2023-10": 297.0,
+    "2023-11": 274.0,
+    "2023-12": 250.0,
+    "2024-01": 211.0,
+    "2024-02": 157.0,
+    "2024-03": 158.0
+   },
+   "leads": {
+    "2022-12": 4086.0,
+    "2023-01": 3446.0,
+    "2023-02": 2622.0,
+    "2023-03": 2457.0,
+    "2023-04": 2306.0,
+    "2023-05": 2786.0,
+    "2023-06": 1985.0,
+    "2023-07": 2217.0,
+    "2023-08": 1722.0,
+    "2023-09": 1550.0,
+    "2023-10": 1786.0,
+    "2023-11": 1664.0,
+    "2023-12": 1515.0,
+    "2024-01": 1282.0,
+    "2024-02": 939.0,
+    "2024-03": 950.0
+   }
+  },
+  "dimension_totals": {
+   "sales": {
+    "segment": {
+     "SMB": 16852308.24,
+     "Mid-Market": 12530037.59,
+     "Enterprise": 15401698.94
+    },
+    "region": {
+     "Americas": 14934959.89,
+     "EMEA": 15636336.21,
+     "APAC": 14212748.67
+    }
+   },
+   "deals": {
+    "segment": {
+     "SMB": 1546.0,
+     "Mid-Market": 2281.0,
+     "Enterprise": 1709.0
+    },
+    "region": {
+     "Americas": 1834.0,
+     "EMEA": 2105.0,
+     "APAC": 1597.0
+    }
+   }
+  },
+  "correlations": {
+   "sales~deals": 0.699,
+   "sales~leads": 0.681,
+   "deals~leads": 0.981
+  },
+  "holdout": {
+   "month": "2024-04",
+   "totals": {
+    "sales": 1418094.39,
+    "deals": 179.0,
+    "leads": 1079.0
+   },
+   "last_observed_month_totals": {
+    "sales": 1287179.43,
+    "deals": 158.0,
+    "leads": 950.0
+   },
+   "change_percent_vs_last_observed_month": {
+    "sales": 10.17,
+    "deals": 13.29,
+    "leads": 13.58
+   }
+  }
+ },
+ "ai_recommendation_count": 0,
+ "ai_failed": false,
+ "executive_summary": "",
+ "forecasts": [
+  {
+   "metric": "sales",
+   "latest_value": 1287179.43,
+   "change_percent_next_month": -30.34,
+   "confidence": 0.84
+  },
+  {
+   "metric": "deals",
+   "latest_value": 158.0,
+   "change_percent_next_month": -31.2,
+   "confidence": 0.84
+  },
+  {
+   "metric": "leads",
+   "latest_value": 950.0,
+   "change_percent_next_month": -31.02,
+   "confidence": 0.83
+  }
+ ],
+ "anomalies": [
+  {
+   "type": "statistical_outlier",
+   "column": "leads",
+   "score": 4.93,
+   "period": null,
+   "description": "One record reached 192.00 for Leads, higher than almost every other record (Week Start Date 2022-12-12, Segment Mid-Market, Region Americas)."
+  },
+  {
+   "type": "statistical_outlier",
+   "column": "deals",
+   "score": 4.82,
+   "period": null,
+   "description": "One record reached 31.00 for Deals, higher than almost every other record (Week Start Date 2022-12-12, Segment Mid-Market, Region Americas)."
+  },
+  {
+   "type": "statistical_outlier",
+   "column": "sales",
+   "score": 4.66,
+   "period": null,
+   "description": "One record reached 322,815.69 for Sales, higher than almost every other record (Week Start Date 2022-12-05, Segment Enterprise, Region APAC)."
+  },
+  {
+   "type": "statistical_outlier",
+   "column": "partner_commission",
+   "score": 3.18,
+   "period": null,
+   "description": "One record reached 25,264.59 for Partner Commission, higher than almost every other record (Week Start Date 2023-04-24, Segment Enterprise, Region APAC)."
+  }
+ ],
+ "quality_issues": [
+  {
+   "type": "outliers",
+   "column": "sales",
+   "severity": "medium",
+   "description": "25 values fall far outside the typical range (-65,848 to 194,290)",
+   "affected_rows": 25,
+   "bounds": {
+    "lower": -65848.015,
+    "upper": 194290.10499999998
+   },
+   "column_label": "Sales"
+  },
+  {
+   "type": "outliers",
+   "column": "deals",
+   "severity": "medium",
+   "description": "16 values fall far outside the typical range (-4 to 20)",
+   "affected_rows": 16,
+   "bounds": {
+    "lower": -4.0,
+    "upper": 20.0
+   },
+   "column_label": "Deals"
+  },
+  {
+   "type": "outliers",
+   "column": "leads",
+   "severity": "medium",
+   "description": "20 values fall far outside the typical range (-18 to 118)",
+   "affected_rows": 20,
+   "bounds": {
+    "lower": -18.0,
+    "upper": 118.0
+   },
+   "column_label": "Leads"
+  },
+  {
+   "type": "missing_values",
+   "column": "partner_commission",
+   "severity": "critical",
+   "description": "76.8% of values are missing",
+   "affected_rows": 477,
+   "column_label": "Partner Commission"
+  },
+  {
+   "type": "outliers",
+   "column": "partner_commission",
+   "severity": "medium",
+   "description": "8 values fall far outside the typical range (-7,149 to 19,224)",
+   "affected_rows": 8,
+   "bounds": {
+    "lower": -7148.830000000002,
+    "upper": 19223.83
+   },
+   "column_label": "Partner Commission"
+  }
+ ],
+ "recommendations": [
+  {
+   "source": "rule:data_quality",
+   "confidence": 0.9,
+   "confidence_method": "default",
+   "title": "Clean high-impact data quality issues",
+   "problem": "Partner Commission: 76.8% of values are missing",
+   "evidence": "Quality score is 78/100 with 5 detected issues.",
+   "expected_impact": "Higher confidence in KPIs, forecasts, and executive reporting.",
+   "description": "Resolve the most severe data quality gaps before making operational decisions from this dataset.",
+   "label": {
+    "correct": false,
+    "reason": "Flagged partner_commission, which is blank by design.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  },
+  {
+   "source": "rule:forecast",
+   "confidence": 0.84,
+   "confidence_method": "default",
+   "title": "Prepare for Sales decline",
+   "problem": "Sales is projected to move materially next month.",
+   "evidence": "Latest value 1,287,179.43; forecast 896,662.59.",
+   "expected_impact": "Better capacity, budget, and commercial planning before the change lands.",
+   "description": "The next-month forecast suggests sales may decline by 30.3%.",
+   "label": {
+    "correct": false,
+    "reason": "Predicted -30.3% next month; the held-back month moved +10.2%.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  },
+  {
+   "source": "rule:forecast",
+   "confidence": 0.84,
+   "confidence_method": "default",
+   "title": "Prepare for Deals decline",
+   "problem": "Deals is projected to move materially next month.",
+   "evidence": "Latest value 158.00; forecast 108.70.",
+   "expected_impact": "Better capacity, budget, and commercial planning before the change lands.",
+   "description": "The next-month forecast suggests deals may decline by 31.2%.",
+   "label": {
+    "correct": false,
+    "reason": "Predicted -31.2% next month; the held-back month moved +13.3%.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  },
+  {
+   "source": "rule:forecast",
+   "confidence": 0.83,
+   "confidence_method": "default",
+   "title": "Prepare for Leads decline",
+   "problem": "Leads is projected to move materially next month.",
+   "evidence": "Latest value 950.00; forecast 655.28.",
+   "expected_impact": "Better capacity, budget, and commercial planning before the change lands.",
+   "description": "The next-month forecast suggests leads may decline by 31.0%.",
+   "label": {
+    "correct": false,
+    "reason": "Predicted -31.0% next month; the held-back month moved +13.6%.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  },
+  {
+   "source": "rule:anomaly",
+   "confidence": 0.78,
+   "confidence_method": "default",
+   "title": "Review the context behind standout Leads",
+   "problem": "One record reached 192.00 for Leads, higher than almost every other record (Week Start Date 2022-12-12, Segment Mid-Market, Region Americas).",
+   "evidence": "One record reached 192.00 for Leads, higher than almost every other record (Week Start Date 2022-12-12, Segment Mid-Market, Region Americas).",
+   "expected_impact": "Helps explain whether this was exceptional performance, a tactical pattern, or a one-off match moment.",
+   "description": "Compare the identified record (Week Start Date 2022-12-12, Segment Mid-Market, Region Americas) with similar records to understand the drivers.",
+   "label": {
+    "correct": false,
+    "reason": "No anomaly was planted; the flagged record is ordinary variation.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  }
+ ]
+}

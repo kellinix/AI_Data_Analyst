@@ -1,0 +1,290 @@
+{
+ "dataset_id": "046_b2b_software_monthly",
+ "scenario": {
+  "dataset_id": "046_b2b_software_monthly",
+  "domain": "b2b_software",
+  "grain": "monthly",
+  "months": 17,
+  "start": "2022-02-01",
+  "growth": -0.04,
+  "seasonality": 0.25,
+  "noise": 0.08,
+  "plant_anomaly": false,
+  "tracking_outage": false,
+  "optional_sparse": true
+ },
+ "truth": {
+  "benchmark_version": "2026-09-11.1",
+  "dataset_id": "046_b2b_software_monthly",
+  "scenario": {
+   "dataset_id": "046_b2b_software_monthly",
+   "domain": "b2b_software",
+   "grain": "monthly",
+   "months": 17,
+   "start": "2022-02-01",
+   "growth": -0.04,
+   "seasonality": 0.25,
+   "noise": 0.08,
+   "plant_anomaly": false,
+   "tracking_outage": false,
+   "optional_sparse": true
+  },
+  "domain_description": "B2B software sales by customer segment and region.",
+  "date_column": "month_start_date",
+  "dimensions": [
+   "segment",
+   "region"
+  ],
+  "metrics": [
+   "sales",
+   "deals",
+   "leads"
+  ],
+  "observed_period": [
+   "2022-02",
+   "2023-06"
+  ],
+  "row_count": 153,
+  "columns": {
+   "month_start_date": "Start date of each month.",
+   "segment": "Dimension: SMB, Mid-Market, Enterprise.",
+   "region": "Dimension: Americas, EMEA, APAC.",
+   "sales": "Revenue for the row, in the business's currency.",
+   "deals": "Count of deals for the row.",
+   "leads": "Count of leads for the row.",
+   "partner_commission": "partner_commission is only filled for deals sourced through a reseller partner; a blank means a direct deal, not missing data."
+  },
+  "generating_process": {
+   "true_monthly_growth_percent": -4.0,
+   "seasonality": "Nov-Dec demand about 25% above baseline, Jan-Feb slightly below.",
+   "noise": "Low: records vary modestly around the trend."
+  },
+  "planted_anomaly": null,
+  "no_planted_anomaly_note": "No genuine anomaly exists. Any standout record is ordinary random variation.",
+  "defect_columns": [],
+  "defect_story": null,
+  "by_design_sparse_columns": [
+   "partner_commission"
+  ],
+  "missing_percent_by_column": {
+   "partner_commission": 75.2
+  },
+  "observed_monthly_totals": {
+   "sales": {
+    "2022-02": 3676945.21,
+    "2022-03": 3717458.56,
+    "2022-04": 3692916.36,
+    "2022-05": 3617278.91,
+    "2022-06": 3294932.54,
+    "2022-07": 3250352.23,
+    "2022-08": 2946034.86,
+    "2022-09": 2946261.33,
+    "2022-10": 2761019.52,
+    "2022-11": 3544214.88,
+    "2022-12": 3261484.71,
+    "2023-01": 2470188.27,
+    "2023-02": 2142580.39,
+    "2023-03": 2175156.24,
+    "2023-04": 2210406.01,
+    "2023-05": 2012444.11,
+    "2023-06": 1868723.56
+   },
+   "deals": {
+    "2022-02": 502.0,
+    "2022-03": 509.0,
+    "2022-04": 513.0,
+    "2022-05": 503.0,
+    "2022-06": 460.0,
+    "2022-07": 439.0,
+    "2022-08": 396.0,
+    "2022-09": 408.0,
+    "2022-10": 393.0,
+    "2022-11": 472.0,
+    "2022-12": 454.0,
+    "2023-01": 334.0,
+    "2023-02": 302.0,
+    "2023-03": 310.0,
+    "2023-04": 313.0,
+    "2023-05": 281.0,
+    "2023-06": 271.0
+   },
+   "leads": {
+    "2022-02": 3134.0,
+    "2022-03": 3074.0,
+    "2022-04": 3119.0,
+    "2022-05": 3007.0,
+    "2022-06": 2647.0,
+    "2022-07": 2704.0,
+    "2022-08": 2360.0,
+    "2022-09": 2606.0,
+    "2022-10": 2297.0,
+    "2022-11": 2793.0,
+    "2022-12": 2869.0,
+    "2023-01": 2123.0,
+    "2023-02": 1887.0,
+    "2023-03": 1791.0,
+    "2023-04": 1949.0,
+    "2023-05": 1594.0,
+    "2023-06": 1663.0
+   }
+  },
+  "dimension_totals": {
+   "sales": {
+    "segment": {
+     "SMB": 12054771.87,
+     "Mid-Market": 23468473.49,
+     "Enterprise": 14065152.33
+    },
+    "region": {
+     "Americas": 16145112.09,
+     "EMEA": 10582229.91,
+     "APAC": 22861055.69
+    }
+   },
+   "deals": {
+    "segment": {
+     "SMB": 1943.0,
+     "Mid-Market": 2368.0,
+     "Enterprise": 2549.0
+    },
+    "region": {
+     "Americas": 2172.0,
+     "EMEA": 2109.0,
+     "APAC": 2579.0
+    }
+   }
+  },
+  "correlations": {
+   "sales~deals": 0.426,
+   "sales~leads": 0.411,
+   "deals~leads": 0.97
+  },
+  "holdout": {
+   "month": "2023-07",
+   "totals": {
+    "sales": 1988880.92,
+    "deals": 269.0,
+    "leads": 1579.0
+   },
+   "last_observed_month_totals": {
+    "sales": 1868723.56,
+    "deals": 271.0,
+    "leads": 1663.0
+   },
+   "change_percent_vs_last_observed_month": {
+    "sales": 6.43,
+    "deals": -0.74,
+    "leads": -5.05
+   }
+  }
+ },
+ "ai_recommendation_count": 0,
+ "ai_failed": false,
+ "executive_summary": "",
+ "forecasts": [
+  {
+   "metric": "sales",
+   "latest_value": 1868723.56,
+   "change_percent_next_month": -0.83,
+   "confidence": 0.86
+  },
+  {
+   "metric": "deals",
+   "latest_value": 271.0,
+   "change_percent_next_month": -3.0,
+   "confidence": 0.86
+  },
+  {
+   "metric": "leads",
+   "latest_value": 1663.0,
+   "change_percent_next_month": -4.27,
+   "confidence": 0.86
+  }
+ ],
+ "anomalies": [
+  {
+   "type": "statistical_outlier",
+   "column": "sales",
+   "score": 3.55,
+   "period": null,
+   "description": "One record reached 1,011,907.44 for Sales, higher than almost every other record (Month Start Date 2022-03-01, Segment Mid-Market, Region APAC)."
+  },
+  {
+   "type": "statistical_outlier",
+   "column": "partner_commission",
+   "score": 3.17,
+   "period": null,
+   "description": "One record reached 81,062.15 for Partner Commission, higher than almost every other record (Month Start Date 2022-10-01, Segment Mid-Market, Region APAC)."
+  }
+ ],
+ "quality_issues": [
+  {
+   "type": "outliers",
+   "column": "sales",
+   "severity": "medium",
+   "description": "11 values fall far outside the typical range (-95,353 to 677,582)",
+   "affected_rows": 11,
+   "bounds": {
+    "lower": -95352.68499999994,
+    "upper": 677582.4749999999
+   },
+   "column_label": "Sales"
+  },
+  {
+   "type": "missing_values",
+   "column": "partner_commission",
+   "severity": "critical",
+   "description": "75.2% of values are missing",
+   "affected_rows": 115,
+   "column_label": "Partner Commission"
+  },
+  {
+   "type": "outliers",
+   "column": "partner_commission",
+   "severity": "medium",
+   "description": "2 values fall far outside the typical range (-8,299 to 61,983)",
+   "affected_rows": 2,
+   "bounds": {
+    "lower": -8299.451250000006,
+    "upper": 61983.498750000006
+   },
+   "column_label": "Partner Commission"
+  }
+ ],
+ "recommendations": [
+  {
+   "source": "rule:data_quality",
+   "confidence": 0.9,
+   "confidence_method": "default",
+   "title": "Clean high-impact data quality issues",
+   "problem": "Partner Commission: 75.2% of values are missing",
+   "evidence": "Quality score is 78/100 with 3 detected issues.",
+   "expected_impact": "Higher confidence in KPIs, forecasts, and executive reporting.",
+   "description": "Resolve the most severe data quality gaps before making operational decisions from this dataset.",
+   "label": {
+    "correct": false,
+    "reason": "Flagged partner_commission, which is blank by design.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  },
+  {
+   "source": "rule:anomaly",
+   "confidence": 0.78,
+   "confidence_method": "default",
+   "title": "Review the context behind standout Sales",
+   "problem": "One record reached 1,011,907.44 for Sales, higher than almost every other record (Month Start Date 2022-03-01, Segment Mid-Market, Region APAC).",
+   "evidence": "One record reached 1,011,907.44 for Sales, higher than almost every other record (Month Start Date 2022-03-01, Segment Mid-Market, Region APAC).",
+   "expected_impact": "Helps explain whether this was exceptional performance, a tactical pattern, or a one-off match moment.",
+   "description": "Compare the identified record (Month Start Date 2022-03-01, Segment Mid-Market, Region APAC) with similar records to understand the drivers.",
+   "label": {
+    "correct": false,
+    "reason": "No anomaly was planted; the flagged record is ordinary variation.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  }
+ ]
+}

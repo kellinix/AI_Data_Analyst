@@ -77,7 +77,7 @@ Runs in this **exact order** inside `FileProcessor.clean_dataframe()` (`file_pro
 | 2 | Clean text | `clean_text` (`:325`) | trim/collapse whitespace, null out sentinel tokens (`""`, `"n/a"`, `"unknown"`, ...) |
 | 3 | Drop empty | `drop_empty` (`:329`) | remove all-null rows and all-null columns |
 | 4 | Normalize dates | `normalize_dates` (`:338`) | parses date-shaped text columns, tries day-first *and* month-first, keeps whichever parses more rows |
-| 5 | Parse currency/percent | `parse_currency_percent` (`:345`) | strips `$£€¥%,()` and `k/m/bn` suffixes, casts to float |
+| 5 | Parse currency/percent | `parse_currency_percent` (`:349`, `_parse_numeric_text_columns` at `:431`) | converts a column only when whole cells are numeric (prose no longer yields a number — see `09_Verification.md §8`), treats withheld values ("Exempt under Section 43 of the Freedom of Information Act 2000") as missing rather than as evidence against the column, strips `$£€¥%,()` and `k/m/bn` suffixes, casts to float |
 | 6 | Handle missing values | `_handle_missing_values` (`:482`) | drops rows missing *every* required numeric metric, then imputes: numeric → median, text → `"Unknown"` |
 | 7 | Remove exact duplicates | `remove_duplicates` (`:359`) | `df.unique()` |
 | 8 | Remove near-duplicates | `fuzzy_deduplicate` (`:366`) | opt-in; see [§5](#5-deduplication) |
@@ -90,20 +90,20 @@ If `semantic_categorical_merging` is enabled (default **on**), `SemanticWrangler
 A new `uploaded_files` row is created for the cleaned file; the cleaning report is stashed in `Analysis.metadata["upload_context"]["cleaning"]`.
 
 ### Stage C — Analysis pipeline (asynchronous, Celery `run_analysis` queue)
-`backend/app/workers/tasks.py:48-82` → `backend/app/services/analysis_engine.py:55-217`
+`backend/app/workers/tasks.py:48-82` → `backend/app/services/analysis_engine.py:56-126` (`AnalysisEngine`: the database work — steps 1 and 13) → `compute_analysis`, `analysis_engine.py:317-452` (steps 2–12, no database dependency; the calibration benchmark calls the same function — `10_Confidence_Calibration.md §3.1`)
 
 1. Load `Analysis` + `UploadedFile` from Postgres; mark `PROCESSING`.
-2. Load the (already-cleaned) file into an in-memory DuckDB table named `data` (`analysis_engine.py:86`).
+2. Load the (already-cleaned) file into an in-memory DuckDB table named `data` (`analysis_engine.py:342`).
 3. `StatisticsEngine.describe_all()` (`analytics/statistics.py:28-55`) — internal order: `DESCRIBE` schema → numeric stats → categorical stats → **semantic enrichment** (assigns each column a `semantic_type`/`analysis_role` using the stats just computed) → categorical stats recomputed for numeric columns reclassified as dimension/flag codes → **data quality analysis last** (its outlier/negative-value checks are gated on the semantic role already being assigned) → correlations.
 4. KPI detection (`kpi_detector.py:44`) — keyword-classifies numeric columns, gated on semantic role.
 5. Chart selection (`chart_selector.py:30`) — also gated on semantic role; reuses KPI detector's outcome-column logic.
-6. Chart data populated via DuckDB aggregation queries (`analysis_engine.py:219-238`).
+6. Chart data populated via DuckDB aggregation queries (`analysis_engine.py:455-467`).
 7. Display-label enrichment: a **second, separate** LLM call (chat completion, not embeddings) decodes terse column names into human-readable labels and chart titles (`semantic_wrangler.py:257-324`).
 8. Forecasting (`analytics/forecasting.py`) and anomaly detection (`analytics/anomaly_detection.py`) run against the now-labeled schema.
 9. Deterministic, rule-based recommendations generated — **no LLM involved** (`analytics/recommendations.py`).
 10. Profile JSON built and written to disk (`services/data_profile.py`) — this becomes the **sole** grounding context for the AI analysis call. See `docs/analytics/08_AI_Analytics_and_Guardrails.md`.
 11. `AIService.generate_analysis()` called, three-tier fallback (Responses API → Chat Completions → fully deterministic template).
-12. AI-authored and deterministic recommendations merged and deduplicated by evidence text (`analysis_engine.py:415-436`).
+12. AI-authored and deterministic recommendations merged and deduplicated by evidence text (`analysis_engine.py:470-491`).
 13. Results persisted: old `Insight` rows deleted, new ones written; `Analysis.metadata`/`.charts` (JSONB) updated; status → `COMPLETED`.
 
 Bounded by a 300s soft / 360s hard Celery timeout, retried up to 3× with 30–60s backoff before the analysis is marked `FAILED` (`workers/tasks.py:53-54,79`; `core/config.py:178`).
@@ -179,8 +179,8 @@ Documenting what a system doesn't yet do is as much a part of data architecture 
 
 | Gap | Where | Why it matters |
 |---|---|---|
-| **SUM vs. AVERAGE aggregation disagree between KPI tiles and charts** | `kpi_detector.py:_uses_average()` (`:164-172`) vs. `chart_selector.py:_aggregation()` (`:209-212`) use different keyword lists. A column named `total_profit` (or `total_orders`, `mrr`, `arr`, `gmv`) is **summed** for its KPI card but **averaged** for its chart. | The KPI tile and the chart built from the same column can show materially different numbers for the same metric — a real correctness risk, not cosmetic. |
-| **Currency/percentage detection duplicated 3× with drifting keyword lists** | `file_processor.py:_looks_like_currency_column` (`:1188`), `kpi_detector.py:_is_currency` (`:159`), `semantic_detector.py` (`:26`) | A column can be treated as currency at one pipeline stage and not another. |
+| ~~SUM vs. AVERAGE aggregation disagree between KPI tiles and charts~~ — **fixed 2026-09-12** | Both now call `kpi_detector.uses_average_aggregation()`; `chart_selector._aggregation()` delegates to it. Previously the two kept separate keyword lists, so `total_profit` (or `total_orders`, `mrr`, `arr`, `gmv`) was summed for its KPI card but averaged for its chart. Already-averaged names (`avg`, `mean`, `median`, `aov`) now average on both sides — a demo dashboard had shown "Avg Order Value $46,919.50", a sum of averages. | Was a real correctness risk: the tile and the chart built from the same column could show materially different numbers. Regression test: `test_kpi_tiles_and_charts_agree_on_aggregation`. |
+| **Currency/percentage detection duplicated 3× with drifting keyword lists** | `file_processor.py:_looks_like_currency_column` (`:1272`), `kpi_detector.py:_is_currency` (`:143`), `semantic_detector.py` RULES (`:28`) — all three now match whole words through `analytics/text_matching.py:24`, and which currency it is comes from `_detect_currency` (`file_processor.py:1233`) | A column can be treated as currency at one pipeline stage and not another — three lists still drift, though they no longer disagree about word boundaries. |
 | **`_quote_identifier` reimplemented 5 times** | `statistics.py:263`, `data_quality.py:216`, `anomaly_detection.py:176`, `forecasting.py:107`, `live_filter.py:34` — identical 2-line function each time | Straightforward to consolidate into one shared `analytics/sql_utils.py`; flagged, not yet fixed, to keep this change-set behavior-neutral. |
 | **Live-filter re-reads the source file from disk on every slicer click** | `analyses.py:610-617` | No cached DuckDB connection/table is reused between the original Celery run and later filter requests — full file I/O + reparse per request. |
 | **Multi-file join has no orphan-key reporting** | `file_processor.py:1047-1105` | A full outer join silently produces unmatched rows on either side with no count surfaced to the user. |

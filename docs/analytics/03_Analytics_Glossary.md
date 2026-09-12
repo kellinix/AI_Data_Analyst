@@ -129,10 +129,10 @@ See `docs/analytics/02_Data_Quality_Framework.md` for the full detail. Summary o
 |---|---|
 | `semantic_detector.py` column-type rules | A hand-authored constant per pattern (e.g. email regex match = 0.95) — not computed from the data at all |
 | `forecasting.py:_confidence()` | A formula combining history length and residual noise (§4 above) — genuinely data-derived |
-| `analysis_engine.py:286` | KPI insight confidence — hardcoded to `0.99` |
-| `analysis_engine.py:342` | Anomaly insight confidence — `min(z_score / 5, 0.95)`, a rescaling of the z-score |
-| `recommendations.py` | Deterministic recommendation confidence — fixed per rule type (quality issue 0.9, forecast-based 0.7, anomaly-based 0.78, generic 0.72) |
-| `ai_service.py:650` | AI recommendation confidence — a lookup table from the model's self-declared priority: `{"High": 0.85, "Medium": 0.7, "Low": 0.55}` — **not** a calibrated accuracy measure. See `docs/analytics/08_AI_Analytics_and_Guardrails.md` for why this specific gap matters. |
+| `analysis_engine.py:186` | KPI insight confidence — hardcoded to `0.99` |
+| `analysis_engine.py:242` | Anomaly insight confidence — `min(z_score / 5, 0.95)`, a rescaling of the z-score |
+| `calibration.py` → `recommendations.py` | Deterministic recommendation confidence, per rule source (`rule:data_quality`, `rule:anomaly`, `rule:forecast`, `rule:tracking`). The benchmark-measured value from `calibration_table.json` when one exists with enough samples; otherwise the hand-set default (quality 0.9, anomaly 0.78, generic 0.72; forecast recommendations inherit the forecast's own formula confidence). See `10_Confidence_Calibration.md`. |
+| `calibration.py` → `ai_service.py` | AI recommendation confidence, per priority tier (`ai:high` / `ai:medium` / `ai:low`). Measured value when available, else the original hand-set lookup `{"High": 0.85, "Medium": 0.7, "Low": 0.55}`. Each recommendation records which applied in `data.confidence_method`. See `10_Confidence_Calibration.md`. |
 
 ---
 

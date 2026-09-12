@@ -1,0 +1,380 @@
+{
+ "dataset_id": "027_hotel_group_weekly",
+ "scenario": {
+  "dataset_id": "027_hotel_group_weekly",
+  "domain": "hotel_group",
+  "grain": "weekly",
+  "months": 24,
+  "start": "2022-08-01",
+  "growth": 0.0,
+  "seasonality": 0.0,
+  "noise": 0.3,
+  "plant_anomaly": false,
+  "tracking_outage": true,
+  "optional_sparse": false
+ },
+ "truth": {
+  "benchmark_version": "2026-09-11.1",
+  "dataset_id": "027_hotel_group_weekly",
+  "scenario": {
+   "dataset_id": "027_hotel_group_weekly",
+   "domain": "hotel_group",
+   "grain": "weekly",
+   "months": 24,
+   "start": "2022-08-01",
+   "growth": 0.0,
+   "seasonality": 0.0,
+   "noise": 0.3,
+   "plant_anomaly": false,
+   "tracking_outage": true,
+   "optional_sparse": false
+  },
+  "domain_description": "Hotel group performance by property and room type.",
+  "date_column": "week_start_date",
+  "dimensions": [
+   "property",
+   "room_type"
+  ],
+  "metrics": [
+   "revenue",
+   "bookings",
+   "customers"
+  ],
+  "observed_period": [
+   "2022-08",
+   "2024-07"
+  ],
+  "row_count": 945,
+  "columns": {
+   "week_start_date": "Start date of each week.",
+   "property": "Dimension: Harbour View, City Centre, Airport.",
+   "room_type": "Dimension: Standard, Deluxe, Suite.",
+   "revenue": "Revenue for the row, in the business's currency.",
+   "bookings": "Count of bookings for the row.",
+   "customers": "Count of customers for the row."
+  },
+  "generating_process": {
+   "true_monthly_growth_percent": 0.0,
+   "seasonality": "No seasonality.",
+   "noise": "High: individual records vary a lot, and records 3+ standard deviations from the mean occur naturally. Such records are ordinary variation, not errors or events."
+  },
+  "planted_anomaly": null,
+  "no_planted_anomaly_note": "No genuine anomaly exists. Any standout record is ordinary random variation.",
+  "defect_columns": [
+   "customers"
+  ],
+  "defect_story": "The tracking feed for customers broke in 2023-02; every customers value from then on is blank. This is a real data defect and customers totals after 2023-02 are not trustworthy.",
+  "by_design_sparse_columns": [],
+  "missing_percent_by_column": {
+   "customers": 74.3
+  },
+  "observed_monthly_totals": {
+   "revenue": {
+    "2022-08": 805133.18,
+    "2022-09": 687238.57,
+    "2022-10": 926956.27,
+    "2022-11": 588958.66,
+    "2022-12": 590350.53,
+    "2023-01": 821585.41,
+    "2023-02": 635945.64,
+    "2023-03": 684400.22,
+    "2023-04": 632411.43,
+    "2023-05": 862432.21,
+    "2023-06": 603948.91,
+    "2023-07": 797454.9,
+    "2023-08": 630721.92,
+    "2023-09": 686355.52,
+    "2023-10": 826881.92,
+    "2023-11": 619166.91,
+    "2023-12": 621788.73,
+    "2024-01": 909255.77,
+    "2024-02": 634913.09,
+    "2024-03": 755471.55,
+    "2024-04": 855934.03,
+    "2024-05": 704515.07,
+    "2024-06": 680175.71,
+    "2024-07": 896410.36
+   },
+   "bookings": {
+    "2022-08": 4211.0,
+    "2022-09": 3546.0,
+    "2022-10": 4700.0,
+    "2022-11": 3127.0,
+    "2022-12": 3186.0,
+    "2023-01": 4258.0,
+    "2023-02": 3391.0,
+    "2023-03": 3502.0,
+    "2023-04": 3511.0,
+    "2023-05": 4468.0,
+    "2023-06": 3237.0,
+    "2023-07": 4161.0,
+    "2023-08": 3267.0,
+    "2023-09": 3583.0,
+    "2023-10": 4173.0,
+    "2023-11": 3211.0,
+    "2023-12": 3212.0,
+    "2024-01": 4858.0,
+    "2024-02": 3387.0,
+    "2024-03": 3807.0,
+    "2024-04": 4467.0,
+    "2024-05": 3548.0,
+    "2024-06": 3538.0,
+    "2024-07": 4636.0
+   },
+   "customers": {
+    "2022-08": 6637.0,
+    "2022-09": 5597.0,
+    "2022-10": 7784.0,
+    "2022-11": 5157.0,
+    "2022-12": 5197.0,
+    "2023-01": 6815.0,
+    "2023-02": null,
+    "2023-03": null,
+    "2023-04": null,
+    "2023-05": null,
+    "2023-06": null,
+    "2023-07": null,
+    "2023-08": null,
+    "2023-09": null,
+    "2023-10": null,
+    "2023-11": null,
+    "2023-12": null,
+    "2024-01": null,
+    "2024-02": null,
+    "2024-03": null,
+    "2024-04": null,
+    "2024-05": null,
+    "2024-06": null,
+    "2024-07": null
+   }
+  },
+  "dimension_totals": {
+   "revenue": {
+    "property": {
+     "Harbour View": 8069800.67,
+     "City Centre": 5401681.67,
+     "Airport": 3986924.17
+    },
+    "room_type": {
+     "Standard": 5476224.93,
+     "Deluxe": 7769013.69,
+     "Suite": 4213167.89
+    }
+   },
+   "bookings": {
+    "property": {
+     "Harbour View": 32176.0,
+     "City Centre": 26901.0,
+     "Airport": 31908.0
+    },
+    "room_type": {
+     "Standard": 25149.0,
+     "Deluxe": 37752.0,
+     "Suite": 28084.0
+    }
+   }
+  },
+  "correlations": {
+   "revenue~bookings": 0.798,
+   "revenue~customers": 0.791,
+   "bookings~customers": 0.968
+  },
+  "holdout": {
+   "month": "2024-08",
+   "totals": {
+    "revenue": 654155.02,
+    "bookings": 3433.0,
+    "customers": null
+   },
+   "last_observed_month_totals": {
+    "revenue": 896410.36,
+    "bookings": 4636.0,
+    "customers": null
+   },
+   "change_percent_vs_last_observed_month": {
+    "revenue": -27.03,
+    "bookings": -25.95,
+    "customers": null
+   }
+  }
+ },
+ "ai_recommendation_count": 0,
+ "ai_failed": false,
+ "executive_summary": "",
+ "forecasts": [
+  {
+   "metric": "revenue",
+   "latest_value": 896410.36,
+   "change_percent_next_month": -16.08,
+   "confidence": 0.83
+  },
+  {
+   "metric": "bookings",
+   "latest_value": 4636.0,
+   "change_percent_next_month": -16.05,
+   "confidence": 0.84
+  },
+  {
+   "metric": "customers",
+   "latest_value": 6815.0,
+   "change_percent_next_month": -13.37,
+   "confidence": 0.64
+  }
+ ],
+ "anomalies": [
+  {
+   "type": "statistical_outlier",
+   "column": "revenue",
+   "score": 5.64,
+   "period": null,
+   "description": "One record reached 82,977.13 for Revenue, higher than almost every other record (Week Start Date 2022-10-03, Property Harbour View, Room Type Deluxe)."
+  },
+  {
+   "type": "statistical_outlier",
+   "column": "bookings",
+   "score": 5.46,
+   "period": null,
+   "description": "One record reached 315.00 for Bookings, higher than almost every other record (Week Start Date 2022-10-03, Property Harbour View, Room Type Deluxe)."
+  },
+  {
+   "type": "statistical_outlier",
+   "column": "customers",
+   "score": 4.54,
+   "period": null,
+   "description": "One record reached 464.00 for Customers, higher than almost every other record (Week Start Date 2022-09-05, Property Harbour View, Room Type Deluxe)."
+  }
+ ],
+ "quality_issues": [
+  {
+   "type": "outliers",
+   "column": "revenue",
+   "severity": "medium",
+   "description": "28 values fall far outside the typical range (-12,262 to 45,946)",
+   "affected_rows": 28,
+   "bounds": {
+    "lower": -12261.650000000003,
+    "upper": 45946.43000000001
+   },
+   "column_label": "Revenue"
+  },
+  {
+   "type": "outliers",
+   "column": "bookings",
+   "severity": "medium",
+   "description": "34 values fall far outside the typical range (-2 to 186)",
+   "affected_rows": 34,
+   "bounds": {
+    "lower": -2.5,
+    "upper": 185.5
+   },
+   "column_label": "Bookings"
+  },
+  {
+   "type": "missing_values",
+   "column": "customers",
+   "severity": "critical",
+   "description": "74.3% of values are missing",
+   "affected_rows": 702,
+   "column_label": "Customers"
+  },
+  {
+   "type": "outliers",
+   "column": "customers",
+   "severity": "medium",
+   "description": "15 values fall far outside the typical range (13 to 273)",
+   "affected_rows": 15,
+   "bounds": {
+    "lower": 13.0,
+    "upper": 273.0
+   },
+   "column_label": "Customers"
+  }
+ ],
+ "recommendations": [
+  {
+   "source": "rule:data_quality",
+   "confidence": 0.9,
+   "confidence_method": "default",
+   "title": "Clean high-impact data quality issues",
+   "problem": "Customers: 74.3% of values are missing",
+   "evidence": "Quality score is 79/100 with 4 detected issues.",
+   "expected_impact": "Higher confidence in KPIs, forecasts, and executive reporting.",
+   "description": "Resolve the most severe data quality gaps before making operational decisions from this dataset.",
+   "label": {
+    "correct": true,
+    "reason": "Flagged customers, which has a planted tracking outage.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  },
+  {
+   "source": "rule:forecast",
+   "confidence": 0.83,
+   "confidence_method": "default",
+   "title": "Prepare for Revenue decline",
+   "problem": "Revenue is projected to move materially next month.",
+   "evidence": "Latest value 896,410.36; forecast 752,250.24.",
+   "expected_impact": "Better capacity, budget, and commercial planning before the change lands.",
+   "description": "The next-month forecast suggests revenue may decline by 16.1%.",
+   "label": {
+    "correct": true,
+    "reason": "Predicted -16.1% next month; the held-back month moved -27.0%.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  },
+  {
+   "source": "rule:forecast",
+   "confidence": 0.84,
+   "confidence_method": "default",
+   "title": "Prepare for Bookings decline",
+   "problem": "Bookings is projected to move materially next month.",
+   "evidence": "Latest value 4,636.00; forecast 3,892.06.",
+   "expected_impact": "Better capacity, budget, and commercial planning before the change lands.",
+   "description": "The next-month forecast suggests bookings may decline by 16.1%.",
+   "label": {
+    "correct": true,
+    "reason": "Predicted -16.1% next month; the held-back month moved -25.9%.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  },
+  {
+   "source": "rule:forecast",
+   "confidence": 0.64,
+   "confidence_method": "default",
+   "title": "Prepare for Customers decline",
+   "problem": "Customers is projected to move materially next month.",
+   "evidence": "Latest value 6,815.00; forecast 5,904.13.",
+   "expected_impact": "Better capacity, budget, and commercial planning before the change lands.",
+   "description": "The next-month forecast suggests customers may decline by 13.4%.",
+   "label": {
+    "correct": null,
+    "reason": "customers has a broken tracking feed; no trustworthy actual.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  },
+  {
+   "source": "rule:anomaly",
+   "confidence": 0.78,
+   "confidence_method": "default",
+   "title": "Review the context behind standout Revenue",
+   "problem": "One record reached 82,977.13 for Revenue, higher than almost every other record (Week Start Date 2022-10-03, Property Harbour View, Room Type Deluxe).",
+   "evidence": "One record reached 82,977.13 for Revenue, higher than almost every other record (Week Start Date 2022-10-03, Property Harbour View, Room Type Deluxe).",
+   "expected_impact": "Helps explain whether this was exceptional performance, a tactical pattern, or a one-off match moment.",
+   "description": "Compare the identified record (Week Start Date 2022-10-03, Property Harbour View, Room Type Deluxe) with similar records to understand the drivers.",
+   "label": {
+    "correct": false,
+    "reason": "No anomaly was planted; the flagged record is ordinary variation.",
+    "method": "rule",
+    "planted_finding": null
+   },
+   "judge_label": null
+  }
+ ]
+}

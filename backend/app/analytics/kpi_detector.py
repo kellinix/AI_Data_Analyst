@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.analytics.text_matching import contains_keyword
+
 # Keyword maps for KPI detection
 REVENUE_KEYWORDS = ["revenue", "sales", "income", "turnover", "gross", "net_revenue", "total_sales", "amount", "price", "value", "gmv"]
 PROFIT_KEYWORDS = ["profit", "margin", "earnings", "ebitda", "net_income", "operating_income", "gross_profit"]
@@ -28,6 +30,9 @@ DURATION_KEYWORDS = ["duration", "hours", "minutes", "distance", "time_to_hire",
 AVERAGE_METRIC_KEYWORDS = [
     "accuracy", "rating", "score", "percentage", "percent", "pct", "rate",
     "ratio", "speed", "impact", "satisfaction", "nps",
+    # Already-averaged measures: summing them compounds an average, which is
+    # how a demo dashboard showed "Avg Order Value $46,919.50".
+    "avg", "average", "mean", "median", "aov",
 ]
 NON_KPI_NUMERIC_KEYWORDS = [
     "date", "time", "timestamp", "age", "latitude", "longitude", "coord",
@@ -98,78 +103,69 @@ def detect_kpis(
     return kpis[:10]
 
 
+# Checked in order: the first vocabulary whose keywords appear as whole tokens
+# in the column name wins. Average-style names (rating, score, rate, ...) are
+# checked first: a "customer satisfaction rating" is a score, not a customer
+# count, and only business metrics should be forecastable.
+_KPI_TYPE_KEYWORDS: tuple[tuple[str, list[str]], ...] = (
+    ("average", AVERAGE_METRIC_KEYWORDS),
+    ("asset_value", ASSET_VALUE_KEYWORDS),
+    ("arr", ARR_KEYWORDS),
+    ("mrr", MRR_KEYWORDS),
+    ("revenue", REVENUE_KEYWORDS),
+    ("margin", MARGIN_KEYWORDS),
+    ("profit", PROFIT_KEYWORDS),
+    ("orders", ORDER_KEYWORDS),
+    ("customers", CUSTOMER_KEYWORDS),
+    ("conversion", CONVERSION_KEYWORDS),
+    ("growth", GROWTH_KEYWORDS),
+    ("aov", AOV_KEYWORDS),
+    ("retention", RETENTION_KEYWORDS),
+    ("churn", CHURN_KEYWORDS),
+    ("cost", COST_KEYWORDS),
+    ("return", RETURN_KEYWORDS),
+    ("inventory", INVENTORY_KEYWORDS),
+    ("duration", DURATION_KEYWORDS),
+)
+
+CURRENCY_KEYWORDS = [
+    "revenue", "sales", "profit", "cost", "price", "amount", "income",
+    "spend", "value", "valuation", "gmv", "mrr", "arr", "aov",
+]
+
+_AVERAGE_NAME_KEYWORDS = ["pct", "percent", "percentage", "rate", *AVERAGE_METRIC_KEYWORDS]
+
+
 def _classify_column(col: str) -> str | None:
-    for kw in ASSET_VALUE_KEYWORDS:
-        if kw in col:
-            return "asset_value"
-    for kw in ARR_KEYWORDS:
-        if kw in col:
-            return "arr"
-    for kw in MRR_KEYWORDS:
-        if kw in col:
-            return "mrr"
-    for kw in REVENUE_KEYWORDS:
-        if kw in col:
-            return "revenue"
-    for kw in MARGIN_KEYWORDS:
-        if kw in col:
-            return "margin"
-    for kw in PROFIT_KEYWORDS:
-        if kw in col:
-            return "profit"
-    for kw in ORDER_KEYWORDS:
-        if kw in col:
-            return "orders"
-    for kw in CUSTOMER_KEYWORDS:
-        if kw in col:
-            return "customers"
-    for kw in CONVERSION_KEYWORDS:
-        if kw in col:
-            return "conversion"
-    for kw in GROWTH_KEYWORDS:
-        if kw in col:
-            return "growth"
-    for kw in AOV_KEYWORDS:
-        if kw in col:
-            return "aov"
-    for kw in RETENTION_KEYWORDS:
-        if kw in col:
-            return "retention"
-    for kw in CHURN_KEYWORDS:
-        if kw in col:
-            return "churn"
-    for kw in COST_KEYWORDS:
-        if kw in col:
-            return "cost"
-    for kw in RETURN_KEYWORDS:
-        if kw in col:
-            return "return"
-    for kw in INVENTORY_KEYWORDS:
-        if kw in col:
-            return "inventory"
-    for kw in DURATION_KEYWORDS:
-        if kw in col:
-            return "duration"
-    for kw in AVERAGE_METRIC_KEYWORDS:
-        if kw in col:
-            return "average"
+    for kpi_type, keywords in _KPI_TYPE_KEYWORDS:
+        if contains_keyword(col, keywords):
+            return kpi_type
     return None
 
 
 def _is_currency(col: str) -> bool:
-    currency_keywords = ["revenue", "sales", "profit", "cost", "price", "amount", "income", "spend", "value", "valuation", "gmv", "mrr", "arr", "aov"]
-    return any(kw in col for kw in currency_keywords)
+    return contains_keyword(col, CURRENCY_KEYWORDS)
 
 
 def _uses_average(col: str, kpi_type: str) -> bool:
-    return (
-        kpi_type in {"margin", "conversion", "growth", "retention", "churn", "return", "average"}
-        or "pct" in col
-        or "percent" in col
-        or "percentage" in col
-        or "rate" in col
-        or any(keyword in col for keyword in AVERAGE_METRIC_KEYWORDS)
-    )
+    return kpi_type in {
+        "margin", "conversion", "growth", "retention", "churn", "return", "average"
+    } or contains_keyword(col, _AVERAGE_NAME_KEYWORDS)
+
+
+def uses_average_aggregation(column: str, kpi_type: str | None = None) -> bool:
+    """Whether a column should be averaged rather than summed.
+
+    The single source of truth for KPI tiles and for charts. They used separate
+    keyword lists, so `total_profit` (or `mrr`, `arr`, `gmv`) was summed on its
+    tile and averaged on its own chart — the same metric, two different numbers.
+    A column with no recognised business meaning is averaged, matching what the
+    KPI fallback already does with it.
+    """
+    resolved = kpi_type or _classify_column(column)
+    if resolved is None:
+        return True
+    return _uses_average(column, resolved)
 
 
 def _is_metric_role(col_info: dict[str, Any]) -> bool:

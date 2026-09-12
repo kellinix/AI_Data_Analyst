@@ -9,6 +9,15 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.analytics.calibration import (
+    RULE_ANOMALY,
+    RULE_DATA_QUALITY,
+    RULE_FORECAST,
+    RULE_TRACKING,
+    confidence_fields,
+)
+from app.analytics.text_matching import contains_keyword
+
 
 def generate_recommendations(
     *,
@@ -38,7 +47,7 @@ def generate_recommendations(
                 else None
             ),
             "importance": "medium",
-            "confidence": 0.72,
+            **confidence_fields(RULE_TRACKING),
             "data": {
                 "difficulty": "Easy",
                 "owner": "Operations",
@@ -56,20 +65,25 @@ def _quality_recommendations(data_quality: dict[str, Any]) -> list[dict[str, Any
     high_impact = [issue for issue in issues if issue.get("severity") in {"high", "critical"}]
     if high_impact:
         issue = high_impact[0]
+        column = issue.get("column")
+        description = issue.get("description", "Severe data quality issue detected.")
+        # Name the column: "78.2% of values are missing" alone doesn't say which field.
+        problem = f"{_humanize(column)}: {description}" if column else description
         recs.append({
             "title": "Clean high-impact data quality issues",
             "description": "Resolve the most severe data quality gaps before making operational decisions from this dataset.",
-            "problem": issue.get("description", "Severe data quality issue detected."),
+            "problem": problem,
             "evidence": f"Quality score is {data_quality.get('score', 0)}/100 with {len(issues)} detected issues.",
             "expected_impact": "Higher confidence in KPIs, forecasts, and executive reporting.",
             "financial_opportunity": None,
             "importance": "high",
-            "confidence": 0.9,
+            **confidence_fields(RULE_DATA_QUALITY),
             "data": {
                 "difficulty": "Medium",
                 "owner": "Data Operations",
                 "estimated_completion": "1-2 weeks",
-                "evidence": issue.get("description"),
+                "evidence": problem,
+                "column": column,
             },
         })
     return recs
@@ -108,7 +122,7 @@ def _forecast_recommendations(
                 else None
             ),
             "importance": "high" if abs(change) >= 15 else "medium",
-            "confidence": forecast.get("confidence", 0.7),
+            **confidence_fields(RULE_FORECAST, default=forecast.get("confidence", 0.7)),
             "data": {
                 "difficulty": "Medium",
                 "owner": owner,
@@ -136,7 +150,7 @@ def _anomaly_recommendations(anomalies: list[dict[str, Any]]) -> list[dict[str, 
         "expected_impact": "Helps explain whether this was exceptional performance, a tactical pattern, or a one-off match moment.",
         "financial_opportunity": None,
         "importance": "medium",
-        "confidence": 0.78,
+        **confidence_fields(RULE_ANOMALY),
         "data": {
             "difficulty": "Easy",
             "owner": _owner_for_metric(anomaly["column"]),
@@ -157,16 +171,14 @@ def _opportunity_from_value(value: Any, ratio: float) -> float | None:
 
 
 def _looks_like_currency(metric: str) -> bool:
-    normalized = metric.lower()
-    return any(
-        word in normalized
-        for word in ("revenue", "sales", "profit", "cost", "price", "amount", "income", "spend", "value", "arr", "mrr")
+    return contains_keyword(
+        metric,
+        ("revenue", "sales", "profit", "cost", "price", "amount", "income", "spend", "value", "arr", "mrr"),
     )
 
 
 def _owner_for_metric(metric: str) -> str:
-    normalized = metric.lower()
-    if any(word in normalized for word in ("revenue", "sales", "profit", "cost", "arr", "mrr")):
+    if contains_keyword(metric, ("revenue", "sales", "profit", "cost", "arr", "mrr")):
         return "Commercial Team"
     return "Operations"
 
