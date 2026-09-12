@@ -369,6 +369,29 @@ async def test_generate_analysis_uses_responses_api_with_strict_schema(monkeypat
     assert "PROFILE JSON - canonical analysis source of truth" in user_prompt
 
 
+async def test_prompt_forbids_attributing_a_record_extreme_to_its_group(monkeypatch):
+    """Regression: the summary read "the DFT department shows a standout
+    financial year variance of 733%" when 733% was a single project and the
+    department averaged 23.94. A non-technical reader repeating that figure as
+    the department's is simply wrong, which is the trust this product runs on.
+    """
+    payload = {"executive_summary": "OK.", "layout_grid": [], "recommendations": []}
+    fake = _FakeOpenAI(responses_outcome=SimpleNamespace(output_text=json.dumps(payload)))
+    monkeypatch.setattr(ai_service, "client", fake)
+
+    await AIService().generate_analysis("portfolio.xlsx", _PROFILE_STATS, [])
+
+    prompt = " ".join(
+        str(part.get("content", ""))
+        for part in fake.responses_calls[0]["input"]
+        if isinstance(part, dict)
+    )
+    assert "An extreme value belongs to the record that holds it" in prompt
+    # The recommendation titles carried the same error, not just the summary.
+    assert "recommendation titles as much as to the summary" in prompt
+    assert "name the record when quoting a single record's extreme value" in prompt
+
+
 async def test_generate_analysis_falls_back_to_chat_completions(monkeypatch):
     payload = {"executive_summary": "From fallback.", "layout_grid": [], "recommendations": []}
     fake = _FakeOpenAI(

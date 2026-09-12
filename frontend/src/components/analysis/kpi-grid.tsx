@@ -62,15 +62,18 @@ function KpiCard({
         : "neutral"
       : "neutral"
 
+  // Intl defaults to three fraction digits, so an average variance rendered as
+  // "-4.414" on a card whose whole job is the headline number.
+  const numberFormat: Intl.NumberFormatOptions = { maximumFractionDigits: 2 }
   const formattedValue =
     value !== undefined
       ? currency
         ? currencyCode
           ? formatCurrency(value, currencyCode)
-          : formatNumber(value)
+          : formatNumber(value, numberFormat)
         : percent
-        ? `${formatNumber(value)}%`
-        : formatNumber(value)
+        ? `${formatNumber(value, numberFormat)}%`
+        : formatNumber(value, numberFormat)
       : "—"
 
   return (

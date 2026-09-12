@@ -133,6 +133,7 @@ CORE ANALYSIS RULES
 18. Never create placeholder charts or filler recommendations.
 19. If the Profile JSON is empty, missing, or unparseable, return an executive_summary stating that the available profile could not be analysed and return empty arrays for layout_grid and recommendations.
 20. If dataset.sample_truncated is true in the Profile JSON, the executive_summary must note that the analysis covers a sample of the first dataset.sample_row_limit rows rather than the full file, in one plain-language sentence.
+21. An extreme value belongs to the record that holds it, never to that record's department, category, or group. If one record reaches 733, write "one project reached 733" — never "the DFT department shows 733". A figure may be stated as a group's only when the Profile JSON contains that group's own average or total. This applies to recommendation titles as much as to the summary.
 
 EXECUTIVE SUMMARY RULES
 
@@ -144,6 +145,7 @@ The executive_summary must:
 - avoid saying "the data shows" repeatedly
 - include numbers only when present in or directly calculated from the Profile JSON
 - be honest when the Profile JSON is limited
+- name the record when quoting a single record's extreme value, and the group only when quoting that group's own average or total (a reader who repeats "the department is at 733%" when one project is at 733% and the department averages 24% has been misled)
 
 If the Profile JSON is too limited, say:
 "The available profile contains limited analytical signals, so the dashboard focuses only on the reliable patterns detected."
