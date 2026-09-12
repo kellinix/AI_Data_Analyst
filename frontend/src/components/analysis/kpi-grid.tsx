@@ -47,6 +47,9 @@ function KpiCard({
   const value = patch && !patch.skipped && patch.value !== null ? patch.value : baseValue
   const changePercent = insight.data?.change_percent as number | undefined
   const currency = insight.data?.is_currency as boolean | undefined
+  // Only format as money when the file said which currency it is; otherwise a
+  // plain number, rather than showing e.g. UK £m figures as US dollars.
+  const currencyCode = insight.data?.currency as string | undefined
   const percent = insight.data?.is_percent as boolean | undefined
   const Icon = getKpiIcon(insight.title)
 
@@ -62,7 +65,9 @@ function KpiCard({
   const formattedValue =
     value !== undefined
       ? currency
-        ? formatCurrency(value)
+        ? currencyCode
+          ? formatCurrency(value, currencyCode)
+          : formatNumber(value)
         : percent
         ? `${formatNumber(value)}%`
         : formatNumber(value)

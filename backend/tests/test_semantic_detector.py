@@ -36,6 +36,57 @@ def test_numeric_date_name_is_temporal_not_metric():
     assert enriched[0]["analysis_role"] == "temporal_dimension"
 
 
+def test_prose_column_name_containing_time_is_not_a_date():
+    """Regression: the name rule matched the word "time" inside
+    "...assessment of the project at a fixed point in time...", so a
+    Red/Amber/Green rating became the dashboard's time axis."""
+    name = (
+        "ipa_delivery_confidence_assessment_a_delivery_confidence_assessment_of_the_"
+        "project_at_a_fixed_point_in_time_using_a_three_point_scale_red_amber_green"
+    )
+    schema = [{"name": name, "dtype": "VARCHAR", "is_numeric": False, "is_date": False}]
+    categorical_stats = {
+        name: {
+            "unique_count": 3,
+            "top_values": [
+                {"value": "Amber", "count": 20},
+                {"value": "Green", "count": 15},
+                {"value": "Not Applicable", "count": 14},
+            ],
+        }
+    }
+
+    enriched = enrich_schema_with_semantics(schema, {}, categorical_stats)
+
+    assert enriched[0]["analysis_role"] != "temporal_dimension"
+    assert enriched[0]["semantic_type"] != "date"
+
+
+def test_text_date_column_with_real_dates_is_still_temporal():
+    schema = [{"name": "project_start_date", "dtype": "VARCHAR", "is_numeric": False, "is_date": False}]
+    categorical_stats = {
+        "project_start_date": {
+            "unique_count": 2,
+            "top_values": [{"value": "2000-05-17", "count": 3}, {"value": "2014-04-01", "count": 2}],
+        }
+    }
+
+    enriched = enrich_schema_with_semantics(schema, {}, categorical_stats)
+
+    assert enriched[0]["analysis_role"] == "temporal_dimension"
+
+
+def test_narrative_column_is_not_typed_as_currency():
+    """Same substring bug in the semantic rules: "arr" inside "narrative"."""
+    schema = [
+        {"name": "departmental_narrative_on_schedule", "dtype": "VARCHAR", "is_numeric": False, "is_date": False}
+    ]
+
+    enriched = enrich_schema_with_semantics(schema, {}, {})
+
+    assert enriched[0]["semantic_type"] != "currency"
+
+
 def test_age_and_coordinate_columns_are_attributes_not_metrics():
     schema = [
         {"name": "age", "dtype": "BIGINT", "is_numeric": True, "is_date": False},

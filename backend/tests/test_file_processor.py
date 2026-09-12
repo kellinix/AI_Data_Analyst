@@ -356,6 +356,113 @@ def test_clean_dataframe_caps_outliers_without_dropping_rows():
     assert report["outlier_capping"]["columns"][0]["column"] == "revenue"
 
 
+def test_prose_columns_are_never_converted_to_numbers():
+    """Regression: the parser searched for a number anywhere in the cell, so
+    "Compared to financial year 22/23-Q4, ..." became 22.0. With enough such
+    rows a narrative column was rewritten as a numeric metric and then summed
+    as money on the dashboard."""
+    processor = FileProcessor()
+    df = pl.DataFrame(
+        {
+            "Departmental narrative on schedule": [
+                "Compared to financial year 22/23-Q4, the project's end-date moved.",
+                "The SSN-AUKUS programme is in its early stages and is working to 2025.",
+                "Compared to financial year 22/23-Q4, the forecast is unchanged.",
+                "Exempt under Section 24 of the Freedom of Information Act 2000.",
+            ],
+            "GMPP ID Number": ["MOD_0001_1112-Q1", "MOD_0007_2122-Q2", "MOD_0011_1314-Q4", "MOD_0021_1516-Q1"],
+            "Financial Year Baseline": ["228.69", "463.64", "1,204.00", "£53.10"],
+        }
+    )
+
+    cleaned, report = processor.clean_dataframe(
+        df,
+        {
+            "parse_currency_percent": True,
+            "missing_data_strategy": "none",
+            "remove_duplicates": False,
+            "semantic_categorical_merging": False,
+        },
+    )
+
+    converted = {item["column"] for item in report["converted_numeric_columns"]}
+    assert converted == {"financial_year_baseline"}
+    assert cleaned["departmental_narrative_on_schedule"].dtype == pl.String
+    assert cleaned["gmpp_id_number"].dtype == pl.String
+    assert cleaned["financial_year_baseline"].to_list() == [228.69, 463.64, 1204.0, 53.1]
+
+
+def test_detects_currency_from_the_original_column_header():
+    """Regression: every amount was formatted as USD, so UK government £m
+    figures displayed as "$23,078,507,463.50". Standardising column names
+    strips the symbol, so detection has to happen on the raw header."""
+    processor = FileProcessor()
+    df = pl.DataFrame({"Financial Year Baseline (£m)": ["228.69", "463.64"], "Project": ["A400M", "AUKUS"]})
+
+    _, report = processor.clean_dataframe(
+        df,
+        {"missing_data_strategy": "none", "remove_duplicates": False, "semantic_categorical_merging": False},
+    )
+
+    assert report["currency"]["code"] == "GBP"
+    assert report["currency"]["symbol"] == "£"
+
+
+def test_currency_is_none_when_the_file_says_nothing():
+    processor = FileProcessor()
+    df = pl.DataFrame({"Revenue": ["100", "200"], "Region": ["North", "South"]})
+
+    _, report = processor.clean_dataframe(
+        df,
+        {"missing_data_strategy": "none", "remove_duplicates": False, "semantic_categorical_merging": False},
+    )
+
+    assert report["currency"] is None
+
+
+def test_withheld_values_do_not_stop_a_money_column_converting():
+    """Real government data carries "Exempt under Section 43 of the Freedom of
+    Information Act 2000" in otherwise numeric money columns (15 of 49 rows in
+    the GMPP files). Those rows are withheld numbers, so they become null and
+    the column still converts; a column that is mostly prose does not."""
+    processor = FileProcessor()
+    df = pl.DataFrame(
+        {
+            "Financial Year Baseline": [
+                "228.69",
+                "Exempt under Section 43 of the Freedom of Information Act 2000 (Commercial)",
+                "463.64",
+                "Not Available",
+                "148.56",
+                "330",
+            ],
+            "Departmental narrative": [
+                "Compared to financial year 22/23-Q4, the end-date moved.",
+                "The programme is in its early stages.",
+                "12.5",
+                "Delivery remains on track for 2025.",
+                "The forecast is unchanged.",
+                "Exempt under Section 27 of the Freedom of Information Act 2000",
+            ],
+        }
+    )
+
+    cleaned, report = processor.clean_dataframe(
+        df,
+        {
+            "parse_currency_percent": True,
+            "missing_data_strategy": "none",
+            "remove_duplicates": False,
+            "semantic_categorical_merging": False,
+        },
+    )
+
+    converted = {item["column"] for item in report["converted_numeric_columns"]}
+    assert converted == {"financial_year_baseline"}
+    assert cleaned["financial_year_baseline"].to_list() == [228.69, None, 463.64, None, 148.56, 330.0]
+    assert cleaned["departmental_narrative"].dtype == pl.String
+
+
 def test_clean_dataframe_casts_currency_and_percentage_text_to_numbers():
     processor = FileProcessor()
     df = pl.DataFrame(

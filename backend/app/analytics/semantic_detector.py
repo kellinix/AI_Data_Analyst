@@ -11,8 +11,11 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from app.analytics.text_matching import contains_keyword
+
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 PHONE_RE = re.compile(r"^\+?[\d\s().-]{7,}$")
+DATE_VALUE_RE = re.compile(r"\d{1,4}[-/]\d{1,2}[-/]\d{1,4}|\d{1,2}\s+[A-Za-z]{3,9}\s+\d{2,4}")
 
 
 @dataclass(frozen=True)
@@ -89,7 +92,7 @@ def detect_column_semantics(
     if column.get("is_date"):
         return _profile("date", 0.98, "Date or timestamp dtype", "temporal_dimension")
 
-    if _looks_like_date_name(normalized):
+    if _looks_like_date_name(normalized) and _has_date_like_values(column, name, categorical_stats):
         return _profile("date", 0.9, "Column name looks like a date or time field", "temporal_dimension")
 
     if normalized in {"source_file", "sheet"}:
@@ -108,7 +111,7 @@ def detect_column_semantics(
         return _profile("text", 0.78, "Column name looks like descriptive text", "text")
 
     for rule in RULES:
-        if any(keyword in normalized for keyword in rule.keywords):
+        if contains_keyword(normalized, rule.keywords):
             return _profile(
                 rule.semantic_type,
                 rule.confidence,
@@ -164,6 +167,25 @@ def _looks_like_identifier(normalized: str) -> bool:
         or normalized.endswith("_guid")
         or normalized.startswith("id_")
     )
+
+
+def _has_date_like_values(
+    column: dict[str, Any], name: str, categorical_stats: dict[str, Any]
+) -> bool:
+    """Whether a date-ish *name* is backed by date-ish values.
+
+    Numeric columns keep the name-only rule (a date can legitimately arrive as
+    20260710). Text columns must show dates in their observed values: prose
+    names like "...assessment of the project at a fixed point in time..."
+    otherwise turned a Red/Amber/Green rating into the dashboard's time axis.
+    """
+    if column.get("is_numeric"):
+        return True
+    top_values = (categorical_stats.get(name) or {}).get("top_values") or []
+    values = [str(item.get("value", "")) for item in top_values if isinstance(item, dict)]
+    if not values:
+        return False
+    return sum(bool(DATE_VALUE_RE.search(value)) for value in values) / len(values) >= 0.5
 
 
 def _looks_like_date_name(normalized: str) -> bool:

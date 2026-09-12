@@ -36,7 +36,7 @@ from app.models.analysis import Analysis, AnalysisStatus, UploadedFile
 from app.models.insight import Insight
 from app.services.ai_service import AIService
 from app.services.data_profile import build_data_profile_schema, write_data_profile_schema
-from app.services.file_processor import FileProcessor
+from app.services.file_processor import FileProcessor, detect_currency_in_text
 from app.services.semantic_wrangler import (
     SemanticWrangler,
     apply_display_metadata_to_charts,
@@ -193,6 +193,7 @@ class AnalysisEngine:
                 data={
                     "value": kpi.get("value"),
                     "is_currency": kpi.get("is_currency", False),
+                    "currency": kpi.get("currency"),
                     "is_percent": is_percent,
                     "kpi_type": kpi.get("kpi_type"),
                     "mean": kpi.get("mean"),
@@ -264,6 +265,7 @@ class AnalysisEngine:
                 "estimated_completion": rec.get("estimated_completion"),
                 "confidence_source": rec.get("confidence_source"),
                 "confidence_method": rec.get("confidence_method"),
+                "currency": (metadata.get("currency") or {}).get("code"),
                 **rec_data,
             }
             insight = Insight(
@@ -297,6 +299,7 @@ class AnalysisEngine:
             "forecasts": metadata.get("forecasts", []),
             "anomalies": metadata.get("anomalies", []),
             "ai_generation": metadata.get("ai_generation"),
+            "currency": metadata.get("currency"),
         }
 
         await db.flush()
@@ -362,6 +365,13 @@ async def compute_analysis(
             schema=statistics["schema"],
             numeric_stats=statistics["numeric_stats"],
         )
+        currency = _resolve_currency(statistics, upload_context)
+        if currency:
+            statistics["currency"] = currency
+            for kpi in kpis:
+                if kpi.get("is_currency"):
+                    kpi["currency"] = currency["code"]
+                    kpi["currency_symbol"] = currency["symbol"]
         await progress(50)
 
         # Step 4: Select charts, populate them from DuckDB, apply display labels
@@ -456,6 +466,26 @@ async def compute_analysis(
         "ai_result": ai_result,
         "recommendations": recommendations,
     }
+
+
+def _resolve_currency(statistics: dict[str, Any], upload_context: Any) -> dict[str, Any] | None:
+    """Which currency this analysis's money values are in.
+
+    Cleaning sees the original headers ("Financial Year Baseline (£m)") before
+    standardisation rewrites the symbol, so its report is the better source; on
+    the raw path the column names still carry the symbol themselves. Unknown
+    stays unknown — amounts are then shown without a symbol rather than as USD.
+    """
+    if isinstance(upload_context, dict):
+        report = (upload_context.get("cleaning") or {}).get("report") or {}
+        currency = report.get("currency")
+        if isinstance(currency, dict) and currency.get("code"):
+            return currency
+    for column in statistics.get("schema", []):
+        found = detect_currency_in_text(str(column.get("name", "")))
+        if found:
+            return {**found, "evidence": f"column name {column.get('name')!r}"}
+    return None
 
 
 def _populate_charts(

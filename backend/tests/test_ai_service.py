@@ -432,12 +432,12 @@ def test_build_stats_summary_without_profile_json_formats_kpis_and_stats():
         "numeric_stats": {"revenue": {"mean": 10, "min": 1, "max": 50, "total": 10000}},
         "data_quality": {"score": 88, "issues": [{"description": "5% missing region"}]},
     }
-    kpis = [{"column": "total_revenue", "value": 10000, "is_currency": True}]
+    kpis = [{"column": "total_revenue", "value": 10000, "is_currency": True, "currency_symbol": "£"}]
 
     summary = AIService()._build_stats_summary(statistics, kpis)
 
     assert "Rows: 1,000" in summary
-    assert "Total Revenue: $10,000.00" in summary
+    assert "Total Revenue: £10,000.00" in summary
     assert "revenue: mean=10.00" in summary
     assert "DATA QUALITY SCORE: 88/100" in summary
     assert "5% missing region" in summary
@@ -543,11 +543,22 @@ def test_fallback_summary_reflects_quality_score(score, phrase):
 
 def test_fallback_summary_lists_key_measures():
     kpis = [
-        {"column": "total_revenue", "value": 12500.0, "is_currency": True},
+        {"column": "total_revenue", "value": 12500.0, "is_currency": True, "currency_symbol": "£"},
         {"column": "return_pct", "value": 4.5, "is_percent": True},
     ]
 
     summary = _fallback_summary({"row_count": 10, "column_count": 2}, kpis)
 
-    assert "Total Revenue at $12,500.00" in summary
+    assert "Total Revenue at £12,500.00" in summary
     assert "a return % rate of 4.5%" in summary
+
+
+def test_amounts_have_no_symbol_when_the_currency_is_unknown():
+    """Regression: everything was formatted as USD, so UK £m figures read as
+    "$23,078,507,463.50". Unknown currency now means no symbol."""
+    kpis = [{"column": "total_revenue", "value": 12500.0, "is_currency": True}]
+
+    summary = _fallback_summary({"row_count": 10, "column_count": 2}, kpis)
+
+    assert "Total Revenue at 12,500.00" in summary
+    assert "$" not in summary

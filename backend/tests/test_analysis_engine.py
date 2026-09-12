@@ -6,6 +6,30 @@ from app.services import analysis_engine
 from app.services.analysis_engine import AnalysisEngine
 
 
+def test_currency_comes_from_the_cleaning_report_first():
+    """Cleaning sees the original header "(£m)" before standardisation rewrites
+    the symbol, so its report is the authoritative source."""
+    upload_context = {"cleaning": {"report": {"currency": {"code": "GBP", "symbol": "£"}}}}
+    statistics = {"schema": [{"name": "revenue_usd"}]}
+
+    assert analysis_engine._resolve_currency(statistics, upload_context) == {"code": "GBP", "symbol": "£"}
+
+
+def test_currency_falls_back_to_column_names_on_the_raw_path():
+    statistics = {"schema": [{"name": "project"}, {"name": "Financial Year Baseline (£m)"}]}
+
+    resolved = analysis_engine._resolve_currency(statistics, None)
+
+    assert resolved["code"] == "GBP"
+    assert resolved["symbol"] == "£"
+
+
+def test_currency_stays_unknown_when_nothing_says_so():
+    statistics = {"schema": [{"name": "revenue"}, {"name": "region"}]}
+
+    assert analysis_engine._resolve_currency(statistics, {"cleaning": {"report": {}}}) is None
+
+
 class _RecordingSession:
     def __init__(self) -> None:
         self.calls: list[str] = []

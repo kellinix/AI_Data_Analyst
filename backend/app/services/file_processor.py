@@ -309,6 +309,10 @@ class FileProcessor:
             "missing_values": {},
         }
 
+        # Detect before standardising: renaming strips the symbol that says
+        # which currency the money columns are in ("(£m)" -> "currency_m").
+        report["currency"] = _detect_currency(df)
+
         cleaned = df.clone()
         if options["standardize_columns"]:
             original_columns = cleaned.columns
@@ -436,9 +440,23 @@ class FileProcessor:
                 continue
             if _looks_like_date_column(_standardize_column_name(column), series):
                 continue
-            parsed_values = [_parse_numeric_text_value(value) for value in series.to_list()]
+            values = series.to_list()
+            parsed_values = [_parse_numeric_text_value(value) for value in values]
             numeric_count = sum(value is not None for value in parsed_values)
-            if numeric_count / non_null >= 0.85:
+            # Rows whose value was withheld ("Exempt under Section 43 of the
+            # Freedom of Information Act 2000") carry a missing number, not a
+            # category, so they must not count against the column being numeric.
+            withheld_count = sum(
+                1
+                for value, parsed in zip(values, parsed_values, strict=True)
+                if parsed is None and value is not None and _looks_like_withheld_value(str(value))
+            )
+            candidates = non_null - withheld_count
+            numeric_share = numeric_count / candidates if candidates else 0.0
+            # The floor keeps a mostly-prose column from converting on the back
+            # of a handful of numbers.
+            numeric_enough = numeric_share >= 0.85 and numeric_count >= 0.2 * non_null
+            if numeric_enough:
                 expressions.append(pl.Series(column, parsed_values, dtype=pl.Float64).alias(column))
                 converted.append(
                     {
@@ -457,7 +475,8 @@ class FileProcessor:
             )
             numeric = cleaned.cast(pl.Float64, strict=False)
             numeric_count = numeric.drop_nulls().len()
-            if numeric_count / non_null >= 0.85:
+            numeric_share = numeric_count / candidates if candidates else 0.0
+            if numeric_share >= 0.85 and numeric_count >= 0.2 * non_null:
                 expressions.append(
                     pl.col(column)
                     .str.strip_chars()
@@ -1176,8 +1195,15 @@ def _parse_numeric_text_value(value: Any) -> float | None:
     cleaned = re.sub(r"[,$£€¥₹₦%]", "", cleaned)
     cleaned = re.sub(r"\b(bn|billion|mn|million|thousand|k|m|b)\b", "", cleaned)
     cleaned = cleaned.replace(" ", "")
+    # A magnitude suffix stuck to the digits ("1.2k") isn't caught by the word
+    # boundary above; its multiplier was already read from the raw text.
+    cleaned = re.sub(r"(?<=\d)(bn|mn|[kmb])$", "", cleaned)
 
-    match = re.search(r"[-+]?\d*\.?\d+", cleaned)
+    # Fullmatch, not search: the cell must *be* a number once symbols, separators
+    # and magnitude words are stripped. Searching pulled the first number out of
+    # prose — "Compared to financial year 22/23-Q4, ..." became 22.0, and with
+    # enough such rows a narrative column was rewritten as a numeric metric.
+    match = re.fullmatch(r"[-+]?\d*\.?\d+", cleaned)
     if not match:
         return None
     try:
@@ -1185,6 +1211,62 @@ def _parse_numeric_text_value(value: Any) -> float | None:
     except ValueError:
         return None
     return -abs(parsed) if negative else parsed
+
+
+CURRENCY_BY_SYMBOL = {"£": "GBP", "$": "USD", "€": "EUR", "¥": "JPY", "₹": "INR", "₦": "NGN"}
+SYMBOL_BY_CURRENCY = {code: symbol for symbol, code in CURRENCY_BY_SYMBOL.items()}
+_CURRENCY_CODE_RE = re.compile(r"\b(gbp|usd|eur|jpy|inr|ngn|cad|aud)\b", re.IGNORECASE)
+
+
+def detect_currency_in_text(text: str) -> dict[str, str] | None:
+    """Currency named by a header or cell, as `{"code", "symbol"}`, else None."""
+    for symbol, code in CURRENCY_BY_SYMBOL.items():
+        if symbol in text:
+            return {"code": code, "symbol": symbol}
+    match = _CURRENCY_CODE_RE.search(text)
+    if match:
+        code = match.group(1).upper()
+        return {"code": code, "symbol": SYMBOL_BY_CURRENCY.get(code, "")}
+    return None
+
+
+def _detect_currency(df: pl.DataFrame) -> dict[str, Any] | None:
+    """Which currency this file's money columns are in.
+
+    Headers carry it far more often than cells ("Financial Year Baseline (£m)"),
+    so they are checked first. Without this every amount was formatted as US
+    dollars, which turned UK government £m figures into "$23,078,507,463.50".
+    """
+    for column in df.columns:
+        found = detect_currency_in_text(str(column))
+        if found:
+            return {**found, "evidence": f"column header {str(column)[:60]!r}"}
+    for column in df.columns:
+        if df[column].dtype != pl.String:
+            continue
+        for value in df[column].drop_nulls().head(20).to_list():
+            found = detect_currency_in_text(str(value))
+            if found:
+                return {**found, "evidence": f"value in {str(column)[:40]!r}: {str(value)[:30]!r}"}
+    return None
+
+
+_WITHHELD_VALUE_RE = re.compile(
+    r"\b(exempt|redacted|withheld|confidential|commercially\s+sensitive|"
+    r"not\s+(available|applicable|disclosed|reported|published)|tbc|tbd)\b",
+    re.IGNORECASE,
+)
+
+
+def _looks_like_withheld_value(text: str) -> bool:
+    """Whether a cell says the number was withheld rather than giving a category.
+
+    Government publications routinely carry "Exempt under Section 43 of the
+    Freedom of Information Act 2000" inside otherwise numeric money columns —
+    15 of 49 rows in the GMPP data. Counting those as non-numeric evidence kept
+    genuine metric columns as text; counting them as missing keeps the metric.
+    """
+    return bool(_WITHHELD_VALUE_RE.search(text))
 
 
 def _looks_like_currency_column(column: str, series: pl.Series) -> bool:
@@ -1285,19 +1367,23 @@ def _looks_like_year_column(column: str) -> bool:
 
 
 def _looks_like_date_column(normalized_name: str, series: pl.Series) -> bool:
-    if (
-        "date" in normalized_name
-        or "time" in normalized_name
+    """A date column needs date-looking *values*; the name only lowers the bar.
+
+    Name alone used to be enough, so a prose column name containing the word
+    "time" ("...assessment of the project at a fixed point in time...") was
+    treated as a date column even though its values were Red/Amber/Green.
+    """
+    tokens = set(re.split(r"[^a-z0-9]+", normalized_name.lower()))
+    name_hint = bool(
+        tokens & {"date", "time", "timestamp", "datetime", "month", "period"}
         or normalized_name.endswith("_at")
-        or normalized_name in {"month", "period", "timestamp", "datetime"}
-    ):
-        return True
+    )
 
     sample = [str(value).strip() for value in series.drop_nulls().head(20).to_list()]
     if not sample:
         return False
     date_like = sum(_looks_like_date_value(value) for value in sample)
-    return date_like / len(sample) >= 0.7
+    return date_like / len(sample) >= (0.5 if name_hint else 0.7)
 
 
 def _looks_like_date_value(value: str) -> bool:

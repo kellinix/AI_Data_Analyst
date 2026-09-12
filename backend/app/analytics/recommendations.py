@@ -16,6 +16,7 @@ from app.analytics.calibration import (
     RULE_TRACKING,
     confidence_fields,
 )
+from app.analytics.text_matching import contains_keyword
 
 
 def generate_recommendations(
@@ -170,16 +171,14 @@ def _opportunity_from_value(value: Any, ratio: float) -> float | None:
 
 
 def _looks_like_currency(metric: str) -> bool:
-    normalized = metric.lower()
-    return any(
-        word in normalized
-        for word in ("revenue", "sales", "profit", "cost", "price", "amount", "income", "spend", "value", "arr", "mrr")
+    return contains_keyword(
+        metric,
+        ("revenue", "sales", "profit", "cost", "price", "amount", "income", "spend", "value", "arr", "mrr"),
     )
 
 
 def _owner_for_metric(metric: str) -> str:
-    normalized = metric.lower()
-    if any(word in normalized for word in ("revenue", "sales", "profit", "cost", "arr", "mrr")):
+    if contains_keyword(metric, ("revenue", "sales", "profit", "cost", "arr", "mrr")):
         return "Commercial Team"
     return "Operations"
 

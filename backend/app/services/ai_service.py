@@ -415,7 +415,8 @@ When answering:
             for kpi in kpis[:8]:
                 value = kpi.get("value")
                 is_currency = kpi.get("is_currency", False)
-                formatted = f"${value:,.2f}" if is_currency and value is not None else f"{value:,.0f}" if value is not None else "N/A"
+                symbol = kpi.get("currency_symbol") or ""
+                formatted = f"{symbol}{value:,.2f}" if is_currency and value is not None else f"{value:,.0f}" if value is not None else "N/A"
                 lines.append(f"  {_humanize_column_label(kpi['column'])}: {formatted}")
 
         numeric_stats = statistics.get("numeric_stats", {})
@@ -873,7 +874,9 @@ def _format_metric_value(kpi: dict[str, Any]) -> str:
     if value is None:
         return "not available"
     if kpi.get("is_currency"):
-        return f"${float(value):,.2f}"
+        # No symbol when the file never said which currency it is — better than
+        # printing UK £m figures as US dollars.
+        return f"{kpi.get('currency_symbol') or ''}{float(value):,.2f}"
     numeric = float(value)
     if abs(numeric) >= 1000:
         return f"{numeric:,.0f}" if numeric.is_integer() else f"{numeric:,.2f}"

@@ -117,7 +117,7 @@ The full local stack (Docker backend, Celery worker, Postgres, Redis; `next dev`
 
 **Environment problems:** on **Node 25** the server has a `localStorage` object whose methods are undefined, and every `next dev` page returned 500 (`localStorage.getItem is not a function`). A preload script that logged a stack on each server-side `localStorage` read traced it to **Next's own dev overlay** (`react-dev-overlay/…/preferences.js`, `getInitialScale`) — dev-only, not app code. And `next dev` run from `frontend/` reads only `frontend/.env*`, not the repo-root `.env`, so without a `frontend/.env.local` the Supabase middleware had no URL and every page returned 500 (documented in the README).
 
-**Found during testing, then fixed the same day** (regression tests in `test_api_contracts.py` and `test_ai_service.py`):
+**Found during testing, then fixed** (regression tests in `test_api_contracts.py` and `test_ai_service.py`):
 
 | Problem | Fix |
 |---|---|
@@ -126,3 +126,29 @@ The full local stack (Docker backend, Celery worker, Postgres, Redis; `next dev`
 | **`/users/me` returned 500 for reserved-domain emails** (e.g. `@example.test`), which Supabase accepts at sign-up but `EmailStr` rejects. | Response models echo the stored email as `str`; sign-up input is still validated |
 | **AI failures were invisible to users** — the dashboard silently showed the deterministic summary. | `generate_analysis` reports `generation.status` (`ai` / `fallback`), persisted as `metadata.ai_generation`; the dashboard shows a notice on fallback |
 | **Node 25 broke `next dev`** — Next's dev overlay reads Node 25's non-functional server `localStorage`. | `npm run dev` now runs `frontend/scripts/dev.mjs`, which adds `--no-experimental-webstorage` only on Node 25+ (the flag doesn't exist on Node 20, which CI uses). The auth store's `persist` was also made browser-only, defensively |
+
+## 8. Real-data test: UK government major projects portfolio (2026-09-12)
+
+Six IPA *Government Major Projects Portfolio* spreadsheets (MOD, DFT, HO, DFE, DHSC, DCMS; March 2024) were uploaded and combined through the product's own UI with default cleaning — 118 rows, 20 columns. The dashboard it produced was confidently wrong, and every cause sat in the deterministic layer *before* any AI call. This section records the diagnosis; each fix has a regression test built from these files.
+
+**What the dashboard showed:** KPI tiles reading "Departmental Narrative On Schedule ... $8,323" and "Departmental Narrative On Budgeted Whole Life Costs $23,078,507,463.50"; "Key Metrics Over Time" plotted against "Amber"; forecasts of "-29.14, likely between -770.66 and 712.38" citing "73 monthly observations"; £m figures shown in dollars.
+
+| # | Root cause | Evidence | Fix |
+|---|---|---|---|
+| 1 | `_parse_numeric_text_value` **searched** for a number anywhere in a cell, and a column converted to numeric once 85% of rows yielded one | "Compared to financial year 22/23-Q4, the project's end-date…" → `22.0` in 46 of 49 rows; `GMPP ID Number` "MOD_0001_1112-Q1" → a number too | The whole cell must be numeric once symbols, separators and magnitude suffixes are stripped (`re.fullmatch`) |
+| 2 | Withheld values counted as evidence *against* a column being numeric | "Financial Year Baseline (£m)": 33 numeric, 15 "Exempt under Section 43 of the Freedom of Information Act 2000", 1 "Not Available" — after fix 1 the column fell below 85% and the real metric was lost | `_looks_like_withheld_value` treats those rows as missing numbers (null), with a floor so prose columns can't convert |
+| 3 | Keyword vocabularies matched as **substrings** | `"arr"` inside "n**arr**ative" typed three narrative columns as annual recurring revenue — in `kpi_detector`, `semantic_detector` and `recommendations` | New `app/analytics/text_matching.py` matches whole, singularised tokens: `"arr"` no longer matches "narrative", `"cost"` still matches "costs" |
+| 4 | A column counted as a date if its **name** contained "time" | "…assessment of the project at a fixed point in **time**…" made a Red/Amber/Green rating `temporal_dimension`, so it became the x-axis of "Over Time" charts | Date-ish names now need date-ish values (text columns); numeric date names (20260710) keep the old rule |
+| 5 | Currency was hardcoded to USD in the API, the AI summaries and the frontend | UK £m columns displayed as `$23,078,507,463.50` | Detected from the original headers before standardisation rewrites "(£m)" → "currency_m", carried on the cleaning report → statistics → KPI insights → UI; unknown currency now shows no symbol rather than a dollar sign |
+
+**Before → after on the same file** (`MOD_…_March_2024.xlsx`, run offline through `compute_analysis`, no OpenAI spend):
+
+| | Before | After |
+|---|---|---|
+| Columns converted to numeric | 10, including 3 narrative columns, the commentary column and the ID column | 4, all genuinely numeric (33/49, 33/49, 34/49, 25/49 — withheld rows null) |
+| KPI tiles | 4 narrative columns as money, typed `arr` | the real money metrics, typed `cost`, plus the variance percentage |
+| Red/Amber/Green columns | `temporal_dimension` (the charts' time axis) | `dimension` |
+| Chart time axis | the RAG rating | `project_start_date` |
+| Currency | assumed USD | `GBP`, from the header `Financial Year Baseline (£m)` |
+
+**Still open on this dataset** (not regressions, and outside the approved fixes): forecasting treats project start dates spanning 1997–2024 as 41 monthly observations and projects "next month" from them, which is meaningless for a project portfolio; and a text column can still carry `analysis_role=metric` from its name alone (harmless, since KPI detection requires numbers). Existing analyses keep their old numbers until re-analysed.

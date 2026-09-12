@@ -15,7 +15,7 @@ import {
 } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { useRecommendationFeedback } from "@/hooks/use-analyses"
-import { cn, formatCurrency } from "@/lib/utils"
+import { cn, formatCurrency, formatNumber } from "@/lib/utils"
 import type { Insight, RecommendationFeedbackVerdict } from "@/types"
 
 const priorityConfig = {
@@ -138,6 +138,7 @@ function RecommendationCard({
     difficulty?: string
     owner?: string
     estimated_completion?: string
+    currency?: string
   }
   const financialOpportunity =
     typeof data.financial_opportunity === "number"
@@ -196,7 +197,10 @@ function RecommendationCard({
                 Opportunity
               </p>
               <p className="text-sm font-semibold text-emerald-600 dark:text-emerald-400">
-                +{formatCurrency(financialOpportunity ?? 0)}
+                +
+                {data.currency
+                  ? formatCurrency(financialOpportunity ?? 0, data.currency)
+                  : formatNumber(financialOpportunity ?? 0)}
               </p>
             </div>
           </div>

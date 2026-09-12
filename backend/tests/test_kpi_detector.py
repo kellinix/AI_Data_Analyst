@@ -1,6 +1,37 @@
 from __future__ import annotations
 
-from app.analytics.kpi_detector import detect_kpis
+import pytest
+
+from app.analytics.kpi_detector import _classify_column, _is_currency, detect_kpis
+
+
+@pytest.mark.parametrize(
+    ("column", "expected"),
+    [
+        # Regression: "arr" matched inside "n-arr-ative", so narrative text
+        # columns in a government project dataset became annual recurring
+        # revenue and were summed as money.
+        ("departmental_narrative_on_schedule_including_any_deviation", None),
+        ("departmental_narrative_on_budgeted_benefits", None),
+        ("departmental_commentary_on_actions_planned_or_taken", None),
+        # Real vocabulary still matches, including plurals and phrases.
+        ("total_revenue", "revenue"),
+        ("whole_life_costs", "cost"),
+        ("units_sold", "orders"),
+        ("new_customers", "customers"),
+        ("avg_order_value", "revenue"),
+        ("customer_satisfaction_rating", "average"),
+        ("annual_recurring_revenue", "arr"),
+    ],
+)
+def test_classify_column_matches_whole_words_only(column, expected):
+    assert _classify_column(column) == expected
+
+
+def test_narrative_columns_are_not_currency():
+    assert _is_currency("departmental_narrative_on_budgeted_whole_life_costs") is True  # "costs"
+    assert _is_currency("departmental_narrative_on_schedule") is False
+    assert _is_currency("total_revenue") is True
 
 
 def test_detect_revenue_kpi():
