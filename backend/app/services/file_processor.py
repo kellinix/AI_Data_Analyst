@@ -972,6 +972,13 @@ class FileProcessor:
             numeric = cleaned.cast(pl.Float64, strict=False)
             non_null = series.drop_nulls().len()
             numeric_count = numeric.drop_nulls().len()
+            # Leave columns whose non-numeric cells say the value was withheld
+            # ("Exempt under Section 43 of the Freedom of Information Act
+            # 2000"). Casting here would turn them into anonymous nulls before
+            # cleaning can record them, and those rows then look like ordinary
+            # gaps: imputed, or enough to drop the row entirely.
+            if _has_withheld_values(series):
+                continue
             if non_null and numeric_count / non_null >= 0.85:
                 # Whole-number columns become integers so codes and counts
                 # don't render as "2.0" in labels, charts, and stats.
@@ -1278,6 +1285,14 @@ _WITHHELD_VALUE_RE = re.compile(
     r"not\s+(available|applicable|disclosed|reported|published)|tbc|tbd)\b",
     re.IGNORECASE,
 )
+
+
+def _has_withheld_values(series: pl.Series) -> bool:
+    """Whether any sampled cell says its value was withheld rather than absent."""
+    return any(
+        _looks_like_withheld_value(str(value))
+        for value in series.drop_nulls().head(200).to_list()
+    )
 
 
 def _looks_like_withheld_value(text: str) -> bool:

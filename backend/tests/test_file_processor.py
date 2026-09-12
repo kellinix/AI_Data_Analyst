@@ -392,6 +392,70 @@ def test_prose_columns_are_never_converted_to_numbers():
     assert cleaned["financial_year_baseline"].to_list() == [228.69, 463.64, 1204.0, 53.1]
 
 
+def test_read_time_casting_leaves_withheld_columns_to_the_cleaning_stage():
+    """Regression: read-time coercion cast a mostly-numeric column and turned
+    "Exempt under Section 43 ..." into anonymous nulls. Cleaning then had no
+    idea those rows were withheld, so it imputed them or dropped their rows —
+    the same file lost 12 of 118 projects when it arrived as CSV rather than
+    Excel."""
+    processor = FileProcessor()
+    df = pl.DataFrame(
+        {
+            "Benefits": ["10", "20", "30", "40", "50", "60"],
+            "Whole Life Cost": [
+                "100",
+                "200",
+                "300",
+                "400",
+                "500",
+                "Exempt under Section 43 of the Freedom of Information Act 2000",
+            ],
+        }
+    )
+
+    cast = processor._cast_numeric_like_columns(df)
+
+    assert cast["Benefits"].dtype == pl.Int64, "ordinary numeric text still casts"
+    assert cast["Whole Life Cost"].dtype == pl.String
+
+
+def test_withheld_values_survive_a_csv_round_trip(tmp_path):
+    """The same data must behave identically whether it arrives as a dataframe
+    or through the CSV reader."""
+    processor = FileProcessor()
+    df = pl.DataFrame(
+        {
+            "Project": ["A", "B", "C", "D", "E", "F"],
+            "Whole Life Cost": [
+                "100",
+                "Exempt under Section 43 of the Freedom of Information Act 2000",
+                "200",
+                "300",
+                "400",
+                "500",
+            ],
+        }
+    )
+    csv_path = tmp_path / "projects.csv"
+    df.write_csv(csv_path)
+
+    reread = processor._read_file(str(csv_path), ".csv")
+    options = {
+        "parse_currency_percent": True,
+        "missing_data_strategy": "smart",
+        "remove_duplicates": False,
+        "semantic_categorical_merging": False,
+    }
+    from_frame, frame_report = processor.clean_dataframe(df, options)
+    from_csv, csv_report = processor.clean_dataframe(reread, options)
+
+    assert from_frame.height == from_csv.height == 6
+    assert from_csv["whole_life_cost"].sum() == 1500.0
+    assert frame_report["withheld_value_columns"] == csv_report["withheld_value_columns"] == [
+        "whole_life_cost"
+    ]
+
+
 def test_withheld_costs_are_never_imputed_and_keep_their_rows():
     """Regression: withheld values became null, then "smart" missing-data
     handling filled them with a median — inventing public spending. On the UK

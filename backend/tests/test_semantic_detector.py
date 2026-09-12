@@ -87,6 +87,27 @@ def test_narrative_column_is_not_typed_as_currency():
     assert enriched[0]["semantic_type"] != "currency"
 
 
+def test_text_columns_are_never_metrics_however_they_are_named():
+    """Regression: a currency-sounding name made a free-text column a metric,
+    so "Departmental Narrative on Budgeted Whole Life Costs" — prose — was
+    described to the AI as a measure."""
+    schema = [
+        {
+            "name": "departmental_narrative_on_budgeted_whole_life_costs",
+            "dtype": "VARCHAR",
+            "is_numeric": False,
+            "is_date": False,
+        },
+        {"name": "total_cost", "dtype": "DOUBLE", "is_numeric": True, "is_date": False},
+    ]
+
+    enriched = enrich_schema_with_semantics(schema, {"total_cost": {}}, {})
+    by_name = {column["name"]: column for column in enriched}
+
+    assert by_name["departmental_narrative_on_budgeted_whole_life_costs"]["analysis_role"] != "metric"
+    assert by_name["total_cost"]["analysis_role"] == "metric"
+
+
 def test_age_and_coordinate_columns_are_attributes_not_metrics():
     schema = [
         {"name": "age", "dtype": "BIGINT", "is_numeric": True, "is_date": False},

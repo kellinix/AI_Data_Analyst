@@ -172,4 +172,12 @@ The same six files were then modelled by hand in Power BI, giving an independent
 
 Worth recording about the process: the app's own analysis had been run by a Celery worker started before those fixes were deployed. Uvicorn reloads on file changes and the worker does not, so cleaning ran new code while the analysis pipeline ran old code — which is why the output looked half-fixed. `docker compose restart celery_worker` after changing analytics code.
 
-**Still open on this dataset** (not regressions): a text column can carry `analysis_role=metric` from its name alone — harmless, since KPI detection requires numbers — and monthly *anomaly* detection has no density guard of its own yet. Existing analyses keep their old numbers until re-analysed.
+### 8.2 Third pass: the smaller gaps this investigation had left open
+
+| Problem | Fix | Verification |
+|---|---|---|
+| **Monthly anomaly detection had no density guard.** It z-scored whatever months existed, so dates scattered across decades made every populated month extreme next to the empty ones — the same flaw fixed in forecasting | Both now ask `analytics/time_series.py`, so the rule can't drift between them | `test_monthly_anomalies_need_a_real_series`, and a contiguous series still reports its spike |
+| **A text column could carry `analysis_role=metric`** from its name alone, describing prose to the AI as a measure | `_role_for` only calls a column a metric when it is actually numeric | `test_text_columns_are_never_metrics_however_they_are_named` |
+| **Read-time coercion destroyed withheld values.** A mostly-numeric column was cast on read, turning "Exempt under Section 43 …" into anonymous nulls before cleaning could record them — so the same six files lost 12 of 118 projects when supplied as CSV rather than Excel | Read-time casting skips columns containing withheld values, leaving them to the cleaning stage that knows what they are | `test_read_time_casting_leaves_withheld_columns_to_the_cleaning_stage`, `test_withheld_values_survive_a_csv_round_trip`, and the full pipeline over the six files via CSV now returns 118 rows and £244,568m — identical to the Excel path |
+
+Existing analyses keep their old numbers until re-analysed.

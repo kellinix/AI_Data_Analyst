@@ -39,6 +39,42 @@ def test_low_outlier_percentile_ranks_against_all_rows():
     assert "lower than almost every other record" in outlier["description"]
 
 
+def _dated_table(rows: list[tuple[date, float]]) -> duckdb.DuckDBPyConnection:
+    conn = duckdb.connect()
+    conn.execute("CREATE TABLE data (period_date DATE, revenue DOUBLE)")
+    conn.executemany("INSERT INTO data VALUES (?, ?)", rows)
+    return conn
+
+
+DATED_SCHEMA = [
+    {"name": "period_date", "is_numeric": False, "is_date": True, "analysis_role": "temporal_dimension"},
+    {"name": "revenue", "is_numeric": True, "is_date": False, "analysis_role": "metric"},
+]
+
+
+def test_monthly_anomalies_need_a_real_series():
+    """Regression: monthly z-scores were computed over whatever months happened
+    to exist, so project dates scattered across decades made every populated
+    month look extreme next to the empty ones."""
+    rows = [(date(2000 + offset, 6, 15), 100.0 + offset * 30) for offset in range(12)]
+    values = [row[1] for row in rows]
+    stats = {"revenue": {"mean": pystats.mean(values), "std": pystats.stdev(values)}}
+
+    anomalies = detect_anomalies(_dated_table(rows), DATED_SCHEMA, stats)
+
+    assert not [a for a in anomalies if a["type"] == "time_series_spike"]
+
+
+def test_monthly_anomalies_are_still_found_in_a_contiguous_series():
+    rows = [(date(2025, month, 1), 100.0) for month in range(1, 12)] + [(date(2025, 12, 1), 900.0)]
+    values = [row[1] for row in rows]
+    stats = {"revenue": {"mean": pystats.mean(values), "std": pystats.stdev(values)}}
+
+    anomalies = detect_anomalies(_dated_table(rows), DATED_SCHEMA, stats)
+
+    assert [a for a in anomalies if a["type"] == "time_series_spike"]
+
+
 def test_context_values_are_json_serializable():
     """Regression: DuckDB returns DATE cells as datetime.date, which made every
     cleaned upload with a date column fail to save its anomalies to JSONB (and,

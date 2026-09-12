@@ -9,6 +9,7 @@ from typing import Any
 import duckdb
 
 from app.analytics.sql_utils import quote_identifier as _quote_identifier
+from app.analytics.time_series import is_dense_monthly_series
 
 
 def detect_anomalies(
@@ -145,6 +146,24 @@ def _time_series_anomalies(
 ) -> list[dict[str, Any]]:
     date_q = _quote_identifier(date_column)
     metric_q = _quote_identifier(metric_column)
+    # Monthly z-scores only mean something over a real series. Project start
+    # dates spanning decades give a handful of scattered months, where every
+    # populated month looks extreme next to the empty ones.
+    months = [
+        row[0]
+        for row in conn.execute(
+            f"""
+            SELECT DATE_TRUNC('month', {date_q}) AS period
+            FROM {_quote_identifier(table)}
+            WHERE {date_q} IS NOT NULL AND {metric_q} IS NOT NULL
+            GROUP BY 1
+            ORDER BY 1
+            """
+        ).fetchall()
+    ]
+    if not is_dense_monthly_series(months):
+        return []
+
     rows = conn.execute(
         f"""
         WITH series AS (

@@ -274,6 +274,10 @@ def _role_for(semantic_type: str, column: dict[str, Any]) -> str:
         return "identifier"
     if semantic_type in {"country", "city", "product", "category", "department"}:
         return "dimension"
-    if semantic_type in {"currency", "percentage"} or column.get("is_numeric"):
-        return "metric"
-    return "dimension"
+    # Only a numeric column can be a metric. The name alone used to be enough,
+    # so "Departmental Narrative on Budgeted Whole Life Costs" — free text —
+    # was typed currency and carried analysis_role=metric into the profile the
+    # AI reads.
+    if not column.get("is_numeric"):
+        return "text" if semantic_type == "text" else "dimension"
+    return "metric"
