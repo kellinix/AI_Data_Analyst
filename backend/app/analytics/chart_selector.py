@@ -58,6 +58,10 @@ def select_charts(
         reverse=True,
     )
 
+    date_cols = [
+        col for col in date_cols if _has_usable_time_axis(col, date_range, numeric_stats, numeric_cols)
+    ]
+
     if date_cols and numeric_cols:
         date_col = date_cols[0]
         dense_cols = [c for c in numeric_cols[:3] if not _is_sparse_numeric_column(c, numeric_stats)]
@@ -134,6 +138,45 @@ def select_charts(
     return charts[:max_charts]
 
 
+# Rows per month of span below which a date column is a scatter of dates
+# rather than a reporting period. Mirrors forecasting._MIN_MONTHLY_DENSITY.
+_MIN_TIME_AXIS_DENSITY = 0.6
+
+
+def _has_usable_time_axis(
+    date_col: str,
+    date_range: dict[str, Any],
+    numeric_stats: dict[str, Any],
+    numeric_cols: list[str],
+) -> bool:
+    """Whether plotting against this date column says anything.
+
+    A project portfolio's end dates run from 2023 to 2045: charting cost "over
+    time" against them draws a line across 23 years of scattered points. Dates
+    that are genuinely a reporting period have many rows per month.
+    """
+    bounds = (date_range or {}).get(date_col) or {}
+    first, last = _year_month(bounds.get("min")), _year_month(bounds.get("max"))
+    if first is None or last is None:
+        return True
+    span_months = (last[0] - first[0]) * 12 + (last[1] - first[1]) + 1
+    if span_months <= 1:
+        return True
+    rows = max(
+        [int((numeric_stats.get(col) or {}).get("count") or 0) for col in numeric_cols] or [0]
+    )
+    if not rows:
+        return True
+    return rows / span_months >= _MIN_TIME_AXIS_DENSITY
+
+
+def _year_month(value: Any) -> tuple[int, int] | None:
+    text = str(value or "")
+    if len(text) < 7 or not text[:4].isdigit() or not text[5:7].isdigit():
+        return None
+    return int(text[:4]), int(text[5:7])
+
+
 def _normalize(value: str) -> str:
     return value.lower().replace(" ", "_")
 
@@ -187,10 +230,17 @@ def _is_chart_dimension(
 def _dimension_score(column: str, categorical_stats: dict[str, Any]) -> float:
     normalized = _normalize(column)
     score = 0.0
-    if normalized in {"source_file", "source file"}:
-        score += 20
-    if any(term in normalized for term in ("company", "organisation", "organization", "sponsor", "therapy", "area", "type", "phase", "status", "country", "category")):
+    # A real business dimension outranks the file a row came from. Charting
+    # "cost by source file" when the data has departments buries the answer —
+    # a six-department portfolio produced a single-bar "by Source File" chart.
+    if any(term in normalized for term in (
+        "department", "ministry", "agency", "company", "organisation", "organization",
+        "sponsor", "therapy", "area", "type", "phase", "status", "country", "region",
+        "category", "segment", "channel", "team", "owner", "product",
+    )):
         score += 10
+    if normalized in {"source_file", "source file"}:
+        score += 3
     if normalized == "year" or normalized.endswith("_year"):
         score += 6
     unique_count = categorical_stats.get(column, {}).get("unique_count", 0)

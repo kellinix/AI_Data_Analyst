@@ -56,6 +56,14 @@ function specTitle(channel: unknown, fallback?: string | null): string {
     : fallback ?? ""
 }
 
+/** The decoded axis label the backend put on the ECharts option, e.g.
+ * "Financial Year Baseline (£m)" rather than the raw column name. Used as the
+ * fallback when a spec encoding carries no title of its own. */
+function axisLabel(chart: ChartConfig, axis: "xAxis" | "yAxis"): string | null {
+  const name = asObject(asObject(chart.echarts_option)[axis]).name
+  return typeof name === "string" && name.trim() ? name : null
+}
+
 function optionFromVisualSpec(chart: ChartConfig): Record<string, unknown> | null {
   const spec = asObject(chart.visual_spec)
   const renderer = spec.renderer
@@ -76,16 +84,18 @@ function optionFromVisualSpec(chart: ChartConfig): Record<string, unknown> | nul
     const valueField = horizontal ? xField : yField
     const labels = values.map((row) => String(row[categoryField] ?? ""))
     const data = values.map((row) => Number(row[valueField] ?? 0))
+    const xTitle = specTitle(encoding.x, axisLabel(chart, "xAxis") ?? chart.xAxis)
+    const yTitle = specTitle(encoding.y, axisLabel(chart, "yAxis") ?? chart.yAxis)
 
     return {
       tooltip: { trigger: "axis" },
       grid: { left: horizontal ? 260 : 56, right: 28, top: 16, bottom: 44 },
       xAxis: horizontal
-        ? { type: "value", name: specTitle(encoding.x, chart.xAxis) }
-        : { type: "category", name: specTitle(encoding.x, chart.xAxis), data: labels },
+        ? { type: "value", name: xTitle }
+        : { type: "category", name: xTitle, data: labels },
       yAxis: horizontal
-        ? { type: "category", name: specTitle(encoding.y, chart.yAxis), data: labels }
-        : { type: "value", name: specTitle(encoding.y, chart.yAxis) },
+        ? { type: "category", name: yTitle, data: labels }
+        : { type: "value", name: yTitle },
       series: [
         {
           type: "bar",
@@ -110,8 +120,12 @@ function optionFromVisualSpec(chart: ChartConfig): Record<string, unknown> | nul
     return {
       tooltip: { trigger: "axis" },
       legend: { show: groups.length > 1, bottom: 0 },
-      xAxis: { type: "category", name: specTitle(encoding.x, chart.xAxis), data: labels },
-      yAxis: { type: "value", name: specTitle(encoding.y, chart.yAxis) },
+      xAxis: {
+        type: "category",
+        name: specTitle(encoding.x, axisLabel(chart, "xAxis") ?? chart.xAxis),
+        data: labels,
+      },
+      yAxis: { type: "value", name: specTitle(encoding.y, axisLabel(chart, "yAxis") ?? chart.yAxis) },
       series: groups.map((group) => ({
         type: "line",
         smooth: true,
@@ -156,8 +170,8 @@ function optionFromVisualSpec(chart: ChartConfig): Record<string, unknown> | nul
     if (!xField || !yField) return null
     return {
       tooltip: { trigger: "item" },
-      xAxis: { type: "value", name: specTitle(encoding.x, chart.xAxis) },
-      yAxis: { type: "value", name: specTitle(encoding.y, chart.yAxis) },
+      xAxis: { type: "value", name: specTitle(encoding.x, axisLabel(chart, "xAxis") ?? chart.xAxis) },
+      yAxis: { type: "value", name: specTitle(encoding.y, axisLabel(chart, "yAxis") ?? chart.yAxis) },
       series: [
         {
           type: "scatter",
@@ -172,20 +186,28 @@ function optionFromVisualSpec(chart: ChartConfig): Record<string, unknown> | nul
   return null
 }
 
-function compactNumber(value: unknown): string {
+/** Money charts carry the currency detected from the file, so an axis reads
+ * "£117K" rather than "117K". Category labels pass through untouched. */
+function currencyOptions(currency?: string | null): Intl.NumberFormatOptions {
+  return currency ? { style: "currency", currency } : {}
+}
+
+function compactNumber(value: unknown, currency?: string | null): string {
   const numeric = Number(value)
   if (!Number.isFinite(numeric)) return String(value ?? "")
   return new Intl.NumberFormat("en-US", {
     notation: Math.abs(numeric) >= 1000 ? "compact" : "standard",
     maximumFractionDigits: 1,
+    ...currencyOptions(currency),
   }).format(numeric)
 }
 
-function fullNumber(value: unknown): string {
+function fullNumber(value: unknown, currency?: string | null): string {
   const numeric = Number(value)
   if (!Number.isFinite(numeric)) return String(value ?? "")
   return new Intl.NumberFormat("en-US", {
     maximumFractionDigits: Number.isInteger(numeric) ? 0 : 2,
+    ...currencyOptions(currency),
   }).format(numeric)
 }
 
@@ -198,15 +220,18 @@ function seriesDataLength(series: Record<string, unknown>): number {
   return asArray(series.data).length
 }
 
-function labelValue(params: { value: unknown }): string {
-  const value = Array.isArray(params.value) ? params.value[1] : params.value
-  return fullNumber(value)
+function labelValue(currency?: string | null) {
+  return (params: { value: unknown }): string => {
+    const value = Array.isArray(params.value) ? params.value[1] : params.value
+    return fullNumber(value, currency)
+  }
 }
 
 function seriesWithReadableLabels(
   chart: ChartConfig,
   option: Record<string, unknown>,
-  horizontalBar: boolean
+  horizontalBar: boolean,
+  currency?: string | null
 ): unknown[] | undefined {
   const seriesItems = asArray(option.series)
   if (seriesItems.length === 0) return undefined
@@ -226,7 +251,7 @@ function seriesWithReadableLabels(
           position: horizontalBar ? "right" : "top",
           color: "#a1a1aa",
           fontSize: 11,
-          formatter: labelValue,
+          formatter: labelValue(currency),
         },
       }
     }
@@ -342,7 +367,8 @@ function ChartCard({ chart, index }: ChartCardProps) {
   const horizontalBar = isHorizontalBar(chart, chartOption)
   const xAxisLabel = asObject(xAxis.axisLabel)
   const yAxisLabel = asObject(yAxis.axisLabel)
-  const labelledSeries = seriesWithReadableLabels(chart, chartOption, horizontalBar)
+  const currency = effectiveChart.currency ?? null
+  const labelledSeries = seriesWithReadableLabels(chart, chartOption, horizontalBar, currency)
   // Each bar already shows its exact value via the data label added above —
   // the value axis's tick labels (0, 5, 10, ...) are redundant next to that,
   // not the category axis's labels, which are still the only way to tell
@@ -414,7 +440,7 @@ function ChartCard({ chart, index }: ChartCardProps) {
             show: !hideXAxisTicks,
             color: "#71717a",
             hideOverlap: true,
-            formatter: compactNumber,
+            formatter: (value: unknown) => compactNumber(value, currency),
             margin: 10,
             ...xAxisLabel,
           },
@@ -438,7 +464,7 @@ function ChartCard({ chart, index }: ChartCardProps) {
             show: !hideYAxisTicks,
             color: "#71717a",
             hideOverlap: true,
-            formatter: horizontalBar ? undefined : compactNumber,
+            formatter: horizontalBar ? undefined : (value: unknown) => compactNumber(value, currency),
             width: horizontalBar ? 230 : undefined,
             overflow: horizontalBar ? "truncate" : undefined,
             margin: horizontalBar ? 10 : 8,

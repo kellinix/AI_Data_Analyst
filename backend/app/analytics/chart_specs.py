@@ -31,6 +31,20 @@ def build_visual_spec(chart: dict[str, Any]) -> dict[str, Any]:
     return _empty_spec(chart)
 
 
+def _axis_title(chart: dict[str, Any], axis: str) -> Any:
+    """The human label for an axis, falling back to the raw column name.
+
+    `apply_display_metadata_to_charts` writes decoded labels onto the ECharts
+    axes, but the frontend renders *this* spec — so without carrying them over,
+    charts were labelled `financial_year_baseline_currency_m_including_non_...`.
+    """
+    option = _object(chart.get("echarts_option"))
+    name = _object(option.get(f"{axis}Axis")).get("name")
+    if isinstance(name, str) and name.strip():
+        return name
+    return chart.get(f"{axis}Axis")
+
+
 def _base_spec(chart: dict[str, Any], mark: str | dict[str, Any], values: list[dict[str, Any]]) -> dict[str, Any]:
     return {
         "$schema": VEGA_LITE_SCHEMA,
@@ -64,8 +78,8 @@ def _line_spec(chart: dict[str, Any]) -> dict[str, Any]:
 
     spec = _base_spec(chart, {"type": "line", "tooltip": True}, rows)
     spec["encoding"] = {
-        "x": {"field": "period", "type": "ordinal", "title": chart.get("xAxis")},
-        "y": {"field": "value", "type": "quantitative", "title": chart.get("yAxis") or "Value"},
+        "x": {"field": "period", "type": "ordinal", "title": _axis_title(chart, "x")},
+        "y": {"field": "value", "type": "quantitative", "title": _axis_title(chart, "y") or "Value"},
         "color": {"field": "metric", "type": "nominal", "title": None},
         "tooltip": [
             {"field": "period", "type": "ordinal"},
@@ -91,11 +105,11 @@ def _bar_spec(chart: dict[str, Any]) -> dict[str, Any]:
 
     spec = _base_spec(chart, {"type": "bar", "tooltip": True}, rows)
     spec["encoding"] = {
-        "x": {"field": "value", "type": "quantitative", "title": chart.get("xAxis")},
+        "x": {"field": "value", "type": "quantitative", "title": _axis_title(chart, "x")},
         "y": {
             "field": "category",
             "type": "nominal",
-            "title": chart.get("yAxis"),
+            "title": _axis_title(chart, "y"),
             "sort": "-x",
         },
         "tooltip": [
@@ -138,8 +152,8 @@ def _scatter_spec(chart: dict[str, Any]) -> dict[str, Any]:
     ]
     spec = _base_spec(chart, {"type": "point", "tooltip": True}, rows)
     spec["encoding"] = {
-        "x": {"field": "x", "type": "quantitative", "title": chart.get("xAxis")},
-        "y": {"field": "y", "type": "quantitative", "title": chart.get("yAxis")},
+        "x": {"field": "x", "type": "quantitative", "title": _axis_title(chart, "x")},
+        "y": {"field": "y", "type": "quantitative", "title": _axis_title(chart, "y")},
         "tooltip": [
             {"field": "x", "type": "quantitative"},
             {"field": "y", "type": "quantitative"},
@@ -160,7 +174,7 @@ def _histogram_spec(chart: dict[str, Any]) -> dict[str, Any]:
     ]
     spec = _base_spec(chart, {"type": "bar", "tooltip": True}, rows)
     spec["encoding"] = {
-        "x": {"field": "bucket", "type": "ordinal", "title": chart.get("xAxis")},
+        "x": {"field": "bucket", "type": "ordinal", "title": _axis_title(chart, "x")},
         "y": {"field": "count", "type": "quantitative", "title": "Count"},
         "tooltip": [
             {"field": "bucket", "type": "ordinal"},

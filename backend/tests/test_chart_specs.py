@@ -32,6 +32,50 @@ def test_build_visual_spec_returns_bounded_vega_lite_style_bar_spec() -> None:
     ]
 
 
+def test_spec_axes_carry_the_decoded_labels() -> None:
+    """Regression: the frontend renders this spec, and its encodings fell back
+    to the raw column name — so a chart's axis read
+    `financial_year_baseline_currency_m_including_non_government_costs`
+    even though the decoded label was already on the ECharts option."""
+    chart = {
+        "type": "bar",
+        "title": "Whole life cost by department",
+        "xAxis": "total_baseline_whole_life_costs_currency_m_including_non_government_costs",
+        "yAxis": "department",
+        "series": ["total_baseline_whole_life_costs_currency_m_including_non_government_costs"],
+        "echarts_option": {
+            "xAxis": {"type": "value", "name": "Total Baseline Whole Life Costs (£m)"},
+            "yAxis": {"type": "category", "name": "Department", "data": ["MOD", "DFT"]},
+            "series": [{"type": "bar", "data": [117457, 67446]}],
+        },
+    }
+
+    spec = build_visual_spec(chart)
+
+    assert spec["encoding"]["x"]["title"] == "Total Baseline Whole Life Costs (£m)"
+    assert spec["encoding"]["y"]["title"] == "Department"
+
+
+def test_spec_axis_titles_fall_back_to_the_column_name() -> None:
+    chart = {
+        "type": "scatter",
+        "title": "Baseline vs forecast",
+        "xAxis": "baseline",
+        "yAxis": "forecast",
+        "series": ["baseline"],
+        "echarts_option": {
+            "xAxis": {"type": "value"},
+            "yAxis": {"type": "value"},
+            "series": [{"type": "scatter", "data": [[1, 2], [3, 4]]}],
+        },
+    }
+
+    spec = build_visual_spec(chart)
+
+    assert spec["encoding"]["x"]["title"] == "baseline"
+    assert spec["encoding"]["y"]["title"] == "forecast"
+
+
 def test_build_visual_spec_limits_embedded_rows() -> None:
     chart = {
         "type": "histogram",

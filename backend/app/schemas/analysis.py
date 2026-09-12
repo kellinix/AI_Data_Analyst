@@ -59,6 +59,9 @@ class ChartConfig(BaseModel):
     yAxis: str | None = None
     series: list[str] = Field(default_factory=list)
     color_scheme: list[str] = Field(default_factory=list)
+    # Set when the chart's measure is money, so the UI formats it in that
+    # currency rather than as a bare number.
+    currency: str | None = None
     visual_spec: dict[str, Any] | None = None
     echarts_option: dict[str, Any] = Field(default_factory=dict)
 

@@ -238,6 +238,8 @@ export interface ChartConfig {
   yAxis: string | null
   series: string[]
   color_scheme: string[]
+  /** Set when the chart's measure is money, so axes and labels format in it. */
+  currency?: string | null
   visual_spec?: Record<string, unknown> | null
   echarts_option: Record<string, unknown>
 }

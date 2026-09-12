@@ -36,6 +36,59 @@ def test_chart_selector_ignores_numeric_attributes():
     assert ("revenue", "department") in chart_axes
 
 
+TIME_SCHEMA = [
+    {"name": "period_date", "is_numeric": False, "is_date": True, "analysis_role": "temporal_dimension"},
+    {"name": "revenue", "is_numeric": True, "is_date": False, "analysis_role": "metric"},
+]
+
+
+def test_dates_scattered_across_decades_are_not_charted_over_time():
+    """Regression: project end dates running 2023-2045 produced a "costs over
+    time" line across 23 years of scattered points."""
+    date_range = {"period_date": {"min": "2023-01-27 00:00:00", "max": "2045-12-29 00:00:00"}}
+    numeric_stats = {"revenue": {"count": 106, "total": 244568.0}}
+
+    charts = select_charts(TIME_SCHEMA, numeric_stats, {}, date_range, {})
+
+    assert not [c for c in charts if c.get("xAxis") == "period_date"]
+
+
+def test_a_real_reporting_period_still_gets_its_time_chart():
+    date_range = {"period_date": {"min": "2025-02-03 00:00:00", "max": "2026-07-27 00:00:00"}}
+    numeric_stats = {"revenue": {"count": 936, "total": 12285143.0}}
+
+    charts = select_charts(TIME_SCHEMA, numeric_stats, {}, date_range, {})
+
+    assert [c for c in charts if c.get("xAxis") == "period_date"]
+
+
+def test_real_dimensions_outrank_the_source_file_column():
+    """Regression: source_file scored +20 against +10 for a business dimension,
+    so a six-department portfolio was charted "by Source File" — one bar,
+    labelled with a filename."""
+    schema = [
+        {"name": "source_file", "is_numeric": False, "is_date": False, "analysis_role": "dimension"},
+        {"name": "department", "is_numeric": False, "is_date": False, "analysis_role": "dimension"},
+        {"name": "whole_life_cost", "is_numeric": True, "is_date": False, "analysis_role": "metric"},
+    ]
+    categorical_stats = {
+        "source_file": {
+            "unique_count": 6,
+            "top_values": [{"value": "MOD.xlsx", "count": 49}, {"value": "DFT.xlsx", "count": 19}],
+        },
+        "department": {
+            "unique_count": 6,
+            "top_values": [{"value": "MOD", "count": 49}, {"value": "DFT", "count": 19}],
+        },
+    }
+    numeric_stats = {"whole_life_cost": {"count": 118, "total": 244568.0}}
+
+    charts = select_charts(schema, numeric_stats, categorical_stats, {}, {})
+    first_bar = next(chart for chart in charts if chart["type"] == "bar")
+
+    assert first_bar["yAxis"] == "department"
+
+
 def test_bar_charts_average_non_additive_metrics():
     """Grouping a measurement like blood pressure by category must average it —
     a SUM per group just mirrors group sizes."""

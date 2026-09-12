@@ -392,6 +392,7 @@ async def compute_analysis(
         statistics = apply_display_metadata_to_statistics(statistics, semantic_display)
         charts = apply_display_metadata_to_charts(charts, semantic_display)
         charts = attach_visual_specs(charts)
+        _tag_currency_charts(charts, statistics, currency)
         await progress(65)
 
         # Step 5: Forecasting, anomalies, and deterministic recommendations
@@ -466,6 +467,25 @@ async def compute_analysis(
         "ai_result": ai_result,
         "recommendations": recommendations,
     }
+
+
+def _tag_currency_charts(
+    charts: list[dict[str, Any]], statistics: dict[str, Any], currency: dict[str, Any] | None
+) -> list[dict[str, Any]]:
+    """Mark charts whose measure is money, so the UI can format their axes and
+    labels in that currency instead of as bare numbers."""
+    if not currency:
+        return charts
+    money_columns = {
+        column["name"]
+        for column in statistics.get("schema", [])
+        if column.get("semantic_type") == "currency" and column.get("name")
+    }
+    for chart in charts:
+        columns = {chart.get("xAxis"), chart.get("yAxis"), *(chart.get("series") or [])}
+        if columns & money_columns:
+            chart["currency"] = currency["code"]
+    return charts
 
 
 def _resolve_currency(statistics: dict[str, Any], upload_context: Any) -> dict[str, Any] | None:

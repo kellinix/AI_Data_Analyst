@@ -6,6 +6,33 @@ from app.services import analysis_engine
 from app.services.analysis_engine import AnalysisEngine
 
 
+def test_only_money_charts_are_tagged_with_the_currency():
+    statistics = {
+        "schema": [
+            {"name": "whole_life_cost", "semantic_type": "currency"},
+            {"name": "project_count", "semantic_type": "numeric_metric"},
+            {"name": "department", "semantic_type": "department"},
+        ]
+    }
+    charts = [
+        {"xAxis": "whole_life_cost", "yAxis": "department", "series": ["whole_life_cost"]},
+        {"xAxis": "project_count", "yAxis": "department", "series": ["project_count"]},
+    ]
+
+    analysis_engine._tag_currency_charts(charts, statistics, {"code": "GBP", "symbol": "£"})
+
+    assert charts[0]["currency"] == "GBP"
+    assert "currency" not in charts[1]
+
+
+def test_charts_are_untouched_when_the_currency_is_unknown():
+    charts = [{"xAxis": "cost", "yAxis": "department", "series": ["cost"]}]
+
+    analysis_engine._tag_currency_charts(charts, {"schema": [{"name": "cost", "semantic_type": "currency"}]}, None)
+
+    assert "currency" not in charts[0]
+
+
 def test_currency_comes_from_the_cleaning_report_first():
     """Cleaning sees the original header "(£m)" before standardisation rewrites
     the symbol, so its report is the authoritative source."""
