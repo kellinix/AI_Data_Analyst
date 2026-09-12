@@ -49,7 +49,13 @@ def database_url() -> str:
     try:
         asyncio.run(prepare())
     except Exception as exc:  # pragma: no cover - depends on the environment
-        pytest.skip(f"Postgres not reachable for DB-backed tests: {exc}")
+        # The raw driver error here is usually "password authentication failed",
+        # which reads like broken credentials when the real cause is pointing at
+        # a different Postgres on the default port.
+        pytest.skip(
+            "No test database reachable for DB-backed tests — start one and set "
+            f"POSTGRES_PORT if it is not on the default port (see module docstring). Error: {exc}"
+        )
 
     from alembic import command
     from alembic.config import Config

@@ -111,6 +111,57 @@ def test_semantic_display_metadata_adds_friendly_column_and_chart_labels() -> No
     assert updated_charts[0]["echarts_option"]["xAxis"]["name"] == "Customer Transaction Count (Q1)"
 
 
+STACKED_LABELS = {
+    "department": "Department",
+    "whole_life_cost": "Whole Life Cost",
+    "delivery_confidence": "Delivery Confidence",
+}
+
+
+def stacked_title_chart() -> dict:
+    """A stacked bar reverses the plain bar's axes: category on x, measure on y."""
+    return {
+        "type": "bar",
+        "xAxis": "department",
+        "yAxis": "whole_life_cost",
+        "series_by": "delivery_confidence",
+        "aggregation": "sum",
+    }
+
+
+def test_stacked_chart_title_names_the_split_dimension():
+    """Without this the stacked chart read "Department by Whole Life Cost" —
+    backwards, and indistinguishable from the plain bar beside it."""
+    summed = stacked_title_chart()
+    assert _friendly_chart_title(summed, STACKED_LABELS) == (
+        "Whole Life Cost by Department and Delivery Confidence"
+    )
+
+    averaged = {**summed, "aggregation": "average"}
+    assert _friendly_chart_title(averaged, STACKED_LABELS) == (
+        "Avg Whole Life Cost by Department and Delivery Confidence"
+    )
+
+
+def test_a_paragraph_long_column_name_is_trimmed_in_the_title():
+    """Regression: the GMPP delivery-confidence column is named with its whole
+    definition — 200 characters — giving a stacked-chart title several times
+    wider than the chart itself."""
+    long_name = (
+        "ipa_delivery_confidence_assessment_a_delivery_confidence_assessment_of_the_"
+        "project_at_a_fixed_point_in_time_using_a_three_point_scale_red_amber_green_"
+        "definitions_in_the_ipa_annual_report_on_major_projects"
+    )
+    chart = {**stacked_title_chart(), "series_by": long_name}
+
+    title = _friendly_chart_title(chart, STACKED_LABELS)
+
+    assert title.startswith("Whole Life Cost by Department and ")
+    assert title.endswith("…")
+    # Has to fit one line of a chart card, not merely be shorter than before.
+    assert len(title) < 80
+
+
 def test_friendly_bar_title_keeps_aggregation_distinct():
     """Regression test: a chart's aggregation must survive title regeneration
     (e.g. after chart-data population strips echarts_option._columns) so an

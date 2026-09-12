@@ -78,6 +78,34 @@ function optionFromVisualSpec(chart: ChartConfig): Record<string, unknown> | nul
     const yField = fieldName(encoding.y)
     if (!xField || !yField) return null
 
+    // A colour encoding means the measure is split into stacked segments,
+    // e.g. cost per department broken down by delivery status.
+    const stackField = fieldName(encoding.color)
+    if (stackField) {
+      const categories = [...new Set(values.map((row) => String(row[xField] ?? "")))]
+      const stacks = [...new Set(values.map((row) => String(row[stackField] ?? "")))]
+      return {
+        tooltip: { trigger: "axis" },
+        legend: { show: true, bottom: 0 },
+        grid: { left: 56, right: 28, top: 16, bottom: 56 },
+        xAxis: { type: "category", name: specTitle(encoding.x, axisLabel(chart, "xAxis") ?? chart.xAxis), data: categories },
+        yAxis: { type: "value", name: specTitle(encoding.y, axisLabel(chart, "yAxis") ?? chart.yAxis) },
+        series: stacks.map((stack) => ({
+          type: "bar",
+          stack: "total",
+          name: stack,
+          emphasis: { focus: "series" },
+          data: categories.map((category) =>
+            Number(
+              values.find(
+                (row) => String(row[xField] ?? "") === category && String(row[stackField] ?? "") === stack
+              )?.[yField] ?? 0
+            )
+          ),
+        })),
+      }
+    }
+
     const xType = asObject(encoding.x).type
     const horizontal = xType === "quantitative"
     const categoryField = horizontal ? yField : xField

@@ -589,6 +589,33 @@ def _sample_values_for_column(name: Any, statistics: dict[str, Any]) -> list[str
     return [str(item.get("value")) for item in cat.get("top_values", [])[:5]]
 
 
+# A stacked title names three columns, so each part gets roughly a third of the
+# ~70 characters a chart card can show on one line.
+_STACKED_TITLE_PART = 24
+
+
+def _short_label(text: str, limit: int = 48) -> str:
+    """Trim a column label to something that fits on one line of a chart title.
+
+    Survey-style exports name a column with its whole question: the GMPP
+    delivery-confidence column is 200 characters, which produced a stacked-chart
+    title several times wider than the chart. Cuts on a word boundary and marks
+    the cut, so the reader can tell the name was shortened.
+    """
+    cleaned = " ".join(str(text).split())
+    if len(cleaned) <= limit:
+        return cleaned
+    kept: list[str] = []
+    length = 0
+    for word in cleaned.split(" "):
+        extra = len(word) + (1 if kept else 0)
+        if length + extra > limit:
+            break
+        kept.append(word)
+        length += extra
+    return f"{' '.join(kept)}…" if kept else f"{cleaned[:limit]}…"
+
+
 def _friendly_chart_title(chart: dict[str, Any], labels: dict[str, str]) -> str:
     chart_type = chart.get("type")
     x_axis = chart.get("xAxis")
@@ -599,6 +626,20 @@ def _friendly_chart_title(chart: dict[str, Any], labels: dict[str, str]) -> str:
     # chart-data population strips that hint out before this function runs.
     aggregation = chart.get("aggregation")
 
+    # A stacked chart reverses the plain bar's convention — category on x, the
+    # measure on y — so "{x} by {y}" would read backwards and lose the split.
+    split_by = chart.get("series_by")
+    if chart_type == "bar" and x_label and y_label and split_by:
+        # Every part is trimmed here, not just the split: this title names three
+        # columns, so one long export-style name still overflows the card even
+        # after the other two are short. Plain bars keep their full labels.
+        split_label = _short_label(
+            labels.get(split_by, _humanize_identifier(str(split_by))), _STACKED_TITLE_PART
+        )
+        measure = _short_label(y_label, _STACKED_TITLE_PART)
+        category = _short_label(x_label, _STACKED_TITLE_PART)
+        measure = f"Avg {measure}" if aggregation == "average" else measure
+        return f"{measure} by {category} and {split_label}"
     if chart_type == "bar" and x_label and y_label:
         if aggregation == "percent_rate":
             return f"{x_label} Rate by {y_label}"

@@ -92,6 +92,8 @@ def _line_spec(chart: dict[str, Any]) -> dict[str, Any]:
 
 def _bar_spec(chart: dict[str, Any]) -> dict[str, Any]:
     opt = _object(chart.get("echarts_option"))
+    if _object(opt.get("_columns")).get("series_by"):
+        return _stacked_bar_spec(chart)
     x_axis = _object(opt.get("xAxis"))
     y_axis = _object(opt.get("yAxis"))
     series = _object(_first(_list(opt.get("series"))))
@@ -119,6 +121,32 @@ def _bar_spec(chart: dict[str, Any]) -> dict[str, Any]:
     }
     if not horizontal:
         spec["encoding"]["x"], spec["encoding"]["y"] = spec["encoding"]["y"], spec["encoding"]["x"]
+    return spec
+
+
+def _stacked_bar_spec(chart: dict[str, Any]) -> dict[str, Any]:
+    """One bar per category, split into a segment per series value."""
+    opt = _object(chart.get("echarts_option"))
+    categories = [str(value) for value in _list(_object(opt.get("xAxis")).get("data"))]
+    rows: list[dict[str, Any]] = []
+    for item in _list(opt.get("series")):
+        series = _object(item)
+        name = str(series.get("name") or "")
+        for index, value in enumerate(_list(series.get("data"))):
+            if index < len(categories):
+                rows.append({"category": categories[index], "series": name, "value": _number(value)})
+
+    spec = _base_spec(chart, {"type": "bar", "tooltip": True}, rows)
+    spec["encoding"] = {
+        "x": {"field": "category", "type": "nominal", "title": _axis_title(chart, "x")},
+        "y": {"field": "value", "type": "quantitative", "title": _axis_title(chart, "y"), "stack": "zero"},
+        "color": {"field": "series", "type": "nominal", "title": None},
+        "tooltip": [
+            {"field": "category", "type": "nominal"},
+            {"field": "series", "type": "nominal"},
+            {"field": "value", "type": "quantitative"},
+        ],
+    }
     return spec
 
 

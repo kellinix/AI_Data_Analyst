@@ -80,6 +80,127 @@ def test_build_where_clause_no_filters_is_empty():
     assert params == []
 
 
+def _connect_with_portfolio_table() -> duckdb.DuckDBPyConnection:
+    conn = duckdb.connect(":memory:")
+    conn.execute("CREATE TABLE data (department VARCHAR, rag VARCHAR, cost DOUBLE)")
+    conn.executemany(
+        "INSERT INTO data VALUES (?, ?, ?)",
+        [
+            ("MOD", "Amber", 60.0),
+            ("MOD", "Amber", 40.0),
+            ("MOD", "Red", 17.0),
+            ("DFT", "Amber", 60.0),
+            ("DFT", "Green", 7.0),
+        ],
+    )
+    return conn
+
+
+def _stacked_chart() -> dict:
+    return {
+        "type": "bar",
+        "echarts_option": {
+            "xAxis": {"type": "category", "data": []},
+            "yAxis": {"type": "value"},
+            "series": [],
+            "_columns": {"x": "department", "y": "cost", "series_by": "rag", "aggregation": "sum"},
+        },
+    }
+
+
+def test_populate_stacked_bar_builds_one_series_per_status():
+    conn = _connect_with_portfolio_table()
+    chart = _stacked_chart()
+
+    assert populate_chart_option(conn, chart) is True
+
+    opt = chart["echarts_option"]
+    assert opt["xAxis"]["data"] == ["MOD", "DFT"]  # ordered by total cost
+    assert [s["name"] for s in opt["series"]] == ["Amber", "Green", "Red"]
+    assert all(s["stack"] == "total" for s in opt["series"])
+    by_name = {s["name"]: s["data"] for s in opt["series"]}
+    assert by_name["Amber"] == [100.0, 60.0]
+    assert by_name["Green"] == [0.0, 7.0]  # absent combinations are zero, not missing
+    assert by_name["Red"] == [17.0, 0.0]
+
+
+def test_stacked_bar_re_aggregates_under_a_filter():
+    """The point of retaining `_columns`: a slicer must re-query, not re-scale
+    a cached total."""
+    conn = _connect_with_portfolio_table()
+    chart = _stacked_chart()
+    filter_sql, filter_params = build_where_clause(
+        [{"column": "rag", "op": "in", "values": ["Amber"]}]
+    )
+
+    assert populate_chart_option(conn, chart, filter_sql, filter_params) is True
+
+    opt = chart["echarts_option"]
+    assert [s["name"] for s in opt["series"]] == ["Amber"]
+    assert opt["series"][0]["data"] == [100.0, 60.0]
+
+
+def test_stacked_bar_folds_values_that_say_nothing_into_one_series():
+    """Regression: the GMPP delivery-confidence column carries six different
+    "Exempt under Section N of the Freedom of Information Act 2000" sentences
+    plus "Unknown", which stacked six invisible segments with paragraph-long
+    legend entries."""
+    conn = duckdb.connect(":memory:")
+    conn.execute("CREATE TABLE data (department VARCHAR, rag VARCHAR, cost DOUBLE)")
+    conn.executemany(
+        "INSERT INTO data VALUES (?, ?, ?)",
+        [
+            ("MOD", "Amber", 100.0),
+            ("MOD", "Red", 20.0),
+            ("MOD", "Exempt under Section 43 of the Freedom of Information Act 2000", 5.0),
+            ("MOD", "Exempt under Section 24 of the Freedom of Information Act 2000", 3.0),
+            ("MOD", "Unknown", 2.0),
+            ("MOD", "Not Applicable", 1.0),
+        ],
+    )
+    chart = _stacked_chart()
+
+    assert populate_chart_option(conn, chart) is True
+
+    series = chart["echarts_option"]["series"]
+    assert [s["name"] for s in series] == ["Amber", "Red", "Not reported"]
+    by_name = {s["name"]: s["data"] for s in series}
+    assert by_name["Not reported"] == [11.0]  # 5 + 3 + 2 + 1, one segment
+
+
+def test_stacked_bar_averages_over_the_folded_group_not_over_averages():
+    """Folding after an AVG would average four averages; the mean has to be
+    re-derived across the whole folded group."""
+    conn = duckdb.connect(":memory:")
+    conn.execute("CREATE TABLE data (department VARCHAR, rag VARCHAR, cost DOUBLE)")
+    conn.executemany(
+        "INSERT INTO data VALUES (?, ?, ?)",
+        [
+            ("MOD", "Unknown", 10.0),
+            ("MOD", "Unknown", 20.0),
+            ("MOD", "Exempt under Section 43 of the Freedom of Information Act 2000", 60.0),
+        ],
+    )
+    chart = _stacked_chart()
+    chart["echarts_option"]["_columns"]["aggregation"] = "average"
+
+    assert populate_chart_option(conn, chart) is True
+
+    series = chart["echarts_option"]["series"]
+    assert [s["name"] for s in series] == ["Not reported"]
+    assert series[0]["data"] == [30.0]  # (10 + 20 + 60) / 3, not (15 + 60) / 2
+
+
+def test_stacked_bar_reports_no_match_on_an_empty_filter_result():
+    conn = _connect_with_portfolio_table()
+    chart = _stacked_chart()
+    filter_sql, filter_params = build_where_clause(
+        [{"column": "rag", "op": "in", "values": ["Nonexistent"]}]
+    )
+
+    assert populate_chart_option(conn, chart, filter_sql, filter_params) is False
+
+
 def _connect_with_heart_like_table() -> duckdb.DuckDBPyConnection:
     conn = duckdb.connect(":memory:")
     conn.execute("CREATE TABLE data (cp INTEGER, chol DOUBLE, target INTEGER)")

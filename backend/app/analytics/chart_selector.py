@@ -8,6 +8,7 @@ import uuid
 from typing import Any
 
 from app.analytics.kpi_detector import is_outcome_column, uses_average_aggregation
+from app.analytics.text_matching import is_unreported_category
 
 # A numeric column null on more than this fraction of rows is sparse/
 # optional data (e.g. a field only some records ever populate), not a
@@ -108,6 +109,14 @@ def select_charts(
             charts.append(_horizontal_bar_chart(cat_col, numeric_cols[0], top_values))
         if len(charts) >= max_charts:
             break
+
+    # A measure split by status across the leading dimension: "cost by
+    # department, by delivery confidence" in one chart rather than two.
+    status_col = _status_dimension(categorical_cols, categorical_stats)
+    if status_col and categorical_cols and numeric_cols and len(charts) < max_charts:
+        primary_category = next((col for col in categorical_cols if col != status_col), None)
+        if primary_category:
+            charts.append(_stacked_bar_chart(primary_category, numeric_cols[0], status_col))
 
     for cat_col in categorical_cols:
         cat_stats = categorical_stats.get(cat_col, {})
@@ -396,6 +405,74 @@ def _horizontal_bar_chart(cat_col: str, value_col: str, top_values: list[dict] |
                 "name": value_col,
             }],
             "_columns": {"x": cat_col, "y": value_col, "orientation": "horizontal", "aggregation": aggregation},
+        },
+    }
+
+
+def _status_dimension(
+    categorical_cols: list[str], categorical_stats: dict[str, Any]
+) -> str | None:
+    """A small set of states each record is in — RAG rating, stage, status.
+
+    Splitting a measure by one of these is the question a portfolio review
+    actually asks ("how much of our spend is rated Red?").
+
+    Judged on the values that carry information rather than the raw distinct
+    count: the GMPP delivery-confidence column holds five real RAG states plus
+    six separate FOI-exemption sentences, so a plain 2..8 count saw 11 and hid
+    the chart. Requiring retained top values also excludes the free-text
+    commentary column named "...on_the_ipa_rag_rating", which matches the
+    keywords but holds 117 distinct paragraphs.
+    """
+    for column in categorical_cols:
+        normalized = _normalize(column)
+        if not any(
+            term in normalized
+            for term in ("status", "rag", "rating", "confidence", "stage", "phase", "severity", "priority")
+        ):
+            continue
+        top_values = (categorical_stats.get(column) or {}).get("top_values") or []
+        meaningful = {
+            str(item.get("value"))
+            for item in top_values
+            if isinstance(item, dict) and not is_unreported_category(str(item.get("value")))
+        }
+        if 2 <= len(meaningful) <= 8:
+            return column
+    return None
+
+
+def _stacked_bar_chart(cat_col: str, value_col: str, series_col: str) -> dict[str, Any]:
+    cat_label = _humanize(cat_col)
+    value_label = _humanize(value_col)
+    series_label = _humanize(series_col)
+    aggregation = _aggregation(value_col)
+    aggregation_word = "total" if aggregation == "sum" else "average"
+    return {
+        "id": _chart_id(),
+        "type": "bar",
+        "title": f"{value_label} by {cat_label} and {series_label}",
+        "description": f"Splits the {aggregation_word} {value_label.lower()} in each {cat_label.lower()} by {series_label.lower()}",
+        "xAxis": cat_col,
+        "yAxis": value_col,
+        "series": [series_col],
+        # Top level, not just in `_columns`: chart-data population strips the
+        # `_columns` hint before the display layer retitles the chart.
+        "series_by": series_col,
+        "color_scheme": ["#2563eb", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6"],
+        "aggregation": aggregation,
+        "echarts_option": {
+            "tooltip": {"trigger": "axis"},
+            "legend": {"show": True, "bottom": 0},
+            "xAxis": {"type": "category", "name": cat_col, "data": []},
+            "yAxis": {"type": "value", "name": value_col},
+            "series": [],
+            "_columns": {
+                "x": cat_col,
+                "y": value_col,
+                "series_by": series_col,
+                "aggregation": aggregation,
+            },
         },
     }
 

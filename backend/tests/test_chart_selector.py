@@ -62,6 +62,121 @@ def test_a_real_reporting_period_still_gets_its_time_chart():
     assert [c for c in charts if c.get("xAxis") == "period_date"]
 
 
+STATUS_SCHEMA = [
+    {"name": "department", "is_numeric": False, "is_date": False, "analysis_role": "dimension"},
+    {"name": "delivery_confidence", "is_numeric": False, "is_date": False, "analysis_role": "dimension"},
+    {"name": "whole_life_cost", "is_numeric": True, "is_date": False, "analysis_role": "metric"},
+]
+STATUS_CATEGORICAL_STATS = {
+    "department": {
+        "unique_count": 6,
+        "top_values": [{"value": "MOD", "count": 49}, {"value": "DFT", "count": 19}],
+    },
+    "delivery_confidence": {
+        "unique_count": 4,
+        "top_values": [{"value": "Amber", "count": 60}, {"value": "Red", "count": 12}],
+    },
+}
+
+
+def _stacked(charts: list[dict]) -> dict | None:
+    return next(
+        (c for c in charts if (c.get("echarts_option", {}).get("_columns", {})).get("series_by")),
+        None,
+    )
+
+
+def test_a_status_dimension_gets_a_stacked_chart():
+    """A portfolio review asks "how much of our spend is rated Red?" — which
+    needed two charts read side by side before."""
+    numeric_stats = {"whole_life_cost": {"count": 118, "total": 244568.0}}
+
+    chart = _stacked(select_charts(STATUS_SCHEMA, numeric_stats, STATUS_CATEGORICAL_STATS, {}, {}))
+
+    assert chart is not None
+    assert chart["type"] == "bar"
+    assert chart["xAxis"] == "department"
+    assert chart["yAxis"] == "whole_life_cost"
+    assert chart["echarts_option"]["_columns"]["series_by"] == "delivery_confidence"
+
+
+def test_no_stacked_chart_without_a_status_dimension():
+    schema = [row for row in STATUS_SCHEMA if row["name"] != "delivery_confidence"]
+    categorical_stats = {"department": STATUS_CATEGORICAL_STATS["department"]}
+    numeric_stats = {"whole_life_cost": {"count": 118, "total": 244568.0}}
+
+    assert _stacked(select_charts(schema, numeric_stats, categorical_stats, {}, {})) is None
+
+
+def test_the_real_gmpp_rag_column_is_stacked_despite_its_long_tail():
+    """Regression: the delivery-confidence column has 11 distinct values — five
+    real RAG states and six FOI-exemption sentences — so a raw 2..8 cardinality
+    gate rejected it and the chart never appeared on the portfolio it was
+    built for."""
+    schema = [
+        {"name": "department", "is_numeric": False, "is_date": False, "analysis_role": "dimension"},
+        {"name": "ipa_delivery_confidence_assessment", "is_numeric": False, "is_date": False, "analysis_role": "dimension"},
+        {"name": "whole_life_cost", "is_numeric": True, "is_date": False, "analysis_role": "metric"},
+    ]
+    categorical_stats = {
+        "department": STATUS_CATEGORICAL_STATS["department"],
+        "ipa_delivery_confidence_assessment": {
+            "unique_count": 11,
+            "top_values": [
+                {"value": "Amber", "count": 46},
+                {"value": "Unknown", "count": 30},
+                {"value": "Not Applicable", "count": 19},
+                {"value": "Red", "count": 14},
+                {"value": "Exempt under Section 43 of the Freedom of Information Act 2000", "count": 2},
+                {"value": "Exempt under Section 24 of the Freedom of Information Act 2000", "count": 2},
+                {"value": "Green", "count": 1},
+            ],
+        },
+    }
+    numeric_stats = {"whole_life_cost": {"count": 118, "total": 244568.0}}
+
+    chart = _stacked(select_charts(schema, numeric_stats, categorical_stats, {}, {}))
+
+    assert chart is not None
+    assert chart["xAxis"] == "department"
+    assert chart["echarts_option"]["_columns"]["series_by"] == "ipa_delivery_confidence_assessment"
+
+
+def test_free_text_commentary_about_a_rating_is_not_a_status_column():
+    """The GMPP commentary column is named "...on_the_ipa_rag_rating", matching
+    both "rag" and "rating", but holds 117 distinct paragraphs."""
+    schema = [
+        {"name": "department", "is_numeric": False, "is_date": False, "analysis_role": "dimension"},
+        {"name": "departmental_commentary_on_the_ipa_rag_rating", "is_numeric": False, "is_date": False, "analysis_role": "dimension"},
+        {"name": "whole_life_cost", "is_numeric": True, "is_date": False, "analysis_role": "metric"},
+    ]
+    categorical_stats = {
+        "department": STATUS_CATEGORICAL_STATS["department"],
+        # Above 50 distinct values the profiler keeps no top_values at all.
+        "departmental_commentary_on_the_ipa_rag_rating": {"unique_count": 117, "top_values": []},
+    }
+    numeric_stats = {"whole_life_cost": {"count": 118, "total": 244568.0}}
+
+    assert _stacked(select_charts(schema, numeric_stats, categorical_stats, {}, {})) is None
+
+
+def test_a_high_cardinality_status_column_is_not_stacked():
+    """Stacking nine real states produces a striped column nobody can read —
+    unlike the GMPP tail, these all carry information, so none fold away."""
+    categorical_stats = {
+        **STATUS_CATEGORICAL_STATS,
+        "delivery_confidence": {
+            "unique_count": 40,
+            "top_values": [
+                {"value": f"Stage {index}", "count": 10 - index} for index in range(9)
+            ],
+        },
+    }
+    numeric_stats = {"whole_life_cost": {"count": 118, "total": 244568.0}}
+
+    assert _stacked(select_charts(STATUS_SCHEMA, numeric_stats, categorical_stats, {}, {})) is None
+
+
 def test_real_dimensions_outrank_the_source_file_column():
     """Regression: source_file scored +20 against +10 for a business dimension,
     so a six-department portfolio was charted "by Source File" — one bar,

@@ -56,6 +56,41 @@ def test_spec_axes_carry_the_decoded_labels() -> None:
     assert spec["encoding"]["y"]["title"] == "Department"
 
 
+def test_stacked_bar_spec_carries_a_colour_encoding() -> None:
+    """Without the colour channel the frontend drew one anonymous series, so a
+    cost-by-department-by-RAG chart rendered as a plain total."""
+    chart = {
+        "type": "bar",
+        "title": "Whole life cost by department and delivery confidence",
+        "xAxis": "department",
+        "yAxis": "whole_life_cost",
+        "series": ["delivery_confidence"],
+        "echarts_option": {
+            "xAxis": {"type": "category", "name": "Department", "data": ["MOD", "DFT"]},
+            "yAxis": {"type": "value", "name": "Whole Life Cost (£m)"},
+            "series": [
+                {"type": "bar", "stack": "total", "name": "Amber", "data": [100, 60]},
+                {"type": "bar", "stack": "total", "name": "Red", "data": [17, 7]},
+            ],
+            "_columns": {"x": "department", "y": "whole_life_cost", "series_by": "delivery_confidence"},
+        },
+    }
+
+    spec = build_visual_spec(chart)
+
+    assert spec["encoding"]["color"]["field"] == "series"
+    assert spec["encoding"]["x"]["field"] == "category"
+    assert spec["encoding"]["y"]["stack"] == "zero"
+    assert spec["encoding"]["x"]["title"] == "Department"
+    assert spec["encoding"]["y"]["title"] == "Whole Life Cost (£m)"
+    assert spec["data"]["values"] == [
+        {"category": "MOD", "series": "Amber", "value": 100.0},
+        {"category": "DFT", "series": "Amber", "value": 60.0},
+        {"category": "MOD", "series": "Red", "value": 17.0},
+        {"category": "DFT", "series": "Red", "value": 7.0},
+    ]
+
+
 def test_spec_axis_titles_fall_back_to_the_column_name() -> None:
     chart = {
         "type": "scatter",

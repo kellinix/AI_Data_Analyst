@@ -16,6 +16,7 @@ import duckdb
 
 from app.analytics.chart_specs import build_visual_spec
 from app.analytics.sql_utils import quote_identifier as _quote_identifier
+from app.analytics.text_matching import is_unreported_category
 
 FilterOp = Literal["in", "between"]
 
@@ -182,6 +183,93 @@ def _populate_bar(
     return True
 
 
+_UNREPORTED_SERIES = "Not reported"
+
+
+def _populate_stacked_bar(
+    conn: duckdb.DuckDBPyConnection,
+    opt: dict[str, Any],
+    cols: dict[str, Any],
+    filter_sql: str,
+    filter_params: list[Any],
+) -> bool:
+    """A measure per dimension value, split into one series per status.
+
+    The product could only draw one measure against one dimension, so a
+    portfolio's cost by department and its delivery status had to be read from
+    separate charts.
+    """
+    x_col, y_col, series_col = cols.get("x"), cols.get("y"), cols.get("series_by")
+    if not (x_col and y_col and series_col):
+        return False
+    x_identifier = _quote_identifier(x_col)
+    y_identifier = _quote_identifier(y_col)
+    series_identifier = _quote_identifier(series_col)
+    # SUM and COUNT rather than the aggregate itself: values that say nothing
+    # ("Exempt under Section 43...", "Unknown") are folded into one series
+    # below, and an average has to be re-derived over the folded group rather
+    # than averaged again.
+    rows = conn.execute(
+        f"""
+        SELECT CAST({x_identifier} AS VARCHAR) AS category,
+               CAST({series_identifier} AS VARCHAR) AS series,
+               SUM({y_identifier}) AS total,
+               COUNT({y_identifier}) AS n
+        FROM data
+        WHERE {x_identifier} IS NOT NULL
+          AND {series_identifier} IS NOT NULL
+          AND {y_identifier} IS NOT NULL{_extra_and(filter_sql)}
+        GROUP BY category, series
+        LIMIT 200
+        """,
+        filter_params,
+    ).fetchall()
+    if not rows:
+        return False
+
+    averaged = cols.get("aggregation") == "average"
+    totals: dict[str, float] = {}
+    sums: dict[tuple[str, str], float] = {}
+    counts: dict[tuple[str, str], int] = {}
+    for category, series_value, total, count in rows:
+        category_name = str(category)
+        label = str(series_value)
+        if is_unreported_category(label):
+            label = _UNREPORTED_SERIES
+        key = (category_name, label)
+        sums[key] = sums.get(key, 0.0) + float(total or 0)
+        counts[key] = counts.get(key, 0) + int(count or 0)
+        totals[category_name] = totals.get(category_name, 0.0) + float(total or 0)
+
+    def _value(key: tuple[str, str]) -> float:
+        if not averaged:
+            return sums.get(key, 0.0)
+        count = counts.get(key, 0)
+        return sums.get(key, 0.0) / count if count else 0.0
+
+    categories = [name for name, _ in sorted(totals.items(), key=lambda item: item[1], reverse=True)][:12]
+    reported = sorted({label for _, label in sums if label != _UNREPORTED_SERIES})[:8]
+    # The catch-all sorts last so the real states keep a stable colour order.
+    series_names = reported + (
+        [_UNREPORTED_SERIES] if any(label == _UNREPORTED_SERIES for _, label in sums) else []
+    )
+    by_pair = {key: _value(key) for key in sums}
+
+    opt["xAxis"]["data"] = categories
+    opt["series"] = [
+        {
+            "type": "bar",
+            "stack": "total",
+            "name": name,
+            "emphasis": {"focus": "series"},
+            "data": [round(by_pair.get((category, name), 0.0), 2) for category in categories],
+        }
+        for name in series_names
+    ]
+    opt["legend"] = {"show": True, "bottom": 0}
+    return True
+
+
 def _populate_donut(
     conn: duckdb.DuckDBPyConnection,
     opt: dict[str, Any],
@@ -298,6 +386,8 @@ def populate_chart_option(
         matched = _populate_line_multi(conn, opt, cols, filter_sql, filter_params)
     elif chart_type == "line":
         matched = _populate_line_single(conn, opt, cols, filter_sql, filter_params)
+    elif chart_type == "bar" and cols.get("series_by"):
+        matched = _populate_stacked_bar(conn, opt, cols, filter_sql, filter_params)
     elif chart_type == "bar":
         matched = _populate_bar(conn, opt, cols, filter_sql, filter_params)
     elif chart_type == "donut":

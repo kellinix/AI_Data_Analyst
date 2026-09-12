@@ -12,6 +12,7 @@ import duckdb
 import pandas as pd
 import polars as pl
 
+from app.analytics.text_matching import is_withheld_value
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
@@ -1280,13 +1281,6 @@ def _detect_currency(df: pl.DataFrame) -> dict[str, Any] | None:
     return None
 
 
-_WITHHELD_VALUE_RE = re.compile(
-    r"\b(exempt|redacted|withheld|confidential|commercially\s+sensitive|"
-    r"not\s+(available|applicable|disclosed|reported|published)|tbc|tbd)\b",
-    re.IGNORECASE,
-)
-
-
 def _has_withheld_values(series: pl.Series) -> bool:
     """Whether any sampled cell says its value was withheld rather than absent."""
     return any(
@@ -1302,8 +1296,11 @@ def _looks_like_withheld_value(text: str) -> bool:
     Freedom of Information Act 2000" inside otherwise numeric money columns —
     15 of 49 rows in the GMPP data. Counting those as non-numeric evidence kept
     genuine metric columns as text; counting them as missing keeps the metric.
+
+    Shares one vocabulary with the chart layer, which folds the same values into
+    a single slice rather than stacking a segment per exemption sentence.
     """
-    return bool(_WITHHELD_VALUE_RE.search(text))
+    return is_withheld_value(text)
 
 
 def _looks_like_currency_column(column: str, series: pl.Series) -> bool:
