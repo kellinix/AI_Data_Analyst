@@ -346,15 +346,23 @@ class FileProcessor:
             if converted_dates:
                 report["steps"].append("normalized_dates")
 
+        withheld_columns: set[str] = set()
         if options["parse_currency_percent"]:
             cleaned, converted_numeric = self._parse_numeric_text_columns(cleaned)
             report["converted_numeric_columns"] = converted_numeric
+            # Columns where some values were withheld rather than absent. Those
+            # cells must stay empty: imputing a redacted cost invents public
+            # spending — it inflated a £244,568m portfolio total to £367,548m.
+            withheld_columns = {
+                item["column"] for item in converted_numeric if item.get("withheld_values")
+            }
+            report["withheld_value_columns"] = sorted(withheld_columns)
             if converted_numeric:
                 report["steps"].append("parsed_currency_percentage_numbers")
 
         if options["missing_data_strategy"] == "smart":
             before_rows = cleaned.height
-            cleaned, missing_report = self._handle_missing_values(cleaned)
+            cleaned, missing_report = self._handle_missing_values(cleaned, withheld_columns)
             report["missing_values"] = missing_report
             report["dropped_rows_missing_critical_metrics"] = before_rows - cleaned.height
             if missing_report.get("steps"):
@@ -465,6 +473,7 @@ class FileProcessor:
                         "total_non_null": non_null,
                         "detected_currency": _looks_like_currency_column(column, series),
                         "detected_percent": _looks_like_percentage_column(column, series),
+                        "withheld_values": withheld_count,
                     }
                 )
                 continue
@@ -492,18 +501,27 @@ class FileProcessor:
                         "total_non_null": non_null,
                         "detected_currency": _looks_like_currency_column(column, series),
                         "detected_percent": _looks_like_percentage_column(column, series),
+                        "withheld_values": withheld_count,
                     }
                 )
         if expressions:
             df = df.with_columns(expressions)
         return df, converted
 
-    def _handle_missing_values(self, df: pl.DataFrame) -> tuple[pl.DataFrame, dict[str, Any]]:
+    def _handle_missing_values(
+        self, df: pl.DataFrame, withheld_columns: set[str] | None = None
+    ) -> tuple[pl.DataFrame, dict[str, Any]]:
+        # Columns whose gaps are withheld values ("Exempt under Section 43 of the
+        # Freedom of Information Act 2000") are left exactly as they are: the
+        # number exists but was not published, so filling it fabricates data and
+        # dropping its row loses the project entirely.
+        protected = withheld_columns or set()
         report: dict[str, Any] = {
             "strategy": "smart",
             "steps": [],
             "numeric_imputations": [],
             "categorical_imputations": [],
+            "withheld_columns_left_empty": sorted(protected),
         }
         if df.is_empty():
             return df, report
@@ -518,6 +536,7 @@ class FileProcessor:
             column
             for column in df.columns
             if _is_numeric_dtype(df[column].dtype)
+            and column not in protected
             and not _looks_like_identifier_column(column)
             and not _looks_like_year_column(column)
             and (df[column].null_count() / df.height) <= _SPARSE_NUMERIC_METRIC_NULL_RATIO
@@ -537,6 +556,9 @@ class FileProcessor:
         for column in df.columns:
             null_count = df[column].null_count()
             if null_count == 0:
+                continue
+
+            if column in protected:
                 continue
 
             dtype = df[column].dtype

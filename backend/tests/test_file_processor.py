@@ -392,6 +392,69 @@ def test_prose_columns_are_never_converted_to_numbers():
     assert cleaned["financial_year_baseline"].to_list() == [228.69, 463.64, 1204.0, 53.1]
 
 
+def test_withheld_costs_are_never_imputed_and_keep_their_rows():
+    """Regression: withheld values became null, then "smart" missing-data
+    handling filled them with a median — inventing public spending. On the UK
+    government portfolio that turned a £244,568m total into £367,548m, and
+    projects whose costs were all withheld were dropped entirely."""
+    processor = FileProcessor()
+    df = pl.DataFrame(
+        {
+            "Project": ["A", "B", "C", "D", "E", "F"],
+            "Whole Life Cost": [
+                "100",
+                "Exempt under Section 43 of the Freedom of Information Act 2000",
+                "200",
+                "Exempt under Section 27 of the Freedom of Information Act 2000",
+                "300",
+                "400",
+            ],
+        }
+    )
+
+    cleaned, report = processor.clean_dataframe(
+        df,
+        {
+            "parse_currency_percent": True,
+            "missing_data_strategy": "smart",
+            "remove_duplicates": False,
+            "semantic_categorical_merging": False,
+        },
+    )
+
+    assert cleaned.height == 6, "a project whose cost is withheld must not be dropped"
+    assert cleaned["whole_life_cost"].to_list() == [100.0, None, 200.0, None, 300.0, 400.0]
+    assert cleaned["whole_life_cost"].sum() == 1000.0
+    assert report["missing_values"]["numeric_imputations"] == []
+    assert report["withheld_value_columns"] == ["whole_life_cost"]
+
+
+def test_ordinary_missing_numbers_are_still_imputed():
+    # Two metrics, so the row with the gap still has one and survives the
+    # "no metrics at all" drop — otherwise there is nothing left to impute.
+    processor = FileProcessor()
+    df = pl.DataFrame(
+        {
+            "Region": ["N", "S", "E", "W"],
+            "Revenue": ["100", "", "300", "400"],
+            "Units": ["1", "2", "3", "4"],
+        }
+    )
+
+    cleaned, report = processor.clean_dataframe(
+        df,
+        {
+            "parse_currency_percent": True,
+            "missing_data_strategy": "smart",
+            "remove_duplicates": False,
+            "semantic_categorical_merging": False,
+        },
+    )
+
+    assert cleaned["revenue"].null_count() == 0
+    assert report["missing_values"]["numeric_imputations"]
+
+
 def test_detects_currency_from_the_original_column_header():
     """Regression: every amount was formatted as USD, so UK government £m
     figures displayed as "$23,078,507,463.50". Standardising column names
