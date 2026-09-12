@@ -513,7 +513,11 @@ def _fallback_display_metadata(
     columns = [
         {
             "name": column.get("name"),
-            "label": _humanize_identifier(str(column.get("name"))),
+            # Capped: a government export names a column with its whole
+            # definition, so humanising the raw name produced a 200-character
+            # "label" that then became a chart title and a quality-check
+            # heading. 64 leaves ordinary long names untouched.
+            "label": shorten_label(_humanize_identifier(str(column.get("name"))), 64),
             "description": None,
         }
         for column in statistics.get("schema", [])
@@ -546,7 +550,14 @@ def _merge_display_metadata(
             name = str(item["name"])
             columns_by_name[name] = {
                 **columns_by_name.get(name, {"name": name}),
-                "label": str(item.get("label") or columns_by_name.get(name, {}).get("label") or name),
+                # Capped here as well as in the fallback: this is the one point
+                # where the final label is chosen, and a successful AI response
+                # can still hand back a column's entire definition as its
+                # "label", which then becomes a chart title and a check heading.
+                "label": shorten_label(
+                    str(item.get("label") or columns_by_name.get(name, {}).get("label") or name),
+                    64,
+                ),
                 "description": item.get("description"),
             }
 

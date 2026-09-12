@@ -129,6 +129,37 @@ def stacked_title_chart() -> dict:
     }
 
 
+def test_display_labels_are_capped_so_a_column_definition_cannot_become_a_title():
+    """Regression: display labels come from an AI call, and a *successful*
+    response was observed handing back the GMPP delivery-confidence column's
+    entire 200-character definition as its label — which then became the chart
+    title, the axis name and the data-quality check heading."""
+    from app.services.semantic_wrangler import (
+        _fallback_display_metadata,
+        _merge_display_metadata,
+    )
+
+    long_name = (
+        "ipa_delivery_confidence_assessment_a_delivery_confidence_assessment_of_the_"
+        "project_at_a_fixed_point_in_time_using_a_three_point_scale_red_amber_green"
+    )
+    statistics = {"schema": [{"name": long_name}, {"name": "department"}]}
+
+    fallback = _fallback_display_metadata(statistics, [])
+    labels = {c["name"]: c["label"] for c in fallback["columns"]}
+    assert labels["department"] == "Department"
+    assert labels[long_name].endswith("…")
+    assert len(labels[long_name]) <= 65
+
+    # An AI response that returns its own over-long label is capped too.
+    merged = _merge_display_metadata(
+        fallback,
+        {"columns": [{"name": long_name, "label": "A " * 120, "description": None}], "charts": []},
+    )
+    merged_labels = {c["name"]: c["label"] for c in merged["columns"]}
+    assert len(merged_labels[long_name]) <= 65
+
+
 def test_stacked_chart_title_names_the_split_dimension():
     """Without this the stacked chart read "Department by Whole Life Cost" —
     backwards, and indistinguishable from the plain bar beside it."""

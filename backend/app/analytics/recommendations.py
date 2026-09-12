@@ -16,7 +16,7 @@ from app.analytics.calibration import (
     RULE_TRACKING,
     confidence_fields,
 )
-from app.analytics.text_matching import contains_keyword
+from app.analytics.text_matching import contains_keyword, shorten_label
 
 
 def generate_recommendations(
@@ -141,7 +141,13 @@ def _anomaly_recommendations(anomalies: list[dict[str, Any]]) -> list[dict[str, 
     anomaly = anomalies[0]
     label = _humanize(anomaly["column"])
     context = anomaly.get("context") or {}
-    context_text = ", ".join(f"{_humanize(k)} {v}" for k, v in context.items())
+    # Shortened, as the anomaly's own description already is: this built its
+    # context string separately, so the recommendation still carried 200
+    # characters of "Ipa Delivery Confidence Assessment A Delivery Confidence
+    # Assessment Of The Project At A Fixed Point In Time..." before the value.
+    context_text = ", ".join(
+        f"{shorten_label(_humanize(k), 40)} {v}" for k, v in context.items()
+    )
     return [{
         "title": f"Review the context behind standout {label}",
         "description": (f"Compare the identified record ({context_text}) with similar records to understand the drivers." if context_text else f"Compare the identified {label.lower()} record with similar records before drawing a conclusion."),

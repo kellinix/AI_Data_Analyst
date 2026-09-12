@@ -45,7 +45,14 @@ export function DataQualityPanel({ metadata }: DataQualityPanelProps) {
   const score = quality.score ?? 0
   const issues = quality.issues ?? []
   const fixes = quality.fixes ?? []
-  const healthy = score >= 90 && issues.length === 0
+  // A low-severity entry is a note about how widely the values spread — a
+  // portfolio holding HS2 always has some. Counting those as "issues detected"
+  // told a non-technical reader their data was faulty. They stay listed below
+  // with their badge; only the headline count distinguishes them.
+  const defects = issues.filter((issue) => issue.severity !== "low")
+  const notes = issues.filter((issue) => issue.severity === "low")
+  const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`
+  const healthy = score >= 90 && defects.length === 0
   const uploadContext = metadata.upload_context as Record<string, unknown> | undefined
   const cleaning = uploadContext?.cleaning as Record<string, unknown> | undefined
   const report = cleaning?.report as Record<string, unknown> | undefined
@@ -97,9 +104,13 @@ export function DataQualityPanel({ metadata }: DataQualityPanelProps) {
             />
           </div>
           <p className="mt-3 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
-            {healthy
-              ? "No major quality issues detected."
-              : `${issues.length} issue${issues.length === 1 ? "" : "s"} detected before AI reasoning.`}
+            {defects.length === 0
+              ? notes.length === 0
+                ? "No quality issues detected."
+                : `No quality issues. ${plural(notes.length, "note")} on how widely values spread.`
+              : `${plural(defects.length, "issue")} detected before AI reasoning${
+                  notes.length > 0 ? `, plus ${plural(notes.length, "note")} on spread` : ""
+                }.`}
           </p>
           <p className="mt-2 text-[11px] leading-relaxed text-zinc-400">
             Checks apply to the {cleaned ? "cleaned" : "uploaded"} data used for analysis.
@@ -178,9 +189,11 @@ export function DataQualityPanel({ metadata }: DataQualityPanelProps) {
         <div className="rounded-2xl border bg-white p-4 dark:border-zinc-800 dark:bg-zinc-900/60">
           <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Analysis checks</h3>
           <p className="mt-2 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
-            {issues.length === 0
+            {defects.length === 0
               ? "The data used for analysis passed the currently implemented automated checks."
-              : `${issues.length} issue${issues.length === 1 ? "" : "s"} remain in the data used for analysis.`}
+              : `${plural(defects.length, "issue")} ${
+                  defects.length === 1 ? "remains" : "remain"
+                } in the data used for analysis.`}
           </p>
         </div>
       </div>
