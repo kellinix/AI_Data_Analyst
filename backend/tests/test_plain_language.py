@@ -22,9 +22,23 @@ def test_the_models_own_jargon_is_replaced():
 
     for word in ("outlier", "dataset", "anomal"):
         assert word not in plain.lower()
-    assert "unusually high or low figures" in plain
+    assert "variances and extremes in the file" in plain
     assert "in the file" in plain
     assert "unusual results" in plain
+
+
+def test_the_replacement_reads_correctly_after_adjectives():
+    """Seen on the rendered dashboard: the model wrote "shows notable
+    financial outliers", and a multi-word replacement produced "shows notable
+    financial unusually high or low figures". A like-for-like noun fits
+    wherever the original word sat."""
+    assert plain_english(
+        "The Department for Transport (DFT) shows notable financial outliers."
+    ) == "The Department for Transport (DFT) shows notable financial extremes."
+    assert plain_english("Some financial figures are outliers.") == (
+        "Some financial figures are extremes."
+    )
+    assert plain_english("One outlier stands apart.") == "One extreme figure stands apart."
 
 
 def test_the_readers_own_column_names_survive():
@@ -37,7 +51,7 @@ def test_the_readers_own_column_names_survive():
 
 
 def test_capitalisation_is_kept_at_the_start_of_a_sentence():
-    assert plain_english("Outliers dominate.").startswith("Unusually high or low figures")
+    assert plain_english("Outliers dominate.") == "Extremes dominate."
     assert plain_english("The dataset is large.").startswith("The file")
 
 
@@ -52,7 +66,7 @@ def test_every_reader_facing_string_in_a_result_is_cleaned():
 
     cleaned = plain_english_in_place(result)
 
-    assert cleaned["executive_summary"] == "The file has unusually high or low figures."
+    assert cleaned["executive_summary"] == "The file has extremes."
     assert cleaned["recommendations"][0]["title"] == "Review the unusual result"
     assert cleaned["recommendations"][0]["description"] == "Check the relationship."
     # Machine-readable fields are left alone: a column name is an identifier.

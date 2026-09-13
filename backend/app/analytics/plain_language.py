@@ -18,8 +18,12 @@ import re
 from typing import Any
 
 _REPLACEMENTS: tuple[tuple[str, str], ...] = (
-    (r"\boutliers\b", "unusually high or low figures"),
-    (r"\boutlier\b", "unusually high or low figure"),
+    # A like-for-like noun, so it reads correctly wherever the original sat.
+    # The first choice, "unusually high or low figures", broke after
+    # adjectives: the model's "shows notable financial outliers" rendered as
+    # "shows notable financial unusually high or low figures".
+    (r"\boutliers\b", "extremes"),
+    (r"\boutlier\b", "extreme figure"),
     (r"\banomalies\b", "unusual results"),
     (r"\banomaly\b", "unusual result"),
     (r"\bdatasets\b", "files"),
@@ -65,15 +69,6 @@ def plain_english(text: str) -> str:
             result,
             flags=re.IGNORECASE,
         )
-    # Expanding "outliers" can double the noun: the model wrote "some
-    # financial figures are outliers", which became "...are unusually high or
-    # low figures". Collapse it rather than leave the reader that sentence.
-    result = re.sub(
-        r"\bfigures (are|is) unusually high or low figures\b",
-        r"figures \1 unusually high or low",
-        result,
-        flags=re.IGNORECASE,
-    )
     return result
 
 
