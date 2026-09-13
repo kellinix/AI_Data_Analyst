@@ -8,7 +8,7 @@ import uuid
 from typing import Any
 
 from app.analytics.kpi_detector import is_outcome_column, uses_average_aggregation
-from app.analytics.labels import derive_label
+from app.analytics.labels import derive_label, sentence_label
 from app.analytics.text_matching import is_unreported_category
 
 # A numeric column null on more than this fraction of rows is sparse/
@@ -285,7 +285,7 @@ def _time_series_chart(date_col: str, value_col: str) -> dict[str, Any]:
         "id": _chart_id(),
         "type": "line",
         "title": f"{aggregation_label} {value_label} over time",
-        "description": f"Shows the {aggregation} {value_label.lower()} for each {date_label.lower()}",
+        "description": f"Shows the {aggregation} {sentence_label(value_label)} for each {sentence_label(date_label)}",
         "xAxis": date_col,
         "yAxis": value_col,
         "series": [value_col],
@@ -323,7 +323,7 @@ def _sparse_metric_over_time_chart(date_col: str, value_col: str) -> dict[str, A
         "id": _chart_id(),
         "type": "line",
         "title": f"{value_label} over time",
-        "description": f"Shows the individual {value_label.lower()} entries recorded across {date_label.lower()} — most rows have no value for this field",
+        "description": f"Shows the individual {sentence_label(value_label)} entries recorded across {sentence_label(date_label)} — most rows have no value for this field",
         "xAxis": date_col,
         "yAxis": value_col,
         "series": [value_col],
@@ -352,7 +352,7 @@ def _multi_line_chart(date_col: str, value_cols: list[str]) -> dict[str, Any]:
         "id": _chart_id(),
         "type": "line",
         "title": "Key metrics over time",
-        "description": f"Shows selected measures across {date_label.lower()}",
+        "description": f"Shows selected measures across {sentence_label(date_label)}",
         "xAxis": date_col,
         "yAxis": "metrics",
         "series": value_cols,
@@ -389,7 +389,7 @@ def _horizontal_bar_chart(cat_col: str, value_col: str, top_values: list[dict] |
         "id": _chart_id(),
         "type": "bar",
         "title": title,
-        "description": f"Compares the {aggregation_word} {value_label.lower()} across each {cat_label.lower()}",
+        "description": f"Compares the {aggregation_word} {sentence_label(value_label)} across each {sentence_label(cat_label)}",
         "xAxis": value_col,
         "yAxis": cat_col,
         "series": [value_col],
@@ -453,7 +453,7 @@ def _stacked_bar_chart(cat_col: str, value_col: str, series_col: str) -> dict[st
         "id": _chart_id(),
         "type": "bar",
         "title": f"{value_label} by {cat_label} and {series_label}",
-        "description": f"Splits the {aggregation_word} {value_label.lower()} in each {cat_label.lower()} by {series_label.lower()}",
+        "description": f"Splits the {aggregation_word} {sentence_label(value_label)} in each {sentence_label(cat_label)} by {sentence_label(series_label)}",
         "xAxis": cat_col,
         "yAxis": value_col,
         "series": [series_col],
@@ -486,7 +486,7 @@ def _outcome_rate_bar_chart(cat_col: str, outcome_col: str) -> dict[str, Any]:
         "id": _chart_id(),
         "type": "bar",
         "title": f"{outcome_label} rate by {cat_label}",
-        "description": f"Share of records with {outcome_label.lower()} = 1 in each {cat_label.lower()} group",
+        "description": f"Share of records with {sentence_label(outcome_label)} = 1 in each {sentence_label(cat_label)} group",
         "xAxis": outcome_col,
         "yAxis": cat_col,
         "series": [outcome_col],
@@ -514,7 +514,7 @@ def _donut_chart(cat_col: str, top_values: list[dict]) -> dict[str, Any]:
         "id": _chart_id(),
         "type": "donut",
         "title": f"{cat_label} distribution",
-        "description": f"Share of records by {cat_label.lower()}",
+        "description": f"Share of records by {sentence_label(cat_label)}",
         "xAxis": None,
         "yAxis": None,
         "series": [cat_col],
@@ -551,7 +551,7 @@ def _scatter_chart(col_a: str, col_b: str, correlation: float) -> dict[str, Any]
         "id": _chart_id(),
         "type": "scatter",
         "title": f"{label_a} vs {label_b}",
-        "description": f"A {strength} relationship: as {label_a.lower()} changes, {label_b.lower()} tends to {direction}",
+        "description": f"A {strength} relationship: as {sentence_label(label_a)} changes, {sentence_label(label_b)} tends to {direction}",
         "xAxis": col_a,
         "yAxis": col_b,
         "series": [col_a, col_b],

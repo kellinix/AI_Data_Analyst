@@ -3,7 +3,47 @@ from __future__ import annotations
 import pytest
 
 from app.services import analysis_engine
-from app.services.analysis_engine import AnalysisEngine, consolidated_anomaly_card
+from app.services.analysis_engine import (
+    AnalysisEngine,
+    consolidated_anomaly_card,
+    disclose_excluded_points,
+)
+
+
+def test_points_a_log_scale_cannot_plot_are_disclosed():
+    charts = [{
+        "description": "Scatter plot comparing baseline and forecast costs.",
+        "echarts_option": {"_excluded_points": 6},
+    }]
+
+    disclose_excluded_points(charts)
+
+    assert charts[0]["description"].endswith(
+        "6 records with no value recorded are not shown, because the scale is logarithmic."
+    )
+    # The original description survives in front of the note.
+    assert charts[0]["description"].startswith("Scatter plot comparing")
+
+
+def test_the_note_does_not_run_into_the_description():
+    """Descriptions are written as fragments with no full stop, so the note
+    read "...tends to rise together 6 records with no value...". """
+    charts = [{
+        "description": "as financial year baseline (M) changes, forecast tends to rise together",
+        "echarts_option": {"_excluded_points": 6},
+    }]
+
+    disclose_excluded_points(charts)
+
+    assert "rise together. 6 records" in charts[0]["description"]
+
+
+def test_nothing_is_said_when_every_record_is_plotted():
+    charts = [{"description": "All points shown.", "echarts_option": {}}]
+
+    disclose_excluded_points(charts)
+
+    assert charts[0]["description"] == "All points shown."
 
 
 def test_a_single_anomaly_keeps_its_own_title():

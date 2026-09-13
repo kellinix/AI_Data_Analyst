@@ -62,6 +62,26 @@ def derive_label(column: str) -> str:
     return f"{label} {unit}".strip() if unit else label
 
 
+def sentence_label(label: str) -> str:
+    """A label as it should read inside a sentence.
+
+    Lowercasing the whole label turned "Financial Year Baseline (M)" into
+    "... baseline (m)" in every chart description, and would do the same to
+    "IPA" and "%". Words that carry meaning through their case — acronyms,
+    units, symbols — keep it.
+    """
+    words = []
+    for word in str(label).split():
+        stripped = word.strip("()")
+        keep_case = (
+            stripped.isupper()
+            or any(character.isdigit() for character in stripped)
+            or not stripped.isalpha()
+        )
+        words.append(word if keep_case else word.lower())
+    return " ".join(words)
+
+
 def _extract_unit(tokens: list[str]) -> tuple[list[str], str]:
     """Lift a unit out of the name so it can be shown as a suffix."""
     if "pct" in tokens:

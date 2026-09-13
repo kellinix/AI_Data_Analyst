@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.analytics.labels import derive_label
+from app.analytics.labels import derive_label, sentence_label
 
 GMPP_COLUMNS = [
     (
@@ -62,6 +62,15 @@ def test_ordinary_short_names_are_left_alone():
     assert derive_label("revenue") == "Revenue"
     assert derive_label("customer_id") == "Customer ID"
     assert derive_label("q1_sales") == "Q1 Sales"
+
+
+def test_sentence_label_keeps_units_and_acronyms_readable():
+    """Chart descriptions lowercased the whole label, so the unit rendered as
+    "(m)" and an acronym as "ipa" mid-sentence."""
+    assert sentence_label("Financial Year Baseline (M)") == "financial year baseline (M)"
+    assert sentence_label("IPA Delivery Confidence Assessment") == "IPA delivery confidence assessment"
+    assert sentence_label("Financial Year Variance %") == "financial year variance %"
+    assert sentence_label("Department") == "department"
 
 
 def test_a_name_with_nothing_usable_does_not_crash():

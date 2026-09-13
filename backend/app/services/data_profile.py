@@ -58,7 +58,11 @@ def build_data_profile_schema(
         "data_quality": statistics.get("data_quality", {}),
         "relationships": _relationship_profile(upload_context),
         "cleaning": _cleaning_profile(upload_context),
-        "semantic_display": statistics.get("semantic_display", {}),
+        # `semantic_display` is deliberately not sent: every display label it
+        # holds is already on each entry in `columns`, and duplicating it cost
+        # a tenth of the profile on a request that runs into a 30,000
+        # tokens-per-minute ceiling. Consumers read it from the analysis
+        # metadata, never from this profile.
         "recommended_charts": [_compact_chart(chart) for chart in charts[:10]],
         "recommendation_candidates": recommendations[:8],
     }
@@ -155,8 +159,25 @@ def _compact_chart(chart: dict[str, Any]) -> dict[str, Any]:
         "xAxis": chart.get("xAxis"),
         "yAxis": chart.get("yAxis"),
         "series": chart.get("series", []),
-        "visual_spec": chart.get("visual_spec"),
+        "visual_spec": _spec_shape(chart.get("visual_spec")),
     }
+
+
+def _spec_shape(spec: Any) -> dict[str, Any]:
+    """A chart's spec without its plotted rows.
+
+    The model is choosing a layout, not reading the points, but every plotted
+    row was being shipped inside the spec — a third of the whole profile JSON,
+    on a request that already runs into a 30,000 tokens-per-minute ceiling.
+    The row count is kept, since how much data a chart has is worth knowing.
+    """
+    if not isinstance(spec, dict):
+        return {}
+    shape = {key: value for key, value in spec.items() if key != "data"}
+    data = spec.get("data")
+    values = data.get("values") if isinstance(data, dict) else None
+    shape["data_points"] = len(values) if isinstance(values, list) else 0
+    return shape
 
 
 def _relationship_profile(upload_context: dict[str, Any] | None) -> dict[str, Any]:

@@ -410,6 +410,8 @@ async def compute_analysis(
         )
         statistics = apply_display_metadata_to_statistics(statistics, semantic_display)
         charts = apply_display_metadata_to_charts(charts, semantic_display)
+        # After the display layer, which replaces descriptions wholesale.
+        disclose_excluded_points(charts)
         charts = attach_visual_specs(charts)
         _tag_currency_charts(charts, statistics, currency)
         await progress(65)
@@ -564,6 +566,30 @@ def _merge_recommendations(
             seen_evidence.add(evidence)
         merged.append(recommendation)
     return merged[:8]
+
+
+def disclose_excluded_points(charts: list[dict[str, Any]]) -> None:
+    """Say on the chart when a log scale could not plot every record.
+
+    A log axis has no place for a zero, so the scatter populator leaves those
+    records out. Six of 118 projects have no baseline cost recorded — showing
+    112 points without a word is the quiet kind of wrong this dashboard is
+    supposed to avoid.
+    """
+    for chart in charts:
+        excluded = (chart.get("echarts_option") or {}).get("_excluded_points") or 0
+        if not excluded:
+            continue
+        noun = "record" if excluded == 1 else "records"
+        existing = str(chart.get("description") or "").strip()
+        # Chart descriptions are written as fragments with no full stop, so the
+        # note ran straight on: "...tends to rise together 6 records with...".
+        if existing and existing[-1] not in ".!?":
+            existing = f"{existing}."
+        chart["description"] = (
+            f"{existing} {excluded} {noun} with no value recorded are not shown, "
+            "because the scale is logarithmic."
+        ).strip()
 
 
 def consolidated_anomaly_card(anomalies: list[dict[str, Any]]) -> tuple[str, str]:

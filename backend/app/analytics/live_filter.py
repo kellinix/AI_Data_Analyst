@@ -300,14 +300,18 @@ def _is_log_worthy(values: list[float]) -> bool:
     """Whether an axis spans orders of magnitude and needs a log scale.
 
     116 of 118 projects sat on the origin next to two running to thousands,
-    so the chart showed a blob and two dots. A log axis needs strictly
-    positive values, and needs enough points to be worth the reader's effort.
+    so the chart showed a blob and two dots. A log axis cannot place a zero,
+    and a handful of records with no value recorded should not force a linear
+    axis on data that spans four orders of magnitude — but those records are
+    then disclosed on the chart rather than dropped quietly (see
+    `_populate_scatter`), so the share allowed to be missing is small.
     """
-    if len(values) < 8 or any(value <= 0 for value in values):
+    positives = [value for value in values if value > 0]
+    if len(positives) < 8 or len(positives) < 0.9 * len(values):
         return False
-    ordered = sorted(values)
+    ordered = sorted(positives)
     median = ordered[len(ordered) // 2]
-    return median > 0 and max(ordered) / median > 50
+    return median > 0 and max(ordered) / median > 30
 
 
 def _populate_scatter(
@@ -333,11 +337,22 @@ def _populate_scatter(
     points = [
         [float(r[0]), float(r[1])] for r in rows if r[0] is not None and r[1] is not None
     ]
-    opt["series"][0]["data"] = points
-    opt["_scale"] = {
+    scale = {
         axis: _is_log_worthy([point[index] for point in points])
         for index, axis in enumerate(("x", "y"))
     }
+    if scale["x"] or scale["y"]:
+        # A log axis cannot place a zero. Drop those records from the plot and
+        # count them, so the chart can say how many are missing instead of
+        # quietly showing fewer projects than the portfolio holds.
+        plotted = [
+            point for point in points
+            if (point[0] > 0 or not scale["x"]) and (point[1] > 0 or not scale["y"])
+        ]
+        opt["_excluded_points"] = len(points) - len(plotted)
+        points = plotted
+    opt["series"][0]["data"] = points
+    opt["_scale"] = scale
     return True
 
 

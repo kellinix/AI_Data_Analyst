@@ -82,6 +82,59 @@ def test_build_where_clause_no_filters_is_empty():
     assert params == []
 
 
+def test_scatter_uses_a_log_scale_and_says_what_it_could_not_plot():
+    """A log axis has no place for a zero. Six of 118 projects have no
+    baseline cost recorded, and showing 112 points without a word would be the
+    quiet kind of wrong this dashboard exists to avoid."""
+    conn = duckdb.connect(":memory:")
+    conn.execute("CREATE TABLE data (baseline DOUBLE, forecast DOUBLE)")
+    conn.executemany(
+        "INSERT INTO data VALUES (?, ?)",
+        [(float(v), float(v) * 1.05) for v in range(1, 60)] + [(3000.0, 3150.0), (0.0, 0.0)],
+    )
+    chart = {
+        "type": "scatter",
+        "echarts_option": {
+            "xAxis": {"type": "value"},
+            "yAxis": {"type": "value"},
+            "series": [{"type": "scatter", "data": []}],
+            "_columns": {"x": "baseline", "y": "forecast"},
+        },
+    }
+
+    assert populate_chart_option(conn, chart) is True
+
+    opt = chart["echarts_option"]
+    assert opt["_scale"]["x"] is True
+    assert opt["_excluded_points"] == 1
+    assert all(point[0] > 0 and point[1] > 0 for point in opt["series"][0]["data"])
+
+
+def test_scatter_keeps_every_point_when_the_scale_stays_linear():
+    conn = duckdb.connect(":memory:")
+    conn.execute("CREATE TABLE data (baseline DOUBLE, forecast DOUBLE)")
+    conn.executemany(
+        "INSERT INTO data VALUES (?, ?)",
+        [(float(v), float(v) + 1) for v in range(0, 40)],
+    )
+    chart = {
+        "type": "scatter",
+        "echarts_option": {
+            "xAxis": {"type": "value"},
+            "yAxis": {"type": "value"},
+            "series": [{"type": "scatter", "data": []}],
+            "_columns": {"x": "baseline", "y": "forecast"},
+        },
+    }
+
+    assert populate_chart_option(conn, chart) is True
+
+    opt = chart["echarts_option"]
+    assert opt["_scale"] == {"x": False, "y": False}
+    assert "_excluded_points" not in opt
+    assert len(opt["series"][0]["data"]) == 40
+
+
 def test_histogram_bands_widen_for_a_skewed_distribution():
     """Regression: 84 of 118 government projects landed in a single bar,
     because a handful run to thousands of millions while most are under 400."""
@@ -108,8 +161,11 @@ def test_histogram_bands_stay_even_when_the_data_is_not_skewed():
 
 def test_log_scale_only_for_positive_data_spanning_orders_of_magnitude():
     assert _is_log_worthy([1.0] * 10 + [5000.0])
-    # A log axis is undefined at zero and below.
-    assert not _is_log_worthy([0.0] + [1.0] * 10 + [5000.0])
+    # A log axis cannot place a zero. A few such records are allowed, because
+    # the populator leaves them out and the chart says how many; a large share
+    # is not, since the reader would be shown a chart missing much of the data.
+    assert _is_log_worthy([0.0] + [1.0] * 10 + [5000.0])
+    assert not _is_log_worthy([0.0] * 3 + [1.0] * 10 + [5000.0])
     # A narrow spread reads fine on a linear axis.
     assert not _is_log_worthy([float(value) for value in range(1, 30)])
     # Too few points to be worth the reader's effort.
