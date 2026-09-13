@@ -16,6 +16,7 @@ from app.analytics.calibration import (
     RULE_TRACKING,
     confidence_fields,
 )
+from app.analytics.labels import sentence_label
 from app.analytics.text_matching import contains_keyword, shorten_label
 
 
@@ -71,7 +72,7 @@ def _quality_recommendations(data_quality: dict[str, Any]) -> list[dict[str, Any
         problem = f"{_humanize(column)}: {description}" if column else description
         recs.append({
             "title": "Clean high-impact data quality issues",
-            "description": "Resolve the most severe data quality gaps before making operational decisions from this dataset.",
+            "description": "Sort out the most serious gaps in this file before making decisions from it.",
             "problem": problem,
             "evidence": f"Quality score is {data_quality.get('score', 0)}/100 with {len(issues)} detected issues.",
             "expected_impact": "Higher confidence in KPIs, forecasts, and executive reporting.",
@@ -149,11 +150,17 @@ def _anomaly_recommendations(anomalies: list[dict[str, Any]]) -> list[dict[str, 
         f"{shorten_label(_humanize(k), 40)} {v}" for k, v in context.items()
     )
     return [{
-        "title": f"Review the context behind standout {label}",
-        "description": (f"Compare the identified record ({context_text}) with similar records to understand the drivers." if context_text else f"Compare the identified {label.lower()} record with similar records before drawing a conclusion."),
+        "title": f"Look into the unusual {label}",
+        "description": (
+            f"Compare this one ({context_text}) with similar ones to see what drove it."
+            if context_text
+            else f"Compare this {sentence_label(label)} entry with similar ones before drawing a conclusion."
+        ),
         "problem": anomaly.get("description", f"One {label} result is much higher than usual."),
         "evidence": anomaly.get("description", f"One {label} result is much higher than usual."),
-        "expected_impact": "Helps explain whether this was exceptional performance, a tactical pattern, or a one-off match moment.",
+        # This read "...or a one-off match moment" — sports copy left in a
+        # template, shown to someone reading a government project portfolio.
+        "expected_impact": "Tells you whether this is a genuine result worth repeating, a pattern, or a one-off.",
         "financial_opportunity": None,
         "importance": "medium",
         **confidence_fields(RULE_ANOMALY),

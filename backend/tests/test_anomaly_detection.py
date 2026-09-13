@@ -36,7 +36,7 @@ def test_low_outlier_percentile_ranks_against_all_rows():
     outlier = anomalies[0]
     assert outlier["value"] == 71.0
     assert outlier["percentile"] <= 1
-    assert "lower than almost every other record" in outlier["description"]
+    assert "lower than almost everything else in the file" in outlier["description"]
 
 
 CONTEXT_SCHEMA = [
@@ -167,4 +167,4 @@ def test_high_outlier_is_still_described_as_high():
     outlier = anomalies[0]
     assert outlier["value"] == 250.0
     assert outlier["percentile"] >= 99
-    assert "higher than almost every other record" in outlier["description"]
+    assert "higher than almost everything else in the file" in outlier["description"]

@@ -192,9 +192,9 @@ function generateRelationshipSuggestions(
           {
             id: `single:${files[0].id}`,
             type: "separate",
-            title: "Single dataset analysis",
+            title: "Single file analysis",
             description:
-              "Only one file was uploaded, so InsightFlow will analyse this dataset on its own.",
+              "Only one file was uploaded, so InsightFlow will analyse it on its own.",
             confidence: 1,
             columns: [],
             files: [files[0].original_filename],

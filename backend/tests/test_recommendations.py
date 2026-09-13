@@ -25,7 +25,7 @@ def test_anomaly_recommendation_shortens_a_paragraph_long_context_label():
         forecasts=[],
     )
 
-    card = next(r for r in recs if r["title"].startswith("Review the context behind"))
+    card = next(r for r in recs if r["title"].startswith("Look into the unusual"))
     assert "…" in card["description"]
     assert "Of The Project At A Fixed Point" not in card["description"]
     # The value, and the dimension that actually explains the record, survive.
@@ -118,5 +118,10 @@ def test_anomaly_recommendation_uses_domain_neutral_language():
     assert "organisations" not in recs[0]["title"].lower()
     assert "organisations" not in recs[0]["description"].lower()
     assert "correction" not in recs[0]["description"].lower()
-    assert "standout" in recs[0]["title"].lower()
+    # This asserted the title contained "standout" — analyst vocabulary that
+    # the plain-language pass removed. The intent was domain-neutral wording,
+    # so pin that instead: it names the measure in ordinary words.
+    assert recs[0]["title"] == "Look into the unusual Response Time Hours"
+    assert "outlier" not in recs[0]["title"].lower()
+    assert "anomaly" not in recs[0]["title"].lower()
     assert recs[0]["data"]["owner"] == "Operations"

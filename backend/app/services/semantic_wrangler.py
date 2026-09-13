@@ -672,11 +672,17 @@ def _friendly_chart_title(chart: dict[str, Any], labels: dict[str, str]) -> str:
             return f"Average {y_label} Over Time" if aggregation == "average" else f"{y_label} Over Time"
         return f"{y_label} by {x_label}"
     if chart_type == "donut" and chart.get("series"):
-        return f"{labels.get(chart['series'][0], _humanize_identifier(str(chart['series'][0])))} Distribution"
+        # "Distribution" is a statistics word on a chart aimed at someone who
+        # does not read statistics. This layer rebuilds every title, so the
+        # plainer wording in chart_selector was being overwritten here.
+        series_label = labels.get(
+            chart["series"][0], _humanize_identifier(str(chart["series"][0]))
+        )
+        return f"{series_label} breakdown"
     if chart_type == "scatter" and x_label and y_label:
         return f"{x_label} vs {y_label}"
     if chart_type == "histogram" and x_label:
-        return f"{x_label} Distribution"
+        return f"How {x_label} is spread"
     return str(chart.get("title") or "Chart")
 
 

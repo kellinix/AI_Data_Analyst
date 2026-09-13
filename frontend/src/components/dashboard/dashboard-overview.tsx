@@ -165,7 +165,7 @@ export function DashboardOverview() {
                 Recent analyses
               </h2>
               <p className="text-sm text-zinc-500">
-                Latest uploaded datasets and analysis runs.
+                Your most recent files and the analyses built from them.
               </p>
             </div>
             <Button asChild variant="outline" size="sm">

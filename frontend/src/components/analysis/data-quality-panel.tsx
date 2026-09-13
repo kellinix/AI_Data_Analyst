@@ -106,10 +106,10 @@ export function DataQualityPanel({ metadata }: DataQualityPanelProps) {
           <p className="mt-3 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
             {defects.length === 0
               ? notes.length === 0
-                ? "No quality issues detected."
-                : `No quality issues. ${plural(notes.length, "note")} on how widely values spread.`
-              : `${plural(defects.length, "issue")} detected before AI reasoning${
-                  notes.length > 0 ? `, plus ${plural(notes.length, "note")} on spread` : ""
+                ? "Nothing looks wrong with this data."
+                : `Nothing looks wrong. ${plural(notes.length, "note")} below on figures that vary a lot.`
+              : `${plural(defects.length, "thing")} worth checking in your data${
+                  notes.length > 0 ? `, plus ${plural(notes.length, "note")} on figures that vary a lot` : ""
                 }.`}
           </p>
           <p className="mt-2 text-[11px] leading-relaxed text-zinc-400">
@@ -143,7 +143,7 @@ export function DataQualityPanel({ metadata }: DataQualityPanelProps) {
               >
                 <div>
                   <p className="text-sm font-medium text-zinc-800 dark:text-zinc-100">
-                    {issue.column_label ?? issue.column ?? "Whole dataset"}
+                    {issue.column_label ?? issue.column ?? "Your whole file"}
                   </p>
                   <p className="mt-0.5 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
                     {issue.description}
@@ -157,7 +157,7 @@ export function DataQualityPanel({ metadata }: DataQualityPanelProps) {
 
             {issues.length === 0 && (
               <div className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
-                Dataset passed the current automated quality checks.
+                Your file passed every check we ran.
               </div>
             )}
           </div>
@@ -177,12 +177,12 @@ export function DataQualityPanel({ metadata }: DataQualityPanelProps) {
           <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Cleaning performed</h3>
           <p className="mt-2 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
             {cleaned
-              ? `${duplicatesRemoved.toLocaleString()} duplicates removed, ${capped.toLocaleString()} numeric values capped, and ${excluded.toLocaleString()} outlier rows excluded. ${outputRows.toLocaleString()} rows were analysed.`
-              : "Raw mode was used; no automated cleaning was applied."}
+              ? `${duplicatesRemoved.toLocaleString()} repeated entries removed and ${excluded.toLocaleString()} left out as unusually extreme${capped > 0 ? `, ${capped.toLocaleString()} very large figures reined in` : ""}. ${outputRows.toLocaleString()} entries were analysed.`
+              : "Your file was used exactly as supplied, with no tidying up."}
           </p>
           {capped > 0 && (
             <p className="mt-2 rounded-lg bg-amber-50 p-2 text-xs text-amber-700 dark:bg-amber-950/40 dark:text-amber-300">
-              Analysis based on cleaned data. Numeric outliers were capped.
+              Based on tidied-up data: some very large figures were reined in.
             </p>
           )}
         </div>
@@ -190,10 +190,10 @@ export function DataQualityPanel({ metadata }: DataQualityPanelProps) {
           <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Analysis checks</h3>
           <p className="mt-2 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
             {defects.length === 0
-              ? "The data used for analysis passed the currently implemented automated checks."
-              : `${plural(defects.length, "issue")} ${
-                  defects.length === 1 ? "remains" : "remain"
-                } in the data used for analysis.`}
+              ? "Everything we checked looked fine."
+              : `${plural(defects.length, "thing")} ${
+                  defects.length === 1 ? "is" : "are"
+                } still worth a look.`}
           </p>
         </div>
       </div>

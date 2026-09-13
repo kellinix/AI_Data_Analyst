@@ -184,7 +184,7 @@ class AnalysisEngine:
                 weight_label = display_labels.get(
                     weight_column, weight_column.replace("_", " ").title()
                 )
-                title = f"Weighted Avg {kpi_label}"
+                title = f"Average {kpi_label}"
                 description = (
                     f"Average {kpi_label}, weighted by {weight_label}: {kpi['value']:,.2f}"
                 )
@@ -576,19 +576,26 @@ def disclose_excluded_points(charts: list[dict[str, Any]]) -> None:
     112 points without a word is the quiet kind of wrong this dashboard is
     supposed to avoid.
     """
+    marker = "are left out, so the chart can show"
     for chart in charts:
         excluded = (chart.get("echarts_option") or {}).get("_excluded_points") or 0
         if not excluded:
             continue
-        noun = "record" if excluded == 1 else "records"
         existing = str(chart.get("description") or "").strip()
+        # Idempotent: a re-run analyses the same chart objects, and the note
+        # was appended a second time.
+        if marker in existing:
+            continue
+        noun = "entry" if excluded == 1 else "entries"
         # Chart descriptions are written as fragments with no full stop, so the
         # note ran straight on: "...tends to rise together 6 records with...".
         if existing and existing[-1] not in ".!?":
             existing = f"{existing}."
+        # "...because the scale is logarithmic" put a maths term on a chart
+        # meant for someone who does not have one.
         chart["description"] = (
-            f"{existing} {excluded} {noun} with no value recorded are not shown, "
-            "because the scale is logarithmic."
+            f"{existing} {excluded} {noun} with nothing recorded are left out, "
+            "so the chart can show the very small and the very large together."
         ).strip()
 
 
@@ -603,7 +610,7 @@ def consolidated_anomaly_card(anomalies: list[dict[str, Any]]) -> tuple[str, str
     other_labels = [
         label
         for label in (
-            str(item.get("title", "")).removeprefix("Standout ").strip()
+            str(item.get("title", "")).removeprefix("Unusually high or low ").strip()
             for item in anomalies[1:]
         )
         if label
@@ -615,11 +622,11 @@ def consolidated_anomaly_card(anomalies: list[dict[str, Any]]) -> tuple[str, str
             if len(other_labels) == 1
             else ", ".join(other_labels[:-1]) + " and " + other_labels[-1]
         )
-        description = f"{description} Single records also stand out in {joined}."
+        description = f"{description} {joined} also look unusual."
     title = (
-        str(strongest.get("title", "Anomaly detected"))
+        str(strongest.get("title", "Something unusual found"))
         if len(anomalies) == 1
-        else f"Standout records in {len(anomalies)} measures"
+        else f"Unusual figures in {len(anomalies)} areas"
     )
     return title, description
 

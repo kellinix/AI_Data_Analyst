@@ -19,7 +19,8 @@ def test_points_a_log_scale_cannot_plot_are_disclosed():
     disclose_excluded_points(charts)
 
     assert charts[0]["description"].endswith(
-        "6 records with no value recorded are not shown, because the scale is logarithmic."
+        "6 entries with nothing recorded are left out, so the chart can show "
+        "the very small and the very large together."
     )
     # The original description survives in front of the note.
     assert charts[0]["description"].startswith("Scatter plot comparing")
@@ -35,7 +36,12 @@ def test_the_note_does_not_run_into_the_description():
 
     disclose_excluded_points(charts)
 
-    assert "rise together. 6 records" in charts[0]["description"]
+    assert "rise together. 6 entries" in charts[0]["description"]
+
+    # Idempotent: a re-run analyses the same chart objects, and the note was
+    # appended a second time.
+    disclose_excluded_points(charts)
+    assert charts[0]["description"].count("are left out") == 1
 
 
 def test_nothing_is_said_when_every_record_is_plotted():
@@ -48,27 +54,31 @@ def test_nothing_is_said_when_every_record_is_plotted():
 
 def test_a_single_anomaly_keeps_its_own_title():
     title, description = consolidated_anomaly_card(
-        [{"title": "Standout Cost", "description": "One record reached 5,118.30 for Cost."}]
+        [{
+            "title": "Unusually high or low Cost",
+            "description": "One entry reached 5,118.30 for Cost.",
+        }]
     )
 
-    assert title == "Standout Cost"
-    assert description == "One record reached 5,118.30 for Cost."
+    assert title == "Unusually high or low Cost"
+    assert description == "One entry reached 5,118.30 for Cost."
 
 
 def test_several_anomalies_become_one_card():
     """Regression: five "Standout <measure>" cards each said a single record
     was higher than almost every other record — the same sentence five times."""
     anomalies = [
-        {"title": "Standout Cost", "description": "One record reached 5,118.30 for Cost."},
-        {"title": "Standout Variance", "description": "One record reached 733.00 for Variance."},
-        {"title": "Standout Benefits", "description": "One record reached 40,967.00 for Benefits."},
+        {"title": "Unusually high or low Cost", "description": "One entry reached 5,118.30 for Cost."},
+        {"title": "Unusually high or low Variance", "description": "One entry reached 733.00."},
+        {"title": "Unusually high or low Benefits", "description": "One entry reached 40,967.00."},
     ]
 
     title, description = consolidated_anomaly_card(anomalies)
 
-    assert title == "Standout records in 3 measures"
-    assert description.startswith("One record reached 5,118.30 for Cost.")
-    assert description.endswith("Single records also stand out in Variance and Benefits.")
+    # "Standout records in 3 measures" put three analyst words in one heading.
+    assert title == "Unusual figures in 3 areas"
+    assert description.startswith("One entry reached 5,118.30 for Cost.")
+    assert description.endswith("Variance and Benefits also look unusual.")
 
 
 def test_only_money_charts_are_tagged_with_the_currency():

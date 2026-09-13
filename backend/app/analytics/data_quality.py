@@ -124,12 +124,12 @@ def _numeric_quality_issues(
                     "column": column,
                     "severity": "low" if high_side_only else "medium",
                     "description": (
-                        f"{count:,} value{'s' if count != 1 else ''} sit well above the rest "
-                        f"(most fall between {display_lower:,.0f} and {upper:,.0f})"
+                        f"{count:,} figure{'s' if count != 1 else ''} sit well above the rest "
+                        f"(most are between {display_lower:,.0f} and {upper:,.0f})"
                         if high_side_only
                         else (
-                            f"{count:,} value{'s' if count != 1 else ''} fall far outside "
-                            f"the typical range ({display_lower:,.0f} to {upper:,.0f})"
+                            f"{count:,} figure{'s' if count != 1 else ''} sit well outside "
+                            f"the usual range of {display_lower:,.0f} to {upper:,.0f}"
                         )
                     ),
                     "affected_rows": count,

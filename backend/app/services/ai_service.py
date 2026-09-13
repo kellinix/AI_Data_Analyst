@@ -13,6 +13,7 @@ import re
 from typing import Any
 
 from app.analytics.calibration import AI_SOURCE_BY_PRIORITY, confidence_fields
+from app.analytics.plain_language import plain_english_in_place
 from app.core.config import settings
 from app.core.logging import get_logger
 
@@ -120,7 +121,7 @@ CORE ANALYSIS RULES
 5. Treat similar category labels as the same group when the Profile JSON says they were merged or standardized.
 6. Do not describe merged aliases as separate categories.
 7. Prefer concise, high-impact business language.
-8. Avoid developer language and statistical jargon.
+8. Avoid developer language and statistical jargon. The reader runs a business and does not read statistics. Never write "outlier", "distribution", "variance" as a statistical term, "correlation", "percentile", "standard deviation", "record", "row", "column", "dataset", "logarithmic", "z-score" or "anomaly". Say what happened in ordinary words: "one project cost far more than the rest", "these two move together", "this figure is much higher than the others".
 9. If evidence is weak, lower priority rather than speculating.
 10. Do not call something an error unless quality checks explicitly show invalid, missing, duplicate, or impossible values.
 11. For count or volume datasets, describe large outliers as concentration or high-volume categories, not errors.
@@ -578,7 +579,7 @@ def _analysis_schema() -> dict[str, Any]:
 
 def _coerce_analysis_json(content: str) -> dict[str, Any]:
     result = json.loads(content or "{}")
-    return {
+    coerced = {
         "executive_summary": str(result.get("executive_summary", "")),
         "layout_grid": _sanitize_layout_grid(result.get("layout_grid") or []),
         "insights": list(result.get("insights") or []),
@@ -588,6 +589,11 @@ def _coerce_analysis_json(content: str) -> dict[str, Any]:
             if isinstance(rec, dict)
         ],
     }
+    # Both AI paths return through here. Instructing the model not to write
+    # "outlier", "anomaly" or "dataset" did not hold — a successful response
+    # still produced all three — so the vocabulary is corrected rather than
+    # requested. Column names the reader owns are left alone.
+    return plain_english_in_place(coerced)
 
 
 def _sanitize_layout_grid(items: Any) -> list[dict[str, Any]]:

@@ -28,7 +28,7 @@ def test_a_right_skewed_metric_is_not_reported_as_a_defect():
     assert issue["type"] == "wide_spread"
     assert issue["severity"] == "low"
     # The quoted range is clamped to a value the column can actually reach.
-    assert "most fall between 10 and 70" in issue["description"]
+    assert "most are between 10 and 70" in issue["description"]
 
 
 def test_values_below_a_reachable_floor_are_still_flagged():

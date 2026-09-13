@@ -124,9 +124,9 @@ def _distribution_anomalies(
         results.append({
             "type": "statistical_outlier",
             "column": column,
-            "title": f"Standout {label}",
+            "title": f"Unusually high or low {label}",
             "description": (
-                f"One record reached {float(value):,.2f} for {label}, "
+                f"One entry reached {float(value):,.2f} for {label}, "
                 f"{_plain_percentile(percentile)}"
                 + (f" ({context_text})." if context_text else ".")
             ),
@@ -153,14 +153,18 @@ def _format_context_value(value: Any) -> Any:
 
 
 def _plain_percentile(percentile: float) -> str:
-    """Translate a percentile rank into a plain-English comparison sentence fragment."""
+    """Translate a percentile rank into a plain-English comparison.
+
+    "Record" is a database word. A business reader has projects, orders or
+    customers in front of them, not records.
+    """
     if percentile >= 99:
-        return "higher than almost every other record"
+        return "higher than almost everything else in the file"
     if percentile <= 1:
-        return "lower than almost every other record"
+        return "lower than almost everything else in the file"
     if percentile >= 50:
-        return f"higher than about {percentile:.0f}% of other records"
-    return f"lower than about {100 - percentile:.0f}% of other records"
+        return f"higher than about {percentile:.0f}% of the rest"
+    return f"lower than about {100 - percentile:.0f}% of the rest"
 
 
 def _time_series_anomalies(

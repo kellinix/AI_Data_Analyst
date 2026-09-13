@@ -6,8 +6,8 @@ import { CheckCircle2, Circle, Loader2 } from "lucide-react"
 const PROCESSING_STEPS = [
   { label: "Reading file", sublabel: "Parsing structure and encoding" },
   { label: "Detecting columns", sublabel: "Identifying data types and formats" },
-  { label: "Understanding data", sublabel: "Profiling distributions and relationships" },
-  { label: "Finding patterns", sublabel: "Running statistical analysis" },
+  { label: "Understanding data", sublabel: "Seeing how your figures spread and relate" },
+  { label: "Finding patterns", sublabel: "Checking what stands out" },
   { label: "Building KPIs", sublabel: "Detecting business metrics" },
   { label: "Generating charts", sublabel: "Selecting optimal visualisations" },
   { label: "Writing insights", sublabel: "GPT-4o is analysing your data" },

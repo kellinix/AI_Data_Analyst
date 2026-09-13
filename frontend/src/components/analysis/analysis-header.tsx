@@ -168,7 +168,7 @@ export function AnalysisHeader({ analysis, status }: AnalysisHeaderProps) {
           </Badge>
         </div>
         <p className="text-sm text-zinc-500">
-          {analysis.row_count?.toLocaleString()} rows · {analysis.column_count} columns ·{" "}
+          {analysis.row_count?.toLocaleString()} entries · {analysis.column_count} fields ·{" "}
           Analysed {formatDate(analysis.updated_at)}
         </p>
       </div>

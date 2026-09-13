@@ -486,7 +486,7 @@ def _outcome_rate_bar_chart(cat_col: str, outcome_col: str) -> dict[str, Any]:
         "id": _chart_id(),
         "type": "bar",
         "title": f"{outcome_label} rate by {cat_label}",
-        "description": f"Share of records with {sentence_label(outcome_label)} = 1 in each {sentence_label(cat_label)} group",
+        "description": f"The share of each {sentence_label(cat_label)} where {sentence_label(outcome_label)} applies",
         "xAxis": outcome_col,
         "yAxis": cat_col,
         "series": [outcome_col],
@@ -513,8 +513,10 @@ def _donut_chart(cat_col: str, top_values: list[dict]) -> dict[str, Any]:
     return {
         "id": _chart_id(),
         "type": "donut",
-        "title": f"{cat_label} distribution",
-        "description": f"Share of records by {sentence_label(cat_label)}",
+        "title": f"{cat_label} breakdown",
+        # Counts, not a total: this chart divides the number of entries, and
+        # saying "the total" would misdescribe what the reader is looking at.
+        "description": f"How many fall into each {sentence_label(cat_label)}",
         "xAxis": None,
         "yAxis": None,
         "series": [cat_col],
@@ -575,8 +577,8 @@ def _histogram_chart(value_col: str, stats: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": _chart_id(),
         "type": "histogram",
-        "title": f"{value_label} distribution",
-        "description": "Distribution and spread of values",
+        "title": f"How {sentence_label(value_label)} is spread",
+        "description": f"How many fall into each {sentence_label(value_label)} range",
         "xAxis": value_col,
         "yAxis": "count",
         "series": [value_col],
