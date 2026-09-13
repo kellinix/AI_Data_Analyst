@@ -20,6 +20,7 @@ import polars as pl
 from openai import AsyncOpenAI
 
 from app.analytics.labels import derive_label
+from app.analytics.plain_language import plain_english
 from app.analytics.text_matching import shorten_label
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -586,10 +587,18 @@ def _merge_display_metadata(
     for item in metadata.get("charts", []):
         if isinstance(item, dict) and item.get("id"):
             chart_id = str(item["id"])
+            # Display metadata is a *second* AI call, and it never passed
+            # through the plain-language filter wired into the analysis call —
+            # so "Distribution of Financial Year Baseline" and "Histogram
+            # showing the distribution of..." reached the dashboard.
+            title = item.get("title") or charts_by_id.get(chart_id, {}).get("title")
+            description = (
+                item.get("description") or charts_by_id.get(chart_id, {}).get("description")
+            )
             charts_by_id[chart_id] = {
                 **charts_by_id.get(chart_id, {"id": chart_id}),
-                "title": item.get("title") or charts_by_id.get(chart_id, {}).get("title"),
-                "description": item.get("description") or charts_by_id.get(chart_id, {}).get("description"),
+                "title": plain_english(title) if title else title,
+                "description": plain_english(description) if description else description,
             }
 
     return {"columns": list(columns_by_name.values()), "charts": list(charts_by_id.values())}

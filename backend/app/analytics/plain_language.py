@@ -28,6 +28,8 @@ _REPLACEMENTS: tuple[tuple[str, str], ...] = (
     (r"\bcorrelation\b", "relationship"),
     (r"\bdistributions\b", "spreads"),
     (r"\bdistribution\b", "spread"),
+    (r"\bhistograms\b", "bar charts"),
+    (r"\bhistogram\b", "bar chart"),
     (r"\bpercentiles\b", "rankings"),
     (r"\bpercentile\b", "ranking"),
     (r"\blogarithmic\b", "wide-ranging"),
@@ -63,6 +65,15 @@ def plain_english(text: str) -> str:
             result,
             flags=re.IGNORECASE,
         )
+    # Expanding "outliers" can double the noun: the model wrote "some
+    # financial figures are outliers", which became "...are unusually high or
+    # low figures". Collapse it rather than leave the reader that sentence.
+    result = re.sub(
+        r"\bfigures (are|is) unusually high or low figures\b",
+        r"figures \1 unusually high or low",
+        result,
+        flags=re.IGNORECASE,
+    )
     return result
 
 

@@ -270,4 +270,10 @@ Three defects of my own, all caught by looking rather than assuming:
 - The donut's new description said "How the total splits across each department" — but that chart counts entries rather than summing a total. A new inaccuracy is worse than the jargon it replaced.
 - The scatter's disclosure note was appended twice on a re-run, because the function was not idempotent and a re-analysis walks the same chart objects.
 
+**And a second AI call nobody had filtered.** Looking at the rendered page after all of the above still showed "Distribution of Financial Year Baseline", "Histogram showing the distribution of…" and "Donut chart representing the distribution of…". Chart titles and descriptions come from `build_display_metadata` — a *separate* model call that never passed through the filter wired into the analysis call. Routed through it in `_merge_display_metadata`, with "histogram" added to the vocabulary, since a histogram is a bar chart to everyone who has not studied statistics.
+
+**The filter also produced its own clumsy English.** Expanding "outliers" doubled the noun: the model's "some financial figures are outliers" became "…are unusually high or low **figures**". Collapsed. A replacement table that makes text awkward is only a better class of unreadable.
+
 Deliberately **not** replaced: "variance", "baseline", "forecast". They are the reader's own column names, not statistics jargon, and swapping them would make the text wrong rather than plain.
+
+Worth recording about method, because it recurred all day: every one of these was found by rendering the page and reading it. The payload checks, the offline sweeps and the unit tests each reported success at the moment the dashboard was still saying "Distribution", "Standout records in 5 measures", and "a one-off match moment".

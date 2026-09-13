@@ -169,7 +169,7 @@ export function DataQualityPanel({ metadata }: DataQualityPanelProps) {
           <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Source quality</h3>
           <p className="mt-2 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
             {cleaned
-              ? `The source contained ${inputRows.toLocaleString()} rows. A separate pre-cleaning quality score was not recorded.`
+              ? `Your file came in with ${inputRows.toLocaleString()} entries. We did not score it before tidying.`
               : "The quality score above describes the uploaded source data."}
           </p>
         </div>
@@ -177,7 +177,9 @@ export function DataQualityPanel({ metadata }: DataQualityPanelProps) {
           <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Cleaning performed</h3>
           <p className="mt-2 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
             {cleaned
-              ? `${duplicatesRemoved.toLocaleString()} repeated entries removed and ${excluded.toLocaleString()} left out as unusually extreme${capped > 0 ? `, ${capped.toLocaleString()} very large figures reined in` : ""}. ${outputRows.toLocaleString()} entries were analysed.`
+              ? duplicatesRemoved + excluded + capped === 0
+                ? `Nothing needed removing. All ${outputRows.toLocaleString()} entries were analysed.`
+                : `${duplicatesRemoved.toLocaleString()} repeated entries removed and ${excluded.toLocaleString()} left out as unusually extreme${capped > 0 ? `, ${capped.toLocaleString()} very large figures reined in` : ""}. ${outputRows.toLocaleString()} entries were analysed.`
               : "Your file was used exactly as supplied, with no tidying up."}
           </p>
           {capped > 0 && (
