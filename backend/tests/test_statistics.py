@@ -37,6 +37,28 @@ def test_percentage_average_is_weighted_by_the_money_it_applies_to():
     weighted_conn.close()
 
 
+def test_a_percentage_is_weighted_by_money_from_its_own_family():
+    """A financial-year variance is weighted by financial-year money, not by
+    whole-life cost — which is far larger but measures something else. The
+    biggest money column is not automatically the right one."""
+    related_conn = duckdb.connect(":memory:")
+    related_conn.register(
+        "data",
+        pd.DataFrame({
+            "financial_year_variance_pct": [100.0, 0.0],
+            "financial_year_baseline_cost": [1.0, 99.0],
+            "total_whole_life_cost": [5000.0, 5000.0],
+        }),
+    )
+
+    stats = StatisticsEngine(related_conn).describe_all()["numeric_stats"]
+    variance = stats["financial_year_variance_pct"]
+
+    assert variance["weight_column"] == "financial_year_baseline_cost"
+    assert variance["weighted_mean"] == pytest.approx(1.0)
+    related_conn.close()
+
+
 def test_describe_all_structure(conn):
     engine = StatisticsEngine(conn)
     result = engine.describe_all()

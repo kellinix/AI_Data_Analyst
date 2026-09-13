@@ -7,6 +7,7 @@ This ensures the AI is grounded in real numbers, not hallucinations.
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 import duckdb
@@ -23,6 +24,19 @@ logger = get_logger(__name__)
 
 def _is_percentage_column(name: str) -> bool:
     return "%" in name or contains_keyword(name, ["pct", "percent", "percentage"])
+
+
+def _name_tokens(name: str) -> list[str]:
+    return [token for token in re.split(r"[^a-z0-9]+", str(name).lower()) if token]
+
+
+def _shared_prefix(left: list[str], right: list[str]) -> int:
+    shared = 0
+    for a, b in zip(left, right, strict=False):
+        if a != b:
+            break
+        shared += 1
+    return shared
 
 
 class StatisticsEngine:
@@ -69,16 +83,42 @@ class StatisticsEngine:
         same say as a £75m one, so the headline figure can point the opposite
         way to the portfolio it claims to summarise.
         """
-        weight_column = self._dominant_currency_column(numeric_stats)
-        if weight_column is None:
-            return
+        dominant = self._dominant_currency_column(numeric_stats)
         for column, stats in numeric_stats.items():
-            if column == weight_column or not _is_percentage_column(column):
+            if not _is_percentage_column(column):
+                continue
+            weight_column = self._related_currency_column(column, numeric_stats) or dominant
+            if weight_column is None or weight_column == column:
                 continue
             weighted = self._weighted_mean(column, weight_column)
             if weighted is not None:
                 stats["weighted_mean"] = weighted
                 stats["weight_column"] = weight_column
+
+    def _related_currency_column(
+        self, column: str, numeric_stats: dict[str, Any]
+    ) -> str | None:
+        """The money column the percentage is a percentage *of*.
+
+        A financial-year variance should be weighted by financial-year money,
+        not by whole-life cost — which is ten times larger and measures
+        something else entirely. Columns from one family share a leading run
+        of words, so require at least two and prefer the largest among them.
+        """
+        tokens = _name_tokens(column)
+        best: tuple[tuple[int, float], str] | None = None
+        for name, stats in numeric_stats.items():
+            if name == column or not stats.get("total"):
+                continue
+            if not contains_keyword(name, CURRENCY_KEYWORDS):
+                continue
+            shared = _shared_prefix(tokens, _name_tokens(name))
+            if shared < 2:
+                continue
+            score = (shared, abs(float(stats.get("total") or 0)))
+            if best is None or score > best[0]:
+                best = (score, name)
+        return best[1] if best else None
 
     def _dominant_currency_column(self, numeric_stats: dict[str, Any]) -> str | None:
         """The money column the percentages are a percentage *of*."""
