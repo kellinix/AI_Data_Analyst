@@ -232,4 +232,13 @@ Measured with the AI disabled entirely, so nothing but the derivation is in play
 
 The 200-character delivery-confidence column now reads "IPA Delivery Confidence Assessment". `test_labels.py` pins the derivation against every real portfolio column; the stacked title's per-part limit rose from 24 to 36, since 24 was set when a label could still be a paragraph and had begun cutting readable names into ellipses.
 
+**And the subtitle directly beneath each title.** Driving the dashboard with the model fully engaged — both calls returning 200, so the merged path rather than the fallback — showed the titles fixed and the chart *descriptions* still quoting the raw header: "Compares the total financial year baseline currency m including non government costs across each department". Descriptions are built in `chart_selector`, whose own `_humanize` never saw a display label. It now delegates to the same derivation:
+
+| | Before | After |
+|---|---|---|
+| Bar | Compares the total financial year baseline currency m including non government costs across each department | Compares the total financial year baseline (m) across each department |
+| Scatter | as financial year baseline currency m including non government costs changes, financial year forecast currency m including non government costs tends to rise together (190) | as financial year baseline (m) changes, financial year forecast (m) tends to rise together (113) |
+
+Worth recording about the method: this was caught only by looking at the rendered page. Every payload inspection up to that point reported the titles as fixed and said nothing about the line underneath them.
+
 **The scatter was left alone, deliberately.** A log scale was built for it and is covered by tests, but it does not engage on this data and should not: the baseline and forecast columns each contain genuine zero values (six and four), and a log axis silently drops them. A chart that looks better by hiding six real projects is worse than a crowded one, so the guard requires strictly positive values and this dataset keeps a linear, complete scatter.

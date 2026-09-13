@@ -8,6 +8,7 @@ import uuid
 from typing import Any
 
 from app.analytics.kpi_detector import is_outcome_column, uses_average_aggregation
+from app.analytics.labels import derive_label
 from app.analytics.text_matching import is_unreported_category
 
 # A numeric column null on more than this fraction of rows is sparse/
@@ -595,6 +596,16 @@ def _histogram_chart(value_col: str, stats: dict[str, Any]) -> dict[str, Any]:
 
 
 def _humanize(value: str) -> str:
+    """The reader-facing name for a column.
+
+    Delegates to the shared derivation, because these names reach the chart
+    *descriptions* — and titles were fixed while the subtitle directly beneath
+    still read "Compares the total financial year baseline currency m including
+    non government costs across each department".
+    """
+    derived = derive_label(value)
+    if derived:
+        return derived
     replacements = {
         "pct": "%",
         "km": "km",
