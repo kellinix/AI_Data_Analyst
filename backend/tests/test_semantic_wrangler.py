@@ -148,8 +148,9 @@ def test_display_labels_are_capped_so_a_column_definition_cannot_become_a_title(
     fallback = _fallback_display_metadata(statistics, [])
     labels = {c["name"]: c["label"] for c in fallback["columns"]}
     assert labels["department"] == "Department"
-    assert labels[long_name].endswith("…")
-    assert len(labels[long_name]) <= 65
+    # Derived rather than truncated: the name restates its own definition, so
+    # the label is cut at the repeat instead of chopped mid-sentence.
+    assert labels[long_name] == "IPA Delivery Confidence Assessment"
 
     # An AI response that returns its own over-long label is capped too.
     merged = _merge_display_metadata(

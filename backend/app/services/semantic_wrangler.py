@@ -19,6 +19,7 @@ from typing import Any
 import polars as pl
 from openai import AsyncOpenAI
 
+from app.analytics.labels import derive_label
 from app.analytics.text_matching import shorten_label
 from app.core.config import settings
 from app.core.logging import get_logger
@@ -513,11 +514,12 @@ def _fallback_display_metadata(
     columns = [
         {
             "name": column.get("name"),
-            # Capped: a government export names a column with its whole
-            # definition, so humanising the raw name produced a 200-character
-            # "label" that then became a chart title and a quality-check
-            # heading. 64 leaves ordinary long names untouched.
-            "label": shorten_label(_humanize_identifier(str(column.get("name"))), 64),
+            # Derived rather than humanised: humanising the raw name gave
+            # "Financial Year Baseline Currency M Including Non Government
+            # Costs" as a chart title, and a 200-character one for the column
+            # whose name restates its own definition.
+            "label": derive_label(str(column.get("name")))
+            or _humanize_identifier(str(column.get("name"))),
             "description": None,
         }
         for column in statistics.get("schema", [])
@@ -536,6 +538,20 @@ def _fallback_display_metadata(
     }
 
 
+def _preferred_label(ai_label: str, derived: str, name: str) -> str:
+    """Choose between the model's label and the one derived from the column.
+
+    The derived label is the baseline. The model's is used when it is short
+    enough to read on a chart card — it is often better English ("Baseline
+    Financial Year Cost (M)") — but a successful response can equally hand back
+    a column's entire definition, and that must never reach a title.
+    """
+    ai_label = ai_label.strip()
+    if ai_label and len(ai_label) <= 48:
+        return ai_label
+    return shorten_label(derived or ai_label or name, 64)
+
+
 def _merge_display_metadata(
     fallback: dict[str, Any],
     metadata: dict[str, Any],
@@ -550,13 +566,14 @@ def _merge_display_metadata(
             name = str(item["name"])
             columns_by_name[name] = {
                 **columns_by_name.get(name, {"name": name}),
-                # Capped here as well as in the fallback: this is the one point
-                # where the final label is chosen, and a successful AI response
-                # can still hand back a column's entire definition as its
-                # "label", which then becomes a chart title and a check heading.
-                "label": shorten_label(
-                    str(item.get("label") or columns_by_name.get(name, {}).get("label") or name),
-                    64,
+                # The derived label is the baseline; the model's is used only
+                # when it is genuinely shorter. A successful response can still
+                # hand back a column's entire definition as its "label", and
+                # readability should not depend on which one arrives.
+                "label": _preferred_label(
+                    str(item.get("label") or ""),
+                    str(columns_by_name.get(name, {}).get("label") or ""),
+                    name,
                 ),
                 "description": item.get("description"),
             }
@@ -601,9 +618,11 @@ def _sample_values_for_column(name: Any, statistics: dict[str, Any]) -> list[str
     return [str(item.get("value")) for item in cat.get("top_values", [])[:5]]
 
 
-# A stacked title names three columns, so each part gets roughly a third of the
-# ~70 characters a chart card can show on one line.
-_STACKED_TITLE_PART = 24
+# A stacked title names three columns, so each part is bounded. This was 24
+# when a label could be a column's whole 200-character definition; labels are
+# derived now (analytics/labels.py) and run to about 35, so 24 was cutting
+# perfectly readable names into ellipses.
+_STACKED_TITLE_PART = 36
 
 
 def _short_label(text: str, limit: int = 48) -> str:

@@ -218,6 +218,18 @@ The previous passes were verified through the pipeline and the API. This one dro
 | **"5 issues detected before AI reasoning."** Four of those were the low-severity spread notes from §8.4, so the count still told a non-technical reader their data was faulty | Defects and notes are counted separately: "1 issue detected before AI reasoning, plus 4 notes on spread". Both stay listed with their badges — the framing changed, not the disclosure | Rendered in the browser; `defects`/`notes` split in `data-quality-panel.tsx` |
 | **Display labels can be a column's whole definition.** These come from an AI call, and a *successful* response was observed returning the 200-character delivery-confidence definition as the label, which then became a chart title, an axis name and a check heading | Labels are capped at 64 characters at both the fallback and the merge — the single point where the final label is chosen | `test_display_labels_are_capped_so_a_column_definition_cannot_become_a_title` |
 
-**Known and unfixed.** Display-metadata quality is non-deterministic: one run produced "Baseline Financial Year Cost (M)", the next produced "Financial Year Baseline Currency M Including Non Government Costs" for the same column, from a successful call each time. At exactly 64 characters the latter passes the cap untouched, so the dashboard still reads poorly whenever that happens — chart titles run to 79 characters and the scatter's to 134. A deterministic label derivation, rather than a length cap on whatever the model returns, is the real fix.
+**Then fixed: labels are derived, not requested.** Display-metadata quality was non-deterministic — one run produced "Baseline Financial Year Cost (M)", the next "Financial Year Baseline Currency M Including Non Government Costs" for the same column, from a successful call each time. At exactly 64 characters the latter passed the cap untouched, so chart titles ran to 79 characters and the scatter's to 134.
+
+A label is now derived from the column name itself in `analytics/labels.py`, and the model's version is used only when it is short enough to read on a card. Four rules, in order: lift the unit out of the name (`..._currency_m` → "(M)", `..._pct` → "%"), cut at a qualifier clause ("...including non government costs"), cut before a phrase that repeats — a government export restates the column name inside its own definition — then cap at six words.
+
+Measured with the AI disabled entirely, so nothing but the derivation is in play:
+
+| Chart title | Before | After |
+|---|---|---|
+| Bar | Financial Year Baseline Currency M Including Non Government Costs by Department (79) | Financial Year Baseline (M) by Department (41) |
+| Scatter | …Costs vs Financial Year Forecast Currency M Including Non Government Costs (134) | Financial Year Baseline (M) vs Financial Year Forecast (M) (58) |
+| Stacked | Financial Year Baseline… by Department and Ipa Delivery Confidence… | Financial Year Baseline (M) by Department and IPA Delivery Confidence Assessment |
+
+The 200-character delivery-confidence column now reads "IPA Delivery Confidence Assessment". `test_labels.py` pins the derivation against every real portfolio column; the stacked title's per-part limit rose from 24 to 36, since 24 was set when a label could still be a paragraph and had begun cutting readable names into ellipses.
 
 **The scatter was left alone, deliberately.** A log scale was built for it and is covered by tests, but it does not engage on this data and should not: the baseline and forecast columns each contain genuine zero values (six and four), and a log axis silently drops them. A chart that looks better by hiding six real projects is worse than a crowded one, so the guard requires strictly positive values and this dataset keeps a linear, complete scatter.
