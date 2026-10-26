@@ -13,6 +13,22 @@ import sys
 import time
 
 
+def prepare_upload_volume() -> None:
+    """Make Railway's root-owned volume writable, then drop root privileges."""
+    if not hasattr(os, "geteuid") or os.geteuid() != 0:
+        return
+
+    import pwd
+
+    user = pwd.getpwnam("appuser")
+    upload_dir = os.environ.get("UPLOAD_DIR", "/app/uploads")
+    os.makedirs(upload_dir, exist_ok=True)
+    os.chown(upload_dir, user.pw_uid, user.pw_gid)
+    os.initgroups(user.pw_name, user.pw_gid)
+    os.setgid(user.pw_gid)
+    os.setuid(user.pw_uid)
+
+
 def commands() -> list[list[str]]:
     port = int(os.environ.get("PORT", "8000"))
     if not 1 <= port <= 65535:
@@ -28,6 +44,7 @@ def commands() -> list[list[str]]:
 
 
 def main() -> int:
+    prepare_upload_volume()
     children = [subprocess.Popen(command) for command in commands()]
     stopping = False
 

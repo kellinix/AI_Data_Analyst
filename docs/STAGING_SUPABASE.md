@@ -46,11 +46,11 @@ after Railway has assigned them.
 The private Railway project is `Zephyr Staging`, environment `staging`:
 https://railway.com/project/8ca3a5c8-32a4-4f08-b18e-b5153f490f91?environmentId=bbc12aea-ffcb-4ebd-aad0-51da55113de1.
 Postgres and Redis are online. The `zephyr-backend` and `zephyr-web` services
-are staged but have no source or environment variables yet; do not deploy them
-until those settings are complete. The backend has a staged persistent volume
-mounted at `/app/uploads`.
-Railway's GitHub app has been restricted to `kellinix/AI_Data_Analyst`; GitHub
-account verification is still pending, so source connection has not completed.
+are staged and connected to `kellinix/AI_Data_Analyst` on the isolated
+`staging/railway-2026-10-26` branch. They do not yet have environment variables
+or domains; do not deploy them until those settings are complete. The backend
+has a staged persistent volume mounted at `/app/uploads`. Railway's GitHub app
+has access to only the Zephyr repository.
 
 Use a single backend service with root directory `/backend`. Configure its
 Dockerfile builder, pre-deploy command `alembic upgrade head`, start command
@@ -66,12 +66,14 @@ Celery Redis URLs in the backend service's private environment. The backend
 accepts Railway Postgres's standard `DATABASE_URL` and converts it to the
 async driver for API requests. Attach the
 volume before uploading test data. Railway mounts volumes as root, so set
-`RAILWAY_RUN_UID=0` on the backend service while it uses this volume. This setup requires enough memory for the
-API plus DuckDB analysis and is not assumed to fit a free 512 MB service.
+`RAILWAY_RUN_UID=0` on the backend service while it uses this volume. The staging
+launcher fixes the mount's ownership and drops to `appuser` before starting the
+API and workers. This setup requires enough memory for the API plus DuckDB
+analysis and is not assumed to fit a free 512 MB service.
 
 Railway restored Trial builds and marked its October outage resolved on
-23 October 2026. The remaining deployment steps are connecting a reviewed
-source revision, configuring staging-only credentials, assigning HTTPS domains,
+23 October 2026. The remaining deployment steps are configuring staging-only
+credentials, assigning HTTPS domains,
 and running end-to-end checks. Do not copy production credentials
 into staging. Railway recommends rotating any sensitive variables stored
 during the October 21 incident; this new workspace had none.
