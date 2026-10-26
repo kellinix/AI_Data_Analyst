@@ -38,6 +38,23 @@ export interface UsageStats {
   ai_queries_limit: number
 }
 
+export interface UsageLedgerSummary {
+  calendar_month_start: string
+  accounting_mode: "legacy_counters_with_event_tracking"
+  analysis_completed_lifetime: number
+  analysis_completed_this_month: number
+  analysis_reserved: number
+  analysis_failed: number
+  ai_completed_lifetime: number
+  ai_completed_this_month: number
+  ai_failed: number
+  ai_legacy_unknown: number
+  prompt_tokens_recorded: number
+  completion_tokens_recorded: number
+  current_counter_analyses: number
+  current_counter_ai_queries: number
+}
+
 // ---- Subscription ------------------------------------------
 export interface Subscription {
   id: string
@@ -100,19 +117,64 @@ export interface Analysis extends AnalysisListItem {
   filterable_columns: FilterableColumn[]
 }
 
+export type MetricAggregation = "sum" | "average" | "count" | "distinct_count"
+
+export interface MetricDefinitionInput {
+  name: string
+  aggregation: MetricAggregation
+  column_name: string | null
+}
+
+export interface MetricPreview {
+  value: number | null
+  row_count: number
+  sample_truncated: boolean
+  source_filename: string
+  definition: MetricDefinitionInput
+}
+
+export interface MetricDefinition extends MetricDefinitionInput {
+  id: string
+  family_id: string
+  analysis_id: string
+  file_id: string
+  version: number
+  approved_at: string
+  value: number | null
+  row_count: number | null
+  sample_truncated: boolean
+}
+
+export interface DashboardState {
+  version: number
+  spec: {
+    schema_version: 1
+    chart_order: string[]
+    hidden_chart_ids: string[]
+    chart_palettes: Record<string, DashboardPalette>
+    metric_family_ids: string[]
+    saved_filters: Pick<ActiveFilter, "column" | "op" | "values">[]
+  }
+}
+
+export type DashboardPalette = "aurora" | "sunset" | "ocean" | "garden"
+export type DashboardAction = "hide" | "show" | "move_up" | "move_down" | "set_palette" | "pin_metric" | "unpin_metric" | "save_filters" | "undo"
+
 // ---- Interactive filtering / slicers ------------------------
 export interface FilterableColumn {
   column: string
   display_label: string
   role: string
-  kind: "categorical" | "numeric"
+  kind: "categorical" | "numeric" | "date"
   unique_count?: number | null
-  top_values?: { value: string; count: number }[] | null
+  top_values?: { value: string; count: number; label?: string }[] | null
   min?: number | null
   max?: number | null
+  min_date?: string | null
+  max_date?: string | null
 }
 
-export type FilterOp = "in" | "between"
+export type FilterOp = "in" | "between" | "date_between"
 
 export interface ActiveFilter {
   column: string
@@ -254,6 +316,49 @@ export interface ChatMessage {
   content: string
   chart_config: ChartConfig | null
   created_at: string
+  comparison?: ComparisonResult | null
+}
+
+export interface ComparisonPlan {
+  aggregation: "sum" | "average" | "count" | "distinct_count" | "weighted_average"
+  column?: string | null
+  group_by?: string | null
+  weight_column?: string | null
+  date_bucket?: "day" | "month" | "year" | null
+  filters?: ActiveFilter[]
+  order?: "desc" | "asc"
+  limit?: number
+}
+export interface EvidenceEntryRequest {
+  evidence_revision?: string
+  kind: "quality" | "insight" | "comparison"
+  issue_index?: number
+  insight_id?: string
+  comparison?: ComparisonPlan
+  group_value?: string | null
+  offset?: number
+  limit?: number
+}
+export interface EvidenceEntries {
+  record_context?: { singular: string; plural: string; description: string } | null
+  matched_entries: number
+  offset: number
+  limit: number
+  columns: { name: string; label: string; is_date?: boolean }[]
+  entries: { entry_number: number; record_label?: string; values: Record<string, unknown> }[]
+  scope: string
+  has_more: boolean
+}
+export interface ComparisonResult {
+  value_unit?: string | null
+  evidence_revision: string
+  title: string
+  answer: string
+  scope: string
+  matched_entries: number
+  group_count: number
+  plan: ComparisonPlan
+  groups: { group: string | null; group_value: string | null; value: number | null; entries: number; supplied_values: number }[]
 }
 
 export interface ChatSession {

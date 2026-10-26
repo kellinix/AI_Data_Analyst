@@ -12,11 +12,13 @@ import {
   useRerunAnalysis,
 } from "@/hooks/use-analyses"
 import { KpiGrid } from "@/components/analysis/kpi-grid"
+import { MetricDefinitionsPanel } from "@/components/analysis/metric-definitions-panel"
 import { ExecutiveSummary } from "@/components/analysis/executive-summary"
 import { InsightsPanel } from "@/components/analysis/insights-panel"
 import { ChartsGrid } from "@/components/analysis/charts-grid"
 import { SlicerBar } from "@/components/analysis/slicer-bar"
 import { RecommendationsPanel } from "@/components/analysis/recommendations-panel"
+import { ComparisonPanel } from "@/components/analysis/comparison-panel"
 import { DataQualityPanel } from "@/components/analysis/data-quality-panel"
 import { ChatPanel } from "@/components/chat/chat-panel"
 import { AnalysisHeader } from "@/components/analysis/analysis-header"
@@ -24,7 +26,11 @@ import { ProcessingBanner } from "@/components/analysis/processing-banner"
 import { AnalysisDashboardSkeleton } from "@/components/analysis/analysis-dashboard-skeleton"
 import { Button } from "@/components/ui/button"
 import { FilterProvider } from "@/contexts/filter-context"
+import type { FilterableColumn } from "@/types"
+import { DashboardProvider } from "@/contexts/dashboard-context"
 import { AlertTriangle, MessageSquare, RefreshCw } from "lucide-react"
+
+const EMPTY_FILTERABLE_COLUMNS: FilterableColumn[] = []
 
 function isNotFoundError(error: unknown): boolean {
   const maybeAxiosError = error as { response?: { status?: number } } | null
@@ -110,9 +116,11 @@ export function AnalysisDashboard({ id }: AnalysisDashboardProps) {
   const isFailed = currentStatus === "failed"
   const insights = Array.isArray(analysis.insights) ? analysis.insights : []
   const charts = Array.isArray(analysis.charts) ? analysis.charts : []
+  const filterableColumns = analysis.filterable_columns ?? EMPTY_FILTERABLE_COLUMNS
   const hasGeneratedContent = Boolean(analysis.summary) || insights.length > 0 || charts.length > 0
   const aiGeneration = analysis.metadata?.ai_generation as { status?: string } | null | undefined
   const aiFellBack = !isProcessing && aiGeneration?.status === "fallback"
+  const recordContext = analysis.metadata?.record_context as { description?: string } | undefined
 
   async function handleRetry() {
     try {
@@ -125,6 +133,8 @@ export function AnalysisDashboard({ id }: AnalysisDashboardProps) {
   }
 
   return (
+    <DashboardProvider analysisId={id} enabled={!isProcessing && !isFailed}>
+    <FilterProvider analysisId={id} filterableColumns={filterableColumns}>
     <div className="flex h-full">
       {/* Main content */}
       <div className="flex flex-1 flex-col overflow-y-auto">
@@ -135,9 +145,10 @@ export function AnalysisDashboard({ id }: AnalysisDashboardProps) {
           />
         )}
 
-        <div className="flex flex-col gap-8 p-8">
+        <div className="flex flex-col gap-8 p-5 sm:p-8">
           {/* Analysis header */}
           <AnalysisHeader analysis={analysis} status={currentStatus} />
+          {recordContext?.description && <section className="rounded-2xl border bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900"><h2 className="font-semibold">What this data is about</h2><p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">{recordContext.description}</p></section>}
 
           {isProcessing ? (
             <AnalysisDashboardSkeleton />
@@ -185,41 +196,42 @@ export function AnalysisDashboard({ id }: AnalysisDashboardProps) {
               {/* Executive summary */}
               {analysis.summary && (
                 <SectionErrorBoundary title="Executive summary">
-                  <ExecutiveSummary summary={analysis.summary} />
+                  <ExecutiveSummary summary={analysis.summary} analysisEvidence={analysis.metadata?.analysis_evidence} />
                 </SectionErrorBoundary>
               )}
 
-              {/* KPI grid + charts share filter state so a slicer or chart
-                  click can cross-filter both; Insights/Recommendations/
-                  Summary above and below stay outside this provider, since
-                  they're the original full-dataset snapshot and never
-                  recompute on a filter change. */}
-              <FilterProvider analysisId={id} filterableColumns={analysis.filterable_columns ?? []}>
+              {/* KPI cards and charts use the shared live filter state.
+                  Narrative sections remain saved full-dataset snapshots. */}
                 {/* KPI grid */}
                 {insights.length > 0 && (
                   <SectionErrorBoundary title="Key metrics">
-                    <KpiGrid insights={insights} />
+                    <KpiGrid insights={insights} sourceName={analysis.filename} />
                   </SectionErrorBoundary>
                 )}
 
-                {(analysis.filterable_columns ?? []).length > 0 && (
+                <SectionErrorBoundary title="Approved metrics">
+                  <MetricDefinitionsPanel analysis={analysis} />
+                </SectionErrorBoundary>
+
+                {filterableColumns.length > 0 && (
                   <SectionErrorBoundary title="Filters">
-                    <SlicerBar filterableColumns={analysis.filterable_columns} />
+                    <SlicerBar filterableColumns={filterableColumns} />
                   </SectionErrorBoundary>
                 )}
 
                 {/* Charts */}
                 {charts.length > 0 && (
                   <SectionErrorBoundary title="Charts">
-                    <ChartsGrid charts={charts} />
+                    <ChartsGrid charts={charts} analysisId={id} />
                   </SectionErrorBoundary>
                 )}
-              </FilterProvider>
+
+              <ComparisonPanel analysis={analysis} />
 
               {/* Insights */}
               {insights.length > 0 && (
                 <SectionErrorBoundary title="AI insights">
-                  <InsightsPanel insights={insights} />
+                  <InsightsPanel insights={insights} analysisId={id} />
                 </SectionErrorBoundary>
               )}
 
@@ -233,7 +245,7 @@ export function AnalysisDashboard({ id }: AnalysisDashboardProps) {
               {/* Data quality */}
               {analysis.metadata && (
                 <SectionErrorBoundary title="Data quality">
-                  <DataQualityPanel metadata={analysis.metadata} />
+                  <DataQualityPanel metadata={analysis.metadata} analysisId={id} />
                 </SectionErrorBoundary>
               )}
             </motion.div>
@@ -245,6 +257,7 @@ export function AnalysisDashboard({ id }: AnalysisDashboardProps) {
       {isChatOpen && (
         <ChatPanel
           analysisId={id}
+          charts={charts}
           onClose={() => setIsChatOpen(false)}
         />
       )}
@@ -260,12 +273,14 @@ export function AnalysisDashboard({ id }: AnalysisDashboardProps) {
           <Button
             onClick={() => setIsChatOpen(true)}
             size="lg"
-            className="h-14 w-14 rounded-2xl bg-blue-600 shadow-lg shadow-blue-600/30 hover:bg-blue-500"
+            className="h-14 w-14 rounded-2xl bg-gradient-to-br from-violet-600 to-fuchsia-500 shadow-lg shadow-violet-600/30 hover:from-violet-500 hover:to-fuchsia-400"
           >
             <MessageSquare className="h-6 w-6" />
           </Button>
         </motion.div>
       )}
     </div>
+    </FilterProvider>
+    </DashboardProvider>
   )
 }

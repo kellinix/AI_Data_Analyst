@@ -29,7 +29,7 @@ ASSET_VALUE_KEYWORDS = ["market_value", "valuation"]
 DURATION_KEYWORDS = ["duration", "hours", "minutes", "distance", "time_to_hire", "cycle_time"]
 AVERAGE_METRIC_KEYWORDS = [
     "accuracy", "rating", "score", "percentage", "percent", "pct", "rate",
-    "ratio", "speed", "impact", "satisfaction", "nps",
+    "cgpa", "gpa", "chance", "ratio", "speed", "impact", "satisfaction", "nps",
     # Already-averaged measures: summing them compounds an average, which is
     # how a demo dashboard showed "Avg Order Value $46,919.50".
     "avg", "average", "mean", "median", "aov",
@@ -53,6 +53,9 @@ def detect_kpis(
     """
     Return a list of detected KPIs with their values and metadata.
     """
+    from app.analytics.survey_context import survey_fields
+    if survey_fields(schema):
+        return []
     kpis = _outcome_rate_kpis(schema, numeric_stats)
     matched_cols: set[str] = {kpi["column"] for kpi in kpis}
 
@@ -110,7 +113,11 @@ def detect_kpis(
         "duration": 12, "retention": 13, "churn": 14, "cost": 15,
         "return": 16, "inventory": 17, "other": 18,
     }
-    kpis.sort(key=lambda k: priority.get(k["kpi_type"], 9))
+    kpis.sort(key=lambda k: (-3 if k["column"] == "chance_of_admit" else -2 if k["column"] == "cgpa" else priority.get(k["kpi_type"], 9)))
+    for kpi in kpis:
+        if kpi["column"] == "chance_of_admit":
+            kpi["value"] = round(kpi["value"], 12) * 100
+            kpi["is_percent"] = True
     return kpis[:10]
 
 
@@ -144,10 +151,12 @@ CURRENCY_KEYWORDS = [
     "spend", "value", "valuation", "gmv", "mrr", "arr", "aov",
 ]
 
-_AVERAGE_NAME_KEYWORDS = ["pct", "percent", "percentage", "rate", *AVERAGE_METRIC_KEYWORDS]
+_AVERAGE_NAME_KEYWORDS = ["pct", "percent", "percentage", "rate", "price", *AVERAGE_METRIC_KEYWORDS]
 
 
 def _classify_column(col: str) -> str | None:
+    if contains_keyword(col, ["price"]):
+        return "average"
     for kpi_type, keywords in _KPI_TYPE_KEYWORDS:
         if contains_keyword(col, keywords):
             return kpi_type
@@ -160,7 +169,7 @@ def _is_currency(col: str) -> bool:
 
 def _uses_average(col: str, kpi_type: str) -> bool:
     return kpi_type in {
-        "margin", "conversion", "growth", "retention", "churn", "return", "average"
+        "margin", "conversion", "growth", "retention", "churn", "return", "average", "duration"
     } or contains_keyword(col, _AVERAGE_NAME_KEYWORDS)
 
 

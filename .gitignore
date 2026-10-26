@@ -50,6 +50,8 @@ pip-delete-this-directory.txt
 dmypy.json
 .pytest_cache/
 .ruff_cache/
+backend/pytest_tmp/
+backend/zephyr-latest-analysis-with-charts.pdf
 htmlcov/
 .coverage
 .coverage.*

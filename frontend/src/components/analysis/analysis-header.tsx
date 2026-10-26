@@ -3,7 +3,7 @@
 import { motion } from "framer-motion"
 import { MoreHorizontal, Download, RefreshCw, Share2 } from "lucide-react"
 import { toast } from "sonner"
-import { useQueryClient } from "@tanstack/react-query"
+import { useMutation, useQueryClient } from "@tanstack/react-query"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -35,6 +35,14 @@ const statusMeta: Record<
 
 export function AnalysisHeader({ analysis, status }: AnalysisHeaderProps) {
   const queryClient = useQueryClient()
+  const refreshSummary = useMutation({
+    mutationFn: () => analysesApi.refreshSummary(analysis.id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: analysisKeys.detail(analysis.id) })
+      toast.success("Summary updated from saved results")
+    },
+    onError: () => toast.error("Couldn't update the summary from saved results"),
+  })
   const meta = statusMeta[status] ?? statusMeta.processing
   const uploadContext =
     analysis.metadata && typeof analysis.metadata === "object"
@@ -61,7 +69,7 @@ export function AnalysisHeader({ analysis, status }: AnalysisHeaderProps) {
       document.body.appendChild(link)
       link.click()
       link.remove()
-      URL.revokeObjectURL(url)
+      window.setTimeout(() => URL.revokeObjectURL(url), 30_000)
     } catch (error) {
       console.error(errorMessage, error)
       toast.error(errorMessage)
@@ -91,7 +99,7 @@ export function AnalysisHeader({ analysis, status }: AnalysisHeaderProps) {
     }
     return downloadBlob(
       () => analysesApi.downloadPdf(analysis.id),
-      `${analysis.name.replace(/\s+/g, "_").toLowerCase()}.pdf`,
+      `${analysis.name.replace(/\s+/g, "_").toLowerCase()}_visual_report.pdf`,
       "PDF export failed"
     )
   }
@@ -156,18 +164,19 @@ export function AnalysisHeader({ analysis, status }: AnalysisHeaderProps) {
       initial={{ opacity: 0, y: -8 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.35 }}
-      className="flex items-start justify-between gap-4"
+      className="relative flex flex-wrap items-start justify-between gap-4 overflow-hidden rounded-[1.75rem] bg-[#302056] p-7 text-white shadow-xl shadow-violet-950/10"
     >
-      <div className="space-y-1">
+      <div className="space-y-2">
+        <p className="text-xs font-bold uppercase tracking-[.18em] text-teal-200">Analysis report</p>
         <div className="flex items-center gap-2.5">
-          <h1 className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-white">
+          <h1 className="text-2xl font-bold tracking-tight text-white sm:text-3xl">
             {analysis.name}
           </h1>
           <Badge variant={meta.variant} className="text-xs">
             {meta.label}
           </Badge>
         </div>
-        <p className="text-sm text-zinc-500">
+        <p className="text-sm text-violet-100/75">
           {analysis.row_count?.toLocaleString()} entries · {analysis.column_count} fields ·{" "}
           Analysed {formatDate(analysis.updated_at)}
         </p>
@@ -214,6 +223,10 @@ export function AnalysisHeader({ analysis, status }: AnalysisHeaderProps) {
               </DropdownMenuItem>
             )}
             <DropdownMenuSeparator />
+            <DropdownMenuItem onClick={() => refreshSummary.mutate()} disabled={status !== "completed" || refreshSummary.isPending}>
+              <RefreshCw className="mr-2 h-4 w-4" />
+              Update summary from saved results
+            </DropdownMenuItem>
             <DropdownMenuItem onClick={rerunAnalysis}>
               <RefreshCw className="mr-2 h-4 w-4" />
               Re-analyse

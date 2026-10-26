@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING
 
-from sqlalchemy import BigInteger, ForeignKey, Integer, String, Text
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -65,6 +66,7 @@ class Analysis(UUIDMixin, TimestampMixin, Base):
     progress: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     celery_task_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
     share_token: Mapped[str | None] = mapped_column(
         String(64), nullable=True, unique=True, index=True

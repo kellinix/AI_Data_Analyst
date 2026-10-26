@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import io
 from typing import Any
+from xml.sax.saxutils import escape
 
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import cm
 from reportlab.platypus import (
+    KeepTogether,
     Paragraph,
     SimpleDocTemplate,
     Spacer,
@@ -18,23 +20,26 @@ from reportlab.platypus import (
 )
 from xlsxwriter import Workbook
 
+from app.analytics.report_relevance import useful_charts, useful_insights
+from app.services.export_charts import PdfChart, add_excel_charts, normalise_charts
+
 _IMPORTANCE_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3}
 
 
 def _kpi_insights(insights: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [i for i in insights if i.get("type") == "summary"]
+    return [i for i in useful_insights(insights) if i.get("type") == "summary"]
 
 
 def _finding_insights(insights: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(
-        (i for i in insights if i.get("type") not in {"summary", "recommendation"}),
+        (i for i in useful_insights(insights) if i.get("type") not in {"summary", "recommendation"}),
         key=lambda i: _IMPORTANCE_ORDER.get(i.get("importance", "medium"), 2),
     )
 
 
 def _recommendation_insights(insights: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(
-        (i for i in insights if i.get("type") == "recommendation"),
+        (i for i in useful_insights(insights) if i.get("type") == "recommendation"),
         key=lambda i: _IMPORTANCE_ORDER.get(i.get("importance", "medium"), 2),
     )
 
@@ -46,8 +51,9 @@ def build_pdf_report(
     column_count: int | None,
     summary: str | None,
     insights: list[dict[str, Any]],
+    charts: list[dict[str, Any]] | None = None,
 ) -> bytes:
-    """Render a plain-English PDF report: summary, key metrics, findings, actions."""
+    """Render the analysis narrative and its saved dashboard charts."""
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer,
@@ -66,7 +72,7 @@ def build_pdf_report(
     body = ParagraphStyle("Body", parent=styles["BodyText"], spaceAfter=6, leading=15)
 
     story: list[Any] = []
-    story.append(Paragraph(name, styles["Title"]))
+    story.append(Paragraph(escape(name), styles["Title"]))
     row_text = f"{row_count:,} rows" if row_count is not None else "Unknown rows"
     col_text = f"{column_count} columns" if column_count is not None else "unknown columns"
     story.append(Paragraph(f"{row_text} &middot; {col_text}", styles["Normal"]))
@@ -77,7 +83,19 @@ def build_pdf_report(
         for sentence in summary.split(". "):
             sentence = sentence.strip()
             if sentence:
-                story.append(Paragraph(sentence if sentence.endswith(".") else f"{sentence}.", body))
+                story.append(Paragraph(escape(sentence if sentence.endswith(".") else f"{sentence}."), body))
+
+    visual_charts = normalise_charts(useful_charts(charts or []))
+    if visual_charts:
+        for index, chart in enumerate(visual_charts):
+            parts: list[Any] = []
+            if index == 0:
+                parts.append(Paragraph(f"Visual Charts ({len(visual_charts)})", heading))
+            parts.append(Paragraph(escape(chart.title), styles["Heading3"]))
+            if chart.description:
+                parts.append(Paragraph(escape(chart.description), body))
+            parts.extend([Spacer(1, 6), PdfChart(chart), Spacer(1, 10)])
+            story.append(KeepTogether(parts))
 
     kpis = _kpi_insights(insights)
     if kpis:
@@ -110,7 +128,7 @@ def build_pdf_report(
             story.append(Paragraph(f"<b>{rec.get('title', '')}</b>", body))
             story.append(Paragraph(rec.get("description", ""), body))
 
-    if not summary and not kpis and not findings and not recommendations:
+    if not summary and not kpis and not findings and not recommendations and not visual_charts:
         story.append(Paragraph(
             "This analysis has not finished generating content yet.", body
         ))
@@ -140,8 +158,9 @@ def build_excel_report(
     column_count: int | None,
     summary: str | None,
     insights: list[dict[str, Any]],
+    charts: list[dict[str, Any]] | None = None,
 ) -> bytes:
-    """Render a multi-sheet Excel workbook: overview, key metrics, findings, actions."""
+    """Render a multi-sheet workbook with editable charts and source values."""
     buffer = io.BytesIO()
     workbook = Workbook(buffer, {"in_memory": True})
     header_fmt = workbook.add_format({
@@ -203,6 +222,8 @@ def build_excel_report(
             sheet.write(row, 0, rec.get("title", ""))
             sheet.write(row, 1, rec.get("description", ""), wrap_fmt)
             sheet.write(row, 2, rec.get("importance", ""))
+
+    add_excel_charts(workbook, normalise_charts(useful_charts(charts or [])))
 
     workbook.close()
     return buffer.getvalue()

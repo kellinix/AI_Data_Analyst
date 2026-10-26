@@ -5,10 +5,12 @@ from pathlib import Path
 
 import duckdb
 from fastapi import APIRouter, HTTPException, Query, Request, status
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from sqlalchemy import func, select
 from sqlalchemy.orm import selectinload
 
+from app.analytics.histogram_presentation import present_histogram
+from app.analytics.line_presentation import present_time_line
 from app.analytics.live_filter import (
     FilterValidationError,
     build_where_clause,
@@ -16,11 +18,13 @@ from app.analytics.live_filter import (
     requery_chart,
     validate_filters,
 )
+from app.analytics.record_context import record_context
 from app.api.deps import DB, CurrentUser, ensure_analysis_quota, ensure_storage_quota
 from app.core.config import settings
 from app.core.limiter import limiter
 from app.core.logging import get_logger
 from app.models.analysis import Analysis, AnalysisStatus, UploadedFile
+from app.models.export_event import ExportEvent
 from app.models.recommendation_feedback import RecommendationFeedback
 from app.schemas.analysis import (
     AnalysisDetailResponse,
@@ -41,7 +45,11 @@ from app.schemas.analysis import (
 )
 from app.services.export_service import build_excel_report, build_pdf_report
 from app.services.file_processor import FileProcessor
+from app.services.investigation import ComparisonPlan, EntryRequest, compare, entries
+from app.services.report_language import present_insight, present_metadata
 from app.services.semantic_wrangler import SemanticWrangler
+from app.services.summary_refresh import refresh_saved_summary
+from app.services.usage_events import reserve_analysis
 from app.workers.tasks import run_analysis_task
 
 router = APIRouter()
@@ -82,6 +90,7 @@ def _derive_filterable_columns(metadata: dict | None) -> list[FilterableColumn]:
     endpoint already supports `"between"` filters on them today.
     """
     columns = ((metadata or {}).get("data_profile") or {}).get("columns", [])
+    date_ranges = (metadata or {}).get("date_range") or {}
     out: list[FilterableColumn] = []
     for c in columns:
         role = c.get("analysis_role")
@@ -92,13 +101,21 @@ def _derive_filterable_columns(metadata: dict | None) -> list[FilterableColumn]:
         if role in {"dimension", "flag"}:
             cat = c.get("categorical_summary") or {}
             unique_count = cat.get("unique_count")
-            if unique_count is None or not (2 <= unique_count <= 30):
+            if unique_count is None or not (2 <= unique_count <= (100 if name.lower().endswith("question_code") or name.lower() == "answer" else 30)):
                 continue
             out.append(FilterableColumn(
                 column=name, display_label=display_label, role=role,
                 kind="categorical", unique_count=unique_count,
                 top_values=cat.get("top_values"),
             ))
+        elif role == "temporal_dimension" and c.get("is_date"):
+            bounds = date_ranges.get(name) or {}
+            if bounds.get("min") and bounds.get("max"):
+                out.append(FilterableColumn(
+                    column=name, display_label=display_label, role=role,
+                    kind="date", min_date=str(bounds["min"])[:10],
+                    max_date=str(bounds["max"])[:10],
+                ))
         elif role in {"metric", "attribute"}:
             num = c.get("numeric_summary") or {}
             if num.get("min") is None or num.get("max") is None:
@@ -113,8 +130,9 @@ def _derive_filterable_columns(metadata: dict | None) -> list[FilterableColumn]:
     # whichever categorical dimensions happen to appear later in the file
     # (e.g. an outcome column like "target" as the last column).
     categorical = [c for c in out if c.kind == "categorical"]
+    dates = [c for c in out if c.kind == "date"]
     numeric = [c for c in out if c.kind == "numeric"]
-    return (categorical + numeric)[:24]
+    return (categorical + dates + numeric)[:24]
 
 
 def _delete_file_quietly(path: str | None) -> None:
@@ -140,16 +158,16 @@ def _cleaning_enabled(cleaning: dict | None) -> bool:
 def _cleaning_options(cleaning: dict | None) -> dict:
     cleaning = cleaning or {}
     return {
-        "remove_duplicates": cleaning.get("remove_duplicates", True),
+        "remove_duplicates": cleaning.get("remove_duplicates", False),
         "fuzzy_deduplicate": cleaning.get("fuzzy_deduplicate", False),
         "standardize_columns": cleaning.get("standardize_columns", True),
         "normalize_dates": cleaning.get("normalize_dates", True),
         "clean_text": cleaning.get("clean_text", True),
         "parse_currency_percent": cleaning.get("parse_currency_percent", True),
         "drop_empty": cleaning.get("drop_empty", True),
-        "missing_data_strategy": cleaning.get("missing_data_strategy", "smart"),
+        "missing_data_strategy": cleaning.get("missing_data_strategy", "none"),
         "outlier_policy": cleaning.get("outlier_policy", "keep"),
-        "semantic_categorical_merging": cleaning.get("semantic_categorical_merging", True),
+        "semantic_categorical_merging": cleaning.get("semantic_categorical_merging", False),
     }
 
 
@@ -392,6 +410,7 @@ async def create_analysis(
     current_user.analyses_this_month = (current_user.analyses_this_month or 0) + 1
     await db.flush()
     await db.refresh(analysis)
+    await reserve_analysis(db, user_id=current_user.id, analysis_id=analysis.id)
 
     # Commit before queueing so a fast Celery worker can read the analysis row.
     await db.commit()
@@ -508,6 +527,7 @@ async def create_combined_analysis(
     current_user.analyses_this_month = (current_user.analyses_this_month or 0) + 1
     await db.flush()
     await db.refresh(analysis)
+    await reserve_analysis(db, user_id=current_user.id, analysis_id=analysis.id)
 
     await db.commit()
 
@@ -637,6 +657,7 @@ async def query_analysis(
             if patched is None:
                 chart_patches.append(ChartPatch(id=chart["id"], skipped=True))
             else:
+                patched = present_time_line(present_histogram(patched, record_context(analysis.metadata_ or {})))
                 chart_patches.append(ChartPatch(
                     id=chart["id"],
                     echarts_option=patched["echarts_option"],
@@ -653,11 +674,18 @@ async def query_analysis(
             if not column or column not in known_columns:
                 kpi_patches.append(KpiPatch(insight_id=insight.id, skipped=True))
                 continue
+            weighted_by = data.get("weighted_by")
+            if weighted_by and not any(
+                c.get("name") == weighted_by and c.get("is_numeric") for c in schema
+            ):
+                kpi_patches.append(KpiPatch(insight_id=insight.id, skipped=True))
+                continue
             value = recompute_kpi(
                 conn, column,
                 is_total=data.get("is_total", True),
                 is_percent=data.get("is_percent", False),
                 filter_sql=filter_sql, filter_params=filter_params,
+                weighted_by=weighted_by,
             )
             kpi_patches.append(KpiPatch(insight_id=insight.id, value=value))
     finally:
@@ -669,6 +697,38 @@ async def query_analysis(
         charts=chart_patches,
         kpis=kpi_patches,
     )
+
+
+async def _investigation_analysis(analysis_id: uuid.UUID, current_user: CurrentUser, db: DB):
+    result = await db.execute(select(Analysis).where(
+        Analysis.id == analysis_id, Analysis.user_id == current_user.id
+    ).options(selectinload(Analysis.file), selectinload(Analysis.insights)))
+    analysis = result.scalar_one_or_none()
+    if not analysis:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+    if analysis.status != AnalysisStatus.COMPLETED.value:
+        raise HTTPException(status_code=409, detail="Finish this analysis before reviewing its entries.")
+    return analysis
+
+
+@router.post("/{analysis_id}/entries")
+@limiter.limit("30/minute")
+async def view_entries(request: Request, analysis_id: uuid.UUID, body: EntryRequest, current_user: CurrentUser, db: DB):
+    analysis = await _investigation_analysis(analysis_id, current_user, db)
+    try:
+        return await entries(analysis, body)
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+
+@router.post("/{analysis_id}/compare")
+@limiter.limit("30/minute")
+async def compare_entries(request: Request, analysis_id: uuid.UUID, body: ComparisonPlan, current_user: CurrentUser, db: DB):
+    analysis = await _investigation_analysis(analysis_id, current_user, db)
+    try:
+        return await compare(analysis, body)
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
 
 @router.get("/{analysis_id}/status", response_model=AnalysisStatusResponse)
@@ -745,6 +805,10 @@ async def download_profile_json(
     if not analysis:
         raise HTTPException(status_code=404, detail="Analysis not found")
 
+    filename = f"{analysis.name.replace(' ', '_').lower()}_profile.json"
+    profile = (analysis.metadata_ or {}).get("data_profile")
+    if isinstance(profile, dict) and profile:
+        return JSONResponse(content=profile, headers={"Content-Disposition": f'attachment; filename="{filename}"'})
     profile_path = (analysis.metadata_ or {}).get("profile_json_path")
     if not profile_path:
         raise HTTPException(
@@ -756,7 +820,6 @@ async def download_profile_json(
     if not path.exists():
         raise HTTPException(status_code=404, detail="Profile JSON file not found")
 
-    filename = f"{analysis.name.replace(' ', '_').lower()}_profile.json"
     return FileResponse(
         path=str(path),
         media_type="application/json",
@@ -785,15 +848,37 @@ async def _load_analysis_for_export(
 
 def _insight_dicts(analysis: Analysis) -> list[dict]:
     return [
-        {
+        present_insight({
             "type": i.type,
             "title": i.title,
             "description": i.description,
             "importance": i.importance,
             "data": i.data,
-        }
+        }, getattr(analysis, "metadata_", None))
         for i in sorted(analysis.insights, key=lambda i: i.sort_order)
     ]
+
+
+@router.post("/{analysis_id}/summary/refresh")
+async def refresh_analysis_summary(
+    analysis_id: uuid.UUID, current_user: CurrentUser, db: DB,
+):
+    result = await db.execute(
+        select(Analysis).where(Analysis.id == analysis_id, Analysis.user_id == current_user.id)
+        .options(selectinload(Analysis.insights))
+        .with_for_update()
+    )
+    analysis = result.scalar_one_or_none()
+    if not analysis:
+        raise HTTPException(status_code=404, detail="Analysis not found")
+    if analysis.status != AnalysisStatus.COMPLETED.value:
+        raise HTTPException(status_code=409, detail="Finish the analysis before updating its summary.")
+    try:
+        response = refresh_saved_summary(analysis)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    await db.flush()
+    return response
 
 
 @router.get("/{analysis_id}/export/pdf")
@@ -807,10 +892,13 @@ async def export_pdf(
         name=analysis.name,
         row_count=analysis.row_count,
         column_count=analysis.column_count,
-        summary=analysis.summary,
+        summary=present_metadata(getattr(analysis, "metadata_", None), analysis.summary)[1],
         insights=_insight_dicts(analysis),
+        charts=[present_histogram(c, record_context(analysis.metadata_ or {})) for c in analysis.charts or []],
     )
     filename = f"{analysis.name.replace(' ', '_').lower()}.pdf"
+    db.add(ExportEvent(analysis_id=analysis.id, format="pdf"))
+    await db.flush()
     return Response(
         content=pdf_bytes,
         media_type="application/pdf",
@@ -829,10 +917,13 @@ async def export_excel(
         name=analysis.name,
         row_count=analysis.row_count,
         column_count=analysis.column_count,
-        summary=analysis.summary,
+        summary=present_metadata(getattr(analysis, "metadata_", None), analysis.summary)[1],
         insights=_insight_dicts(analysis),
+        charts=[present_histogram(c, record_context(analysis.metadata_ or {})) for c in analysis.charts or []],
     )
     filename = f"{analysis.name.replace(' ', '_').lower()}.xlsx"
+    db.add(ExportEvent(analysis_id=analysis.id, format="excel"))
+    await db.flush()
     return Response(
         content=excel_bytes,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -981,6 +1072,7 @@ async def rerun_analysis(
     )
 
     analysis.status = AnalysisStatus.PENDING.value
+    analysis.completed_at = None
     analysis.progress = 0
     analysis.summary = None
     analysis.error_message = None

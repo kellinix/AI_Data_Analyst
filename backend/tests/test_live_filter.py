@@ -39,10 +39,77 @@ def test_validate_filters_rejects_temporal_role():
         validate_filters([{"column": "recorded_at", "op": "in", "values": ["2024-01-01"]}], SCHEMA)
 
 
+def test_date_range_recalculates_sales_without_model_inference():
+    schema = [{"name": "sale_date", "is_date": True, "is_numeric": False,
+               "analysis_role": "temporal_dimension"}]
+    filters = validate_filters(
+        [{"column": "sale_date", "op": "date_between", "values": ["2024-02-01", "2024-02-29"]}],
+        schema,
+    )
+    sql, params = build_where_clause(filters)
+    with duckdb.connect(":memory:") as conn:
+        conn.execute("CREATE TABLE data AS SELECT * FROM (VALUES (DATE '2024-01-31', 10.0), (DATE '2024-02-01', 20.0), (DATE '2024-02-29', 30.0), (DATE '2024-03-01', 40.0)) t(sale_date, sales)")
+        assert conn.execute(f"SELECT COUNT(*) FROM data WHERE {sql}", params).fetchone()[0] == 2
+        assert recompute_kpi(conn, "sales", is_total=True, is_percent=False,
+                             filter_sql=sql, filter_params=params) == 50.0
+
+
+def test_filtered_weighted_kpi_keeps_its_original_definition():
+    with duckdb.connect(":memory:") as conn:
+        conn.execute("CREATE TABLE data AS SELECT * FROM (VALUES ('North', 10.0, 100.0), ('North', 50.0, 900.0), ('South', 90.0, 1000.0)) t(region, margin_pct, revenue)")
+        sql, params = build_where_clause([
+            {"column": "region", "op": "in", "values": ["North"]}
+        ])
+        assert recompute_kpi(conn, "margin_pct", is_total=False, is_percent=False,
+                             filter_sql=sql, filter_params=params, weighted_by="revenue") == 46.0
+        assert recompute_kpi(conn, "margin_pct", is_total=False, is_percent=False,
+                             filter_sql='CAST("region" AS VARCHAR) IN (?)',
+                             filter_params=["Missing"], weighted_by="revenue") is None
+
+
+@pytest.mark.parametrize("values", [
+    ["2024-02-30", "2024-03-01"], ["2024-03-01", "2024-02-01"],
+    ["2024-02-01"], ["2024-02-01' OR true --", "2024-03-01"],
+])
+def test_date_range_rejects_invalid_or_reversed_dates(values):
+    schema = [{"name": "sale_date", "is_date": True, "analysis_role": "temporal_dimension"}]
+    with pytest.raises(FilterValidationError):
+        validate_filters([{"column": "sale_date", "op": "date_between", "values": values}], schema)
+
+
+def test_date_filter_suggested_from_saved_profile():
+    metadata = {"data_profile": {"columns": [
+        {"name": "sale_date", "display_label": "Sale Date", "is_date": True,
+         "analysis_role": "temporal_dimension"},
+    ]}, "date_range": {"sale_date": {"min": "2024-01-01", "max": "2024-03-31"}}}
+    result = _derive_filterable_columns(metadata)
+    assert [(c.column, c.kind, c.min_date, c.max_date) for c in result] == [
+        ("sale_date", "date", "2024-01-01", "2024-03-31")
+    ]
+
+
 def test_validate_filters_rejects_between_on_non_numeric():
     schema = [{"name": "region", "is_numeric": False, "analysis_role": "dimension"}]
     with pytest.raises(FilterValidationError):
         validate_filters([{"column": "region", "op": "between", "values": [1, 2]}], schema)
+
+
+@pytest.mark.parametrize("values", [
+    [2, 1], [1], [1, 2, 3], [True, 2], ["1", 2], [float("inf"), 2],
+])
+def test_numeric_range_rejects_invalid_bounds(values):
+    with pytest.raises(FilterValidationError):
+        validate_filters([{"column": "chol", "op": "between", "values": values}], SCHEMA)
+
+
+def test_numeric_range_recalculates_filtered_total():
+    filters = validate_filters([{"column": "chol", "op": "between", "values": [100, 200]}], SCHEMA)
+    sql, params = build_where_clause(filters)
+    with duckdb.connect(":memory:") as conn:
+        conn.execute("CREATE TABLE data AS SELECT * FROM (VALUES (90, 10.0), (100, 20.0), (200, 30.0), (201, 40.0)) t(chol, sales)")
+        assert conn.execute(f"SELECT COUNT(*) FROM data WHERE {sql}", params).fetchone()[0] == 2
+        assert recompute_kpi(conn, "sales", is_total=True, is_percent=False,
+                             filter_sql=sql, filter_params=params) == 50.0
 
 
 def test_validate_filters_accepts_known_dimension():

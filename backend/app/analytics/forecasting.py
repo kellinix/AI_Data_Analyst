@@ -87,6 +87,11 @@ def _forecast_metric(
 
     latest = y[-1]
     next_month = predictions["next_month"]["value"]
+    # A point prediction may be above the latest month while the uncertainty
+    # still includes it. Keep the range, but do not call that an increase.
+    direction_supported = not (
+        predictions["next_month"]["lower"] <= latest <= predictions["next_month"]["upper"]
+    )
     change_percent = ((next_month - latest) / latest * 100) if latest else 0.0
 
     return {
@@ -97,6 +102,7 @@ def _forecast_metric(
         "latest_value": round(float(latest), 2),
         "monthly_slope": round(float(slope), 2),
         "change_percent_next_month": round(change_percent, 2),
+        "change_direction_supported": direction_supported,
         "predictions": predictions,
         "confidence": _confidence(len(rows), residual_std, float(np.mean(y))),
     }

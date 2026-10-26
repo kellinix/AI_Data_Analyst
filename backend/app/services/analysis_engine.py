@@ -12,8 +12,10 @@ Pipeline:
 
 from __future__ import annotations
 
+import re
 import uuid
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -22,6 +24,17 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.analytics.admission_context import (
+    admission_summary,
+    clarify_chart,
+    clarify_statistics,
+    is_admission,
+)
+from app.analytics.analysis_evidence import (
+    analysis_evidence,
+    recommendation_catalogue,
+    select_recommendations,
+)
 from app.analytics.anomaly_detection import detect_anomalies
 from app.analytics.chart_selector import select_charts
 from app.analytics.chart_specs import attach_visual_specs
@@ -30,6 +43,13 @@ from app.analytics.kpi_detector import detect_kpis
 from app.analytics.live_filter import populate_chart_option
 from app.analytics.recommendations import generate_recommendations
 from app.analytics.statistics import StatisticsEngine
+from app.analytics.summary_evidence import build_summary_facts, render_summary
+from app.analytics.survey_context import (
+    clarify_survey,
+    populate_survey,
+    survey_catalog,
+    survey_fields,
+)
 from app.core.logging import get_logger
 from app.db.session import AsyncSessionLocal
 from app.models.analysis import Analysis, AnalysisStatus, UploadedFile
@@ -42,6 +62,7 @@ from app.services.semantic_wrangler import (
     apply_display_metadata_to_charts,
     apply_display_metadata_to_statistics,
 )
+from app.services.usage_events import finalize_analysis
 
 logger = get_logger(__name__)
 
@@ -130,6 +151,7 @@ class AnalysisEngine:
 
         logger.info("Analysis completed", analysis_id=analysis_id)
 
+
     async def _populate_chart_data(
         self, conn: duckdb.DuckDBPyConnection, charts: list[dict[str, Any]]
     ) -> list[dict[str, Any]]:
@@ -170,7 +192,10 @@ class AnalysisEngine:
             )
             is_total = kpi.get("is_total", True)
             is_percent = kpi.get("is_percent", False)
-            if is_percent:
+            if is_percent and kpi["column"] == "chance_of_admit":
+                title = "Average recorded admission chance"
+                description = "Average recorded chance, not the percentage actually admitted."
+            elif is_percent:
                 title = f"{kpi_label} Rate"
                 description = f"{kpi['value']:,.1f}% of records have {kpi_label.lower()} = 1"
             elif is_total:
@@ -191,6 +216,8 @@ class AnalysisEngine:
             else:
                 title = f"Avg {kpi_label}"
                 description = f"Average {kpi_label}: {kpi['value']:,.2f}"
+            if kpi["column"] == "cgpa":
+                title = "Average undergraduate grade (out of 10)"
             if kpi.get("is_currency"):
                 value_word = "Total" if is_total else "Average"
                 description = f"{value_word} {kpi_label}: {kpi['value']:,.2f}"
@@ -206,7 +233,7 @@ class AnalysisEngine:
                     "value": kpi.get("value"),
                     "is_currency": kpi.get("is_currency", False),
                     "currency": kpi.get("currency"),
-                    "is_percent": is_percent,
+                    "is_percent": is_percent or kpi.get("is_percent", False),
                     "kpi_type": kpi.get("kpi_type"),
                     "mean": kpi.get("mean"),
                     "column": kpi["column"],
@@ -234,6 +261,10 @@ class AnalysisEngine:
         for i, forecast in enumerate(metadata.get("forecasts", [])[:3]):
             next_month = forecast.get("predictions", {}).get("next_month", {})
             metric_label = _humanize_metric_label(forecast["metric"])
+            uncertainty_note = (
+                " The range includes the latest observed month, so the direction of change is uncertain."
+                if forecast.get("change_direction_supported") is False else ""
+            )
             insight = Insight(
                 analysis_id=analysis.id,
                 type="forecast",
@@ -241,7 +272,7 @@ class AnalysisEngine:
                 description=(
                     f"Next month is forecast at {next_month.get('value', 0):,.2f}, "
                     f"likely to fall somewhere between {next_month.get('lower', 0):,.2f} "
-                    f"and {next_month.get('upper', 0):,.2f}."
+                    f"and {next_month.get('upper', 0):,.2f}.{uncertainty_note}"
                 ),
                 importance="medium",
                 confidence=float(forecast.get("confidence", 0.7)),
@@ -301,6 +332,7 @@ class AnalysisEngine:
 
         # Update analysis
         analysis.status = AnalysisStatus.COMPLETED.value
+        analysis.completed_at = datetime.now(UTC)
         analysis.progress = 100
         analysis.row_count = row_count
         analysis.column_count = column_count
@@ -309,6 +341,7 @@ class AnalysisEngine:
         analysis.metadata_ = {
             "upload_context": metadata.get("upload_context"),
             "data_quality": metadata.get("data_quality", {}),
+            "analysis_evidence": metadata.get("analysis_evidence", {}),
             "date_range": metadata.get("date_range", {}),
             "schema": metadata.get("schema", []),
             "parser": metadata.get("parser", {}),
@@ -320,6 +353,11 @@ class AnalysisEngine:
             "ai_generation": metadata.get("ai_generation"),
             "currency": metadata.get("currency"),
         }
+
+        await finalize_analysis(
+            db, user_id=analysis.user_id, analysis_id=analysis.id,
+            status="completed", created_at=analysis.created_at,
+        )
 
         await db.flush()
 
@@ -339,7 +377,17 @@ class AnalysisEngine:
         if analysis:
             analysis.status = AnalysisStatus.FAILED.value
             analysis.error_message = error[:1024]
+            await finalize_analysis(
+                db, user_id=analysis.user_id, analysis_id=analysis.id,
+                status="failed", created_at=analysis.created_at,
+            )
             await db.flush()
+
+
+def _summary_without_unverified_currency(summary: str, currency: dict[str, Any] | None) -> str:
+    if currency and currency.get("code"):
+        return summary
+    return re.sub(r"(?<!\w)[$£€¥](?=\s*\d)", "", summary)
 
 
 async def compute_analysis(
@@ -377,7 +425,17 @@ async def compute_analysis(
             statistics["sample_truncated"] = True
             statistics["sample_row_limit"] = file_processor.SAMPLE_ROWS
         _adjust_portfolio_data_quality(statistics, upload_context)
+        statistics["analysis_evidence"] = analysis_evidence(statistics, upload_context)
+        statistics["data_quality"]["scope"] = "Checks on records used for analysis; missing fields may be optional. This score does not verify real-world accuracy."
+        cleaning = upload_context.get("cleaning", {}) if isinstance(upload_context, dict) else {}
+        source_quality = (cleaning.get("report") or {}).get("source_quality")
+        if source_quality:
+            statistics["data_quality"]["source_quality"] = source_quality
         await progress(35)
+
+        clarify_statistics(statistics)
+        clarify_survey(statistics)
+        survey_catalog(statistics, conn)
 
         # Step 3: Detect KPIs
         kpis = detect_kpis(
@@ -410,6 +468,15 @@ async def compute_analysis(
         )
         statistics = apply_display_metadata_to_statistics(statistics, semantic_display)
         charts = apply_display_metadata_to_charts(charts, semantic_display)
+        if is_admission(statistics["schema"]):
+            statistics["semantic_display"] = semantic_display
+            clarify_statistics(statistics)
+            for chart in charts:
+                clarify_chart(chart)
+        if survey_fields(statistics["schema"]):
+            clarify_survey(statistics)
+            for chart in charts:
+                populate_survey(conn, chart, "", [])
         # After the display layer, which replaces descriptions wholesale.
         disclose_excluded_points(charts)
         charts = attach_visual_specs(charts)
@@ -419,12 +486,21 @@ async def compute_analysis(
         # Step 5: Forecasting, anomalies, and deterministic recommendations
         forecasts = generate_forecasts(conn, statistics["schema"], kpis)
         anomalies = detect_anomalies(conn, statistics["schema"], statistics["numeric_stats"])
+        if is_admission(statistics["schema"]):
+            anomalies = [item for item in anomalies if not (item.get("column") in {"cgpa", "chance_of_admit"} and 0 <= float(item.get("value", -1)) <= (10 if item.get("column") == "cgpa" else 1))]
+        if survey_fields(statistics["schema"]):
+            anomalies = []
         deterministic_recommendations = generate_recommendations(
             kpis=kpis,
             data_quality=statistics["data_quality"],
             anomalies=anomalies,
             forecasts=forecasts,
+            statistics=statistics,
         )
+        actions = recommendation_catalogue(deterministic_recommendations)
+        statistics["analysis_evidence"]["recommendation_catalogue"] = actions
+        summary_facts = build_summary_facts(statistics, kpis, forecasts, upload_context)
+        statistics["analysis_evidence"]["summary_fact_catalogue"] = summary_facts
         profile_json = build_data_profile_schema(
             analysis_id=analysis_id,
             file_name=file_name,
@@ -464,12 +540,35 @@ async def compute_analysis(
             },
             kpis=kpis,
         )
+        if is_admission(statistics["schema"]):
+            ai_result["insights"] = [item for item in ai_result.get("insights", []) if item.get("type") != "anomaly"]
+        if survey_fields(statistics["schema"]):
+            ai_result["insights"] = []
         await progress(85)
 
-        recommendations = _merge_recommendations(
-            ai_result.get("recommendations", []),
-            deterministic_recommendations,
+        ai_result["executive_summary"], summary_checks = render_summary(
+            summary_facts, ai_result.get("summary_fact_ids")
         )
+        if is_admission(statistics["schema"]):
+            ai_result["executive_summary"] = admission_summary(statistics)
+            summary_checks = {"method": "admission_measured_v1", "facts": [], "scope": "All analysed applicant records"}
+        if survey_fields(statistics["schema"]):
+            published = statistics["numeric_stats"][survey_fields(statistics["schema"])["percentage"]]["count"]
+            ai_result["executive_summary"] = (f"This file contains {row_count:,} published survey result records, not individual respondents.\n"
+                f"{published:,} records contain a published percentage; the other {row_count - published:,} remain unavailable. Blank notes are optional.\n"
+                "Country comparisons must use one question, one answer and one survey group. The chart identifies its current selection; supplied Average rows are excluded.\n"
+                "No overall percentage, population count or trend is inferred from these records.")
+            summary_checks = {"method": "survey_measured_v1", "facts": []}
+        statistics["analysis_evidence"]["summary_checks"] = summary_checks
+        profile_json["analysis_evidence"]["summary_checks"] = summary_checks
+        recommendations, recommendation_checks = select_recommendations(
+            ai_result.get("recommendation_ids"), actions,
+            None if (ai_result.get("generation") or {}).get("status") == "fallback"
+            else ai_result.get("recommendations"),
+        )
+        statistics["analysis_evidence"]["recommendation_checks"] = recommendation_checks
+        profile_json["analysis_evidence"]["recommendation_checks"] = recommendation_checks
+        write_data_profile_schema(profile_json, profile_json_path)
         await progress(90)
     finally:
         conn.close()
@@ -551,16 +650,28 @@ def _merge_recommendations(
     merged: list[dict[str, Any]] = []
     seen_titles: set[str] = set()
     seen_evidence: set[str] = set()
+    seen_findings: set[tuple[str, str]] = set()
+    columns = {str((r.get("data") or {}).get("column") or "") for r in deterministic_recommendations} - {""}
     for recommendation in [*ai_recommendations, *deterministic_recommendations]:
         title = str(recommendation.get("title", "")).strip()
         key = _recommendation_key(recommendation)
         # Two cards citing the same evidence are the same finding worded
         # differently (an AI card and a deterministic card for one anomaly).
         evidence = " ".join(str(recommendation.get("evidence", "")).lower().split())
+        text = f"{title} {evidence} {recommendation.get('description', '')}".lower()
+        column = str((recommendation.get("data") or {}).get("column") or "")
+        if not column:
+            column = next((name for name in columns if name.lower() in text), "")
+        kind = "coverage" if any(term in text for term in ("missing", "coverage", "incomplete")) else "identity" if any(term in text for term in ("distinct", "repeat", "entity count")) else ""
+        finding = (column.lower(), kind)
         if not title or key in seen_titles:
             continue
         if evidence and evidence in seen_evidence:
             continue
+        if column and kind and finding in seen_findings:
+            continue
+        if column and kind:
+            seen_findings.add(finding)
         seen_titles.add(key)
         if evidence:
             seen_evidence.add(evidence)
@@ -607,14 +718,17 @@ def consolidated_anomaly_card(anomalies: list[dict[str, Any]]) -> tuple[str, str
     wants to know what to look at.
     """
     strongest = anomalies[0]
-    other_labels = [
+    other_labels = list(dict.fromkeys(
         label
         for label in (
-            str(item.get("title", "")).removeprefix("Unusually high or low ").strip()
+            str(item.get("title", ""))
+            .removeprefix("Unusually high or low ")
+            .replace("weekly_sales", "Weekly Sales")
+            .strip()
             for item in anomalies[1:]
         )
         if label
-    ]
+    ))
     description = str(strongest.get("description", ""))
     if other_labels:
         joined = (
@@ -622,11 +736,12 @@ def consolidated_anomaly_card(anomalies: list[dict[str, Any]]) -> tuple[str, str
             if len(other_labels) == 1
             else ", ".join(other_labels[:-1]) + " and " + other_labels[-1]
         )
-        description = f"{description} {joined} also look unusual."
+        verb = "looks" if len(other_labels) == 1 else "look"
+        description = f"{description} {joined} also {verb} unusual."
     title = (
         str(strongest.get("title", "Something unusual found"))
         if len(anomalies) == 1
-        else f"Unusual figures in {len(anomalies)} areas"
+        else f"{len(anomalies)} unusual results found"
     )
     return title, description
 

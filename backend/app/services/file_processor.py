@@ -116,7 +116,11 @@ class FileProcessor:
                 read_options={"n_rows": self.SAMPLE_ROWS + 1},
                 infer_schema_length=1000,
             )
-            df = self._normalize_excel_sheets(sheets)
+            parser_report = {}
+            df = self._normalize_excel_sheets(sheets, parser_report)
+            if not hasattr(self, "_excel_parser_reports"):
+                self._excel_parser_reports = {}
+            self._excel_parser_reports[str(file_path)] = parser_report
             return self._cap_dataframe(df)
         elif ext == ".json":
             # polars has no row-limited JSON reader for arbitrary (non-NDJSON)
@@ -169,6 +173,7 @@ class FileProcessor:
             return {
                 "type": "excel",
                 "header_scan_rows": self.HEADER_SCAN_ROWS,
+                **getattr(self, "_excel_parser_reports", {}).get(str(file_path), {}),
             }
         return {"type": ext.removeprefix(".")}
 
@@ -308,11 +313,26 @@ class FileProcessor:
             "steps": [],
             "renamed_columns": {},
             "missing_values": {},
+            "dropped_rows_missing_critical_metrics": 0,
         }
 
         # Detect before standardising: renaming strips the symbol that says
         # which currency the money columns are in ("(£m)" -> "currency_m").
         report["currency"] = _detect_currency(df)
+
+        # Retain source gaps before placeholder labels or estimates hide them.
+        from app.analytics.data_quality import _quality_score, _ratio_severity
+
+        source = self._trim_text_values(df)
+        source_issues = [
+            {"type": "missing_values", "column": column, "severity": _ratio_severity(count / max(df.height, 1)),
+             "affected_rows": count, "description": f"{count:,} source values are missing ({count / max(df.height, 1):.1%})"}
+            for column in source.columns if _standardize_column_name(column) not in {"notes", "note", "comments", "comment", "remarks"} and (count := source[column].null_count())
+        ]
+        report["source_quality"] = {
+            "score": _quality_score(df.height, source_issues), "issues": source_issues,
+            "scope": "Source completeness only; missing fields may be optional. Identity and external accuracy are not verified.",
+        }
 
         cleaned = df.clone()
         if options["standardize_columns"]:
@@ -443,6 +463,8 @@ class FileProcessor:
         for column in df.columns:
             if df[column].dtype != pl.String:
                 continue
+            if _looks_like_identifier_column(column):
+                continue
             series = df[column]
             non_null = series.drop_nulls().len()
             if non_null == 0:
@@ -516,7 +538,10 @@ class FileProcessor:
         # Freedom of Information Act 2000") are left exactly as they are: the
         # number exists but was not published, so filling it fabricates data and
         # dropping its row loses the project entirely.
-        protected = withheld_columns or set()
+        protected = set(withheld_columns or set()) | {column for column in df.columns if _standardize_column_name(column) in {"notes", "note", "comments", "comment", "remarks"}}
+        from app.analytics.survey_context import survey_fields
+        if survey_fields([{"name": name} for name in df.columns]):
+            protected.update(df.columns)
         report: dict[str, Any] = {
             "strategy": "smart",
             "steps": [],
@@ -796,7 +821,8 @@ class FileProcessor:
 
         header_index = self._detect_header_row(df)
         if header_index is None:
-            return self._cast_numeric_like_columns(df)
+            normalized = self._cast_numeric_like_columns(df)
+            return self._normalize_date_columns(normalized)[0]
 
         header_values = df.row(header_index)
         names = self._make_column_names(header_values)
@@ -805,20 +831,42 @@ class FileProcessor:
         normalized = normalized.filter(
             pl.any_horizontal([pl.col(col).is_not_null() for col in normalized.columns])
         )
-        return self._cast_numeric_like_columns(normalized)
+        normalized = self._cast_numeric_like_columns(normalized)
+        return self._normalize_date_columns(normalized)[0]
 
     def _normalize_excel_sheets(
-        self, sheets: pl.DataFrame | dict[str, pl.DataFrame]
+        self, sheets: pl.DataFrame | dict[str, pl.DataFrame], parser_report: dict[str, Any] | None = None
     ) -> pl.DataFrame:
+        report = parser_report if parser_report is not None else {}
+        report.update({"included_sheets": [], "excluded_sheets": []})
         if isinstance(sheets, pl.DataFrame):
             return self._normalize_report_table(sheets)
 
         frames: list[pl.DataFrame] = []
-        for _sheet_name, raw_sheet in sheets.items():
+        names: list[str] = []
+        for sheet_name, raw_sheet in sheets.items():
             normalized = self._normalize_report_table(raw_sheet)
             if normalized.is_empty():
                 continue
             frames.append(normalized)
+            names.append(sheet_name)
+
+        if frames:
+            primary = max(frames, key=lambda frame: frame.height)
+            selected = []
+            selected_names = []
+            for name, frame in zip(names, frames, strict=True):
+                shared = set(primary.columns) & set(frame.columns)
+                if frame is not primary and not shared:
+                    report["excluded_sheets"].append({
+                        "name": name, "rows": frame.height,
+                        "reason": "No shared table fields with the main dataset; kept separate from record counts.",
+                    })
+                    continue
+                selected.append(frame)
+                selected_names.append(name)
+            frames, names = selected, selected_names
+            report["included_sheets"] = names
 
         if not frames:
             return pl.DataFrame()
@@ -829,7 +877,7 @@ class FileProcessor:
             return joined
         frames = [
             frame.with_columns(pl.lit(sheet_name).alias("Sheet"))
-            for sheet_name, frame in zip(sheets.keys(), frames, strict=False)
+            for sheet_name, frame in zip(names, frames, strict=True)
         ]
         return pl.concat(frames, how="diagonal_relaxed")
 
@@ -894,6 +942,15 @@ class FileProcessor:
         return frame.group_by(join_columns).agg(expressions)
 
     def _detect_header_row(self, df: pl.DataFrame) -> int | None:
+        first = [_clean_cell(value) for value in df.row(0)]
+        filled = [value for value in first if value]
+        # A credible existing schema must not lose to a denser data row later
+        # in the file (for example, a long survey question and optional notes).
+        if (len(filled) >= 2 and len(set(filled)) == len(filled)
+                and not any(_is_numeric_text(value) for value in filled)
+                and all(len(value) <= 80 for value in filled)
+                and sum(_looks_like_header(value) for value in filled) >= max(2, len(filled) / 2)):
+            return 0
         best_index = 0
         best_score = self._header_score(df, 0)
         scan_limit = min(df.height - 1, self.HEADER_SCAN_ROWS)
@@ -967,6 +1024,8 @@ class FileProcessor:
         for column in df.columns:
             series = df[column]
             if series.dtype != pl.String:
+                continue
+            if _looks_like_identifier_column(column):
                 continue
 
             cleaned = series.str.replace_all(",", "").str.strip_chars()
@@ -1300,7 +1359,7 @@ def _looks_like_withheld_value(text: str) -> bool:
     Shares one vocabulary with the chart layer, which folds the same values into
     a single slice rather than stacking a segment per exemption sentence.
     """
-    return is_withheld_value(text)
+    return text.strip() == ":" or is_withheld_value(text)
 
 
 def _looks_like_currency_column(column: str, series: pl.Series) -> bool:
@@ -1345,12 +1404,12 @@ def _cleaning_options(options: dict[str, Any]) -> dict[str, Any]:
     outlier_policy = str(options.get("outlier_policy") or "keep").lower()
     if outlier_policy not in {"keep", "cap", "exclude"}:
         outlier_policy = "keep"
-    missing_data_strategy = str(options.get("missing_data_strategy") or "smart").lower()
+    missing_data_strategy = str(options.get("missing_data_strategy") or "none").lower()
     if missing_data_strategy not in {"smart", "none"}:
-        missing_data_strategy = "smart"
+        missing_data_strategy = "none"
 
     return {
-        "remove_duplicates": bool(options.get("remove_duplicates", True)),
+        "remove_duplicates": bool(options.get("remove_duplicates", False)),
         "fuzzy_deduplicate": bool(options.get("fuzzy_deduplicate", False)),
         "standardize_columns": bool(options.get("standardize_columns", True)),
         "normalize_dates": bool(options.get("normalize_dates", True)),
@@ -1359,7 +1418,7 @@ def _cleaning_options(options: dict[str, Any]) -> dict[str, Any]:
         "drop_empty": bool(options.get("drop_empty", True)),
         "missing_data_strategy": missing_data_strategy,
         "outlier_policy": outlier_policy,
-        "semantic_categorical_merging": bool(options.get("semantic_categorical_merging", True)),
+        "semantic_categorical_merging": bool(options.get("semantic_categorical_merging", False)),
     }
 
 
@@ -1392,6 +1451,8 @@ def _looks_like_identifier_column(column: str) -> bool:
         or normalized.startswith("id_")
         or normalized.endswith("_uuid")
         or normalized.endswith("_guid")
+        or normalized.endswith("_code")
+        or normalized in {"code", "postcode", "zipcode", "zip", "postal_code"}
     )
 
 
@@ -1448,6 +1509,18 @@ def _parse_mixed_datetime_series(
         ("month_first", _to_datetime_mixed(pandas_series, dayfirst=False)),
         ("day_first", _to_datetime_mixed(pandas_series, dayfirst=True)),
     ]
+    # Resolve ambiguous 01-10-2010 values using unambiguous rows in the same
+    # column. A majority of valid rows can otherwise tie under pandas' lenient
+    # fallback parsing and silently swap months and days.
+    day_first_evidence = month_first_evidence = 0
+    for value in normalized_values:
+        match = re.match(r"^(\d{1,2})[-/](\d{1,2})[-/]\d{2,4}(?:\D|$)", value or "")
+        if match:
+            first, second = int(match[1]), int(match[2])
+            day_first_evidence += first > 12 and second <= 12
+            month_first_evidence += second > 12 and first <= 12
+    if day_first_evidence > month_first_evidence:
+        candidates.reverse()
     strategy, parsed = max(candidates, key=lambda item: int(item[1].notna().sum()))
     parsed_count = int(parsed.notna().sum())
     has_time_or_timezone = any(
@@ -1530,7 +1603,6 @@ def _row_exact_signature(row: dict[str, Any], columns: list[str]) -> str:
 
 
 def _looks_like_header(value: str) -> bool:
-    normalized = value.lower()
     header_terms = (
         "name",
         "organisation",
@@ -1548,7 +1620,9 @@ def _looks_like_header(value: str) -> bool:
         "number",
         "id",
     )
-    return any(term in normalized for term in header_terms)
+    tokens = set(re.findall(r"[a-z]+", re.sub(r"([a-z])([A-Z])", r"\1 \2", value).lower()))
+    terms = set(header_terms) | {"country", "code", "subset", "question", "answer", "percentage", "notes", "score", "rating", "region", "revenue", "channel"}
+    return bool(tokens & terms)
 
 
 def _top_relationship_suggestion(context: dict[str, Any]) -> dict[str, Any]:

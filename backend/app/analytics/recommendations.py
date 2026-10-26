@@ -17,6 +17,7 @@ from app.analytics.calibration import (
     confidence_fields,
 )
 from app.analytics.labels import sentence_label
+from app.analytics.semantic_detector import is_serial_identifier
 from app.analytics.text_matching import contains_keyword, shorten_label
 
 
@@ -26,12 +27,26 @@ def generate_recommendations(
     data_quality: dict[str, Any],
     anomalies: list[dict[str, Any]],
     forecasts: list[dict[str, Any]],
+    statistics: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     recommendations: list[dict[str, Any]] = []
 
     recommendations.extend(_quality_recommendations(data_quality))
+    source = data_quality.get("source_quality", {})
+    if source.get("issues"):
+        issue = max(source["issues"], key=lambda item: item.get("affected_rows", 0))
+        evidence = f"{issue.get('column')}: {issue.get('description')}"
+        recommendations.append({
+            "title": f"Check source coverage for {_humanize(issue.get('column') or 'missing fields')}",
+            "description": "Confirm whether this field is optional. Compare results for populated and missing records before using it to rank or target groups.",
+            "problem": "Cleaning can fill gaps without restoring the missing information.",
+            "evidence": evidence, "expected_impact": "Makes the coverage limits of comparisons explicit.",
+            "financial_opportunity": None, "importance": "medium", **confidence_fields(RULE_DATA_QUALITY),
+            "data": {"evidence": evidence, "owner": "Data Operations", "difficulty": "Easy"},
+        })
     recommendations.extend(_forecast_recommendations(forecasts, kpis))
     recommendations.extend(_anomaly_recommendations(anomalies))
+    recommendations.extend(_counting_recommendations(statistics or {}))
 
     if not recommendations and kpis:
         top_kpi = kpis[0]
@@ -39,25 +54,44 @@ def generate_recommendations(
         recommendations.append({
             "title": f"Track {label} regularly",
             "description": f"Use {label.lower()} as a standing measure in the next review cycle.",
-            "problem": "The file contains a useful measure, but it is not yet tied to a regular review rhythm.",
+            "problem": "A measured value alone does not establish a target or a change over time.",
             "evidence": f"{label} is {_format_value(top_kpi.get('value'))}.",
             "expected_impact": "Helps decision-makers spot movement in an important measure earlier.",
-            "financial_opportunity": (
-                _opportunity_from_value(top_kpi.get("value"), 0.01)
-                if top_kpi.get("is_currency")
-                else None
-            ),
+            "financial_opportunity": None,
             "importance": "medium",
             **confidence_fields(RULE_TRACKING),
             "data": {
                 "difficulty": "Easy",
                 "owner": "Operations",
                 "estimated_completion": "1 week",
-                "show_financial_opportunity": bool(top_kpi.get("is_currency")),
+                "show_financial_opportunity": False,
             },
         })
 
     return recommendations[:8]
+
+
+def _counting_recommendations(statistics: dict[str, Any]) -> list[dict[str, Any]]:
+    """Repeated entities are a counting limitation, not evidence of poor performance."""
+    for measure in statistics.get("entity_counts", []):
+        if is_serial_identifier(str(measure.get("column") or "")):
+            continue
+        populated = measure.get("populated_records", 0)
+        repeated = measure.get("repeated_records", 0)
+        if populated and repeated / populated >= 0.05:
+            column = measure["column"]
+            evidence = (f"{populated:,} records contain {measure['distinct_values']:,} distinct values in {column}; "
+                        f"{repeated:,} records repeat an already recorded value.")
+            return [{
+                "title": f"Use distinct {_humanize(column)} counts for entity comparisons",
+                "description": "Compare record counts with distinct-value counts before ranking groups. Verify the identity field before treating distinct values as unique entities.",
+                "problem": "One entity may appear in several records, so row counts can overstate entity coverage.",
+                "evidence": evidence, "expected_impact": "Avoids confusing activity or register entries with the number of entities represented.",
+                "financial_opportunity": None, "importance": "medium",
+                **confidence_fields(RULE_DATA_QUALITY),
+                "data": {"column": column, "evidence": evidence, "owner": "Data Operations", "difficulty": "Easy"},
+            }]
+    return []
 
 
 def _quality_recommendations(data_quality: dict[str, Any]) -> list[dict[str, Any]]:
@@ -71,10 +105,10 @@ def _quality_recommendations(data_quality: dict[str, Any]) -> list[dict[str, Any
         # Name the column: "78.2% of values are missing" alone doesn't say which field.
         problem = f"{_humanize(column)}: {description}" if column else description
         recs.append({
-            "title": "Clean high-impact data quality issues",
-            "description": "Sort out the most serious gaps in this file before making decisions from it.",
+            "title": "Review high-impact data quality checks",
+            "description": "Confirm which fields are required and when missing values are expected. Compare populated and missing groups before using incomplete fields in decisions.",
             "problem": problem,
-            "evidence": f"Quality score is {data_quality.get('score', 0)}/100 with {len(issues)} detected issues.",
+            "evidence": problem,
             "expected_impact": "Higher confidence in KPIs, forecasts, and executive reporting.",
             "financial_opportunity": None,
             "importance": "high",
@@ -82,7 +116,6 @@ def _quality_recommendations(data_quality: dict[str, Any]) -> list[dict[str, Any
             "data": {
                 "difficulty": "Medium",
                 "owner": "Data Operations",
-                "estimated_completion": "1-2 weeks",
                 "evidence": problem,
                 "column": column,
             },
@@ -95,16 +128,20 @@ def _forecast_recommendations(
     kpis: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     recs: list[dict[str, Any]] = []
-    kpi_by_column = {kpi["column"]: kpi for kpi in kpis}
 
     for forecast in forecasts:
+        if forecast.get("change_direction_supported") is False:
+            continue
+        interval = forecast.get("predictions", {}).get("next_month", {})
+        lower, upper = interval.get("lower"), interval.get("upper")
+        latest = forecast.get("latest_value")
+        if lower is not None and upper is not None and latest is not None and lower <= latest <= upper:
+            continue
         change = forecast.get("change_percent_next_month", 0)
         metric = forecast["metric"]
         label = _humanize(metric)
         if abs(change) < 5:
             continue
-        kpi = kpi_by_column.get(metric, {})
-        is_currency = bool(kpi.get("is_currency")) or _looks_like_currency(metric)
         direction = "increase" if change > 0 else "decline"
         owner = (
             "Revenue Operations"
@@ -117,20 +154,17 @@ def _forecast_recommendations(
             "problem": f"{label} is projected to move materially next month.",
             "evidence": f"Latest value {forecast['latest_value']:,.2f}; forecast {forecast['predictions']['next_month']['value']:,.2f}.",
             "expected_impact": "Better capacity, budget, and commercial planning before the change lands.",
-            "financial_opportunity": (
-                _opportunity_from_value(kpi.get("value"), 0.03)
-                if is_currency
-                else None
-            ),
+            "financial_opportunity": None,
             "importance": "high" if abs(change) >= 15 else "medium",
             **confidence_fields(RULE_FORECAST, default=forecast.get("confidence", 0.7)),
             "data": {
                 "difficulty": "Medium",
                 "owner": owner,
+                "column": metric,
                 "estimated_completion": "2 weeks",
                 "expected_impact": f"Plan around a projected {abs(change):.1f}% {direction}.",
                 "evidence": f"{forecast['observations']} monthly observations support the forecast.",
-                "show_financial_opportunity": is_currency,
+                "show_financial_opportunity": False,
             },
         })
     return recs
@@ -172,22 +206,6 @@ def _anomaly_recommendations(anomalies: list[dict[str, Any]]) -> list[dict[str, 
             "show_financial_opportunity": False,
         },
     }]
-
-
-def _opportunity_from_value(value: Any, ratio: float) -> float | None:
-    if value is None:
-        return None
-    try:
-        return round(abs(float(value)) * ratio, 2)
-    except (TypeError, ValueError):
-        return None
-
-
-def _looks_like_currency(metric: str) -> bool:
-    return contains_keyword(
-        metric,
-        ("revenue", "sales", "profit", "cost", "price", "amount", "income", "spend", "value", "arr", "mrr"),
-    )
 
 
 def _owner_for_metric(metric: str) -> str:

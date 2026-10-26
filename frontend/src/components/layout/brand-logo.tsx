@@ -33,7 +33,7 @@ export function BrandLogo({
             wordmarkClassName
           )}
         >
-          Insight<span className="text-blue-600 dark:text-blue-400">Flow</span>
+          Zephyr<span className="text-violet-600 dark:text-violet-400">.</span>
         </motion.span>
       )}
     </span>

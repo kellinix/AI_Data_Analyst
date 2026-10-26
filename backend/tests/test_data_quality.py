@@ -24,9 +24,11 @@ def test_a_right_skewed_metric_is_not_reported_as_a_defect():
 
     quality = analyze_data_quality(conn, _SKEW_SCHEMA, _SKEW_STATS, "data")
 
-    issue = next(i for i in quality["issues"] if i["column"] == "cost")
+    issue = next(i for i in quality["issues"] if i["column"] == "cost" and i["type"] == "wide_spread")
     assert issue["type"] == "wide_spread"
     assert issue["severity"] == "low"
+    assert issue["below_range_rows"] == 0
+    assert issue["above_range_rows"] == 2
     # The quoted range is clamped to a value the column can actually reach.
     assert "most are between 10 and 70" in issue["description"]
 
@@ -39,9 +41,11 @@ def test_values_below_a_reachable_floor_are_still_flagged():
         conn, _SKEW_SCHEMA, {"cost": {"p25": 20.0, "p75": 40.0, "min": -500.0}}, "data"
     )
 
-    issue = next(i for i in quality["issues"] if i["column"] == "cost")
+    issue = next(i for i in quality["issues"] if i["column"] == "cost" and i["type"] == "outliers")
     assert issue["type"] == "outliers"
     assert issue["severity"] == "medium"
+    assert issue["below_range_rows"] == 1
+    assert issue["above_range_rows"] == 0
 
 
 def test_duplicate_count_groups_by_actual_columns():

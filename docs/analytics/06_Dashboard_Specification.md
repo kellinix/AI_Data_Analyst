@@ -1,5 +1,12 @@
 # Dashboard Specification
 
+> Update, 7 October 2026: migration `004_completion_exports` adds
+> `analyses.completed_at` and generated-export events. The original capability
+> tables below describe the earlier schema. Completion time and export rate can
+> be measured for new activity after this migration; historical values remain
+> unknown. Pricing, trial lifecycle, and NPS collection still need implementation.
+> See [project status](../PROJECT_STATUS.md) for current work.
+
 This system actually powers two different dashboards, aimed at two different
 audiences. Both are documented here — the one that ships today (§1), described
 exactly as it exists, and a proposed executive/operational dashboard for

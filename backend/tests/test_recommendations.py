@@ -96,7 +96,10 @@ def test_forecast_recommendation_uses_metric_evidence():
         ],
     )
     assert recs
-    assert recs[0]["financial_opportunity"] == 3000
+    # A projected revenue change is not proof of a recoverable saving.
+    assert recs[0]["financial_opportunity"] is None
+    assert recs[0]["data"]["show_financial_opportunity"] is False
+    assert "8,750" in recs[0]["evidence"]
     assert "revenue" in recs[0]["title"].lower()
 
 

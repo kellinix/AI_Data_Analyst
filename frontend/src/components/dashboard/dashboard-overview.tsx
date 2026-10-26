@@ -45,16 +45,17 @@ function MetricTile({
   tone: "blue" | "emerald" | "amber" | "zinc"
 }) {
   const tones = {
-    blue: "bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-300",
+    blue: "bg-violet-100 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300",
     emerald:
-      "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-300",
+      "bg-teal-100 text-teal-700 dark:bg-teal-950/40 dark:text-teal-300",
     amber:
-      "bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-300",
-    zinc: "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300",
+      "bg-orange-100 text-orange-700 dark:bg-orange-950/40 dark:text-orange-300",
+    zinc: "bg-fuchsia-100 text-fuchsia-700 dark:bg-fuchsia-950/40 dark:text-fuchsia-300",
   }
 
   return (
-    <div className="rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900/60">
+    <div className="zephyr-card group relative overflow-hidden p-5 transition-transform hover:-translate-y-1 dark:border-zinc-800 dark:bg-zinc-900/60">
+      <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-violet-500 via-teal-400 to-orange-400 opacity-80" />
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-sm text-zinc-500 dark:text-zinc-400">{label}</p>
@@ -63,7 +64,7 @@ function MetricTile({
           </p>
         </div>
         <div
-          className={`flex h-10 w-10 items-center justify-center rounded-lg ${tones[tone]}`}
+          className={`flex h-11 w-11 items-center justify-center rounded-2xl ${tones[tone]}`}
         >
           <Icon className="h-5 w-5" />
         </div>
@@ -76,7 +77,7 @@ function RecentAnalysisRow({ analysis }: { analysis: AnalysisListItem }) {
   const meta = statusMeta[analysis.status]
   const StatusIcon = meta.icon
   const content = (
-    <div className="flex items-center justify-between gap-4 rounded-lg border border-zinc-200 bg-white px-4 py-3 transition-colors hover:border-zinc-300 dark:border-zinc-800 dark:bg-zinc-900/60 dark:hover:border-zinc-700">
+    <div className="zephyr-card flex items-center justify-between gap-4 px-5 py-4 transition-all hover:-translate-y-0.5 hover:border-violet-300 hover:shadow-lg dark:border-zinc-800 dark:bg-zinc-900/60">
       <div className="min-w-0">
         <div className="flex items-center gap-2">
           <p className="truncate text-sm font-medium text-zinc-950 dark:text-white">
@@ -190,8 +191,8 @@ export function DashboardOverview() {
           </div>
         </section>
 
-        <aside className="rounded-lg border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900/60">
-          <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-300">
+        <aside className="zephyr-card p-6 dark:border-zinc-800">
+          <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-violet-600 text-white shadow-lg shadow-violet-600/25">
             <Upload className="h-5 w-5" />
           </div>
           <h2 className="mt-4 text-lg font-semibold text-zinc-950 dark:text-white">

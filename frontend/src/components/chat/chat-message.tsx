@@ -7,12 +7,15 @@ import remarkGfm from "remark-gfm"
 import { cn } from "@/lib/utils"
 import type { ChartConfig, ChatMessage as ChatMessageType } from "@/types"
 
+import { ComparisonFigures } from "@/components/analysis/comparison-panel"
+
 interface ChatMessageProps {
+  analysisId?: string
   message: ChatMessageType
   onOpenChart?: (chart: ChartConfig) => void
 }
 
-export function ChatMessage({ message, onOpenChart }: ChatMessageProps) {
+export function ChatMessage({ message, onOpenChart, analysisId }: ChatMessageProps) {
   const isUser = message.role === "user"
 
   return (
@@ -56,6 +59,7 @@ export function ChatMessage({ message, onOpenChart }: ChatMessageProps) {
             </ReactMarkdown>
           </div>
         )}
+        {!isUser && message.comparison && analysisId && <details className="mt-3 text-sm"><summary className="cursor-pointer font-medium">See the figures behind this answer</summary><div className="mt-3"><ComparisonFigures analysisId={analysisId} result={message.comparison} /></div></details>}
         {!isUser && message.chart_config && onOpenChart && (
           <button
             type="button"

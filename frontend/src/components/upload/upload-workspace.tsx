@@ -318,7 +318,7 @@ export function UploadWorkspace() {
   const [cleaningMode, setCleaningMode] = useState<CleaningOptions["mode"]>("clean")
   const [outlierPolicy, setOutlierPolicy] =
     useState<NonNullable<CleaningOptions["outlier_policy"]>>("keep")
-  const [semanticCleanup, setSemanticCleanup] = useState(true)
+  const [semanticCleanup, setSemanticCleanup] = useState(false)
   const [fuzzyDeduplicate, setFuzzyDeduplicate] = useState(false)
   const [processingStep, setProcessingStep] = useState(0)
   const createAnalysis = useCreateAnalysis()
@@ -420,14 +420,14 @@ export function UploadWorkspace() {
         }
         const cleaning: CleaningOptions = {
           mode: cleaningMode,
-          remove_duplicates: true,
+          remove_duplicates: false,
           fuzzy_deduplicate: fuzzyDeduplicate,
           standardize_columns: true,
           normalize_dates: true,
           clean_text: true,
           parse_currency_percent: true,
           drop_empty: true,
-          missing_data_strategy: cleaningMode === "clean" ? "smart" : "none",
+          missing_data_strategy: "none",
           outlier_policy: outlierPolicy,
           semantic_categorical_merging: semanticCleanup,
         }
@@ -631,7 +631,7 @@ export function UploadWorkspace() {
                   Data preparation
                 </h2>
                 <p className="text-xs text-zinc-500">
-                  Missing values, duplicates, semantic category variants, messy dates, text, currency, percentages, and empty rows are handled before analysis.
+                  Tidy dates, text, currency, and percentages. Missing amounts and repeated records stay as supplied. Category merging and duplicate removal are optional.
                 </p>
               </div>
             </div>

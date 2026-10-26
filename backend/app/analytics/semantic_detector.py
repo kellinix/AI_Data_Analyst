@@ -41,6 +41,7 @@ RULES: tuple[SemanticRule, ...] = (
 )
 
 NUMERIC_ATTRIBUTE_KEYWORDS = (
+    "height",
     "age",
     "latitude",
     "longitude",
@@ -98,13 +99,16 @@ def detect_column_semantics(
     if normalized in {"source_file", "sheet"}:
         return _profile("source", 0.96, "Column identifies the source table or workbook sheet", "dimension")
 
+    if normalized in {"store", "store_number", "store_no", "store_num", "branch", "branch_number", "branch_no", "shop", "shop_number"}:
+        return _profile("categorical_dimension", 0.94, "Column identifies a location or store group", "dimension")
+
     if _looks_like_year(normalized, column, numeric_stats):
         return _profile("year", 0.94, "Column name and values look like calendar years", "temporal_dimension")
 
     if _looks_like_identifier(normalized):
         return _profile("identifier", 0.9, "Column name looks like a record identifier", "identifier")
 
-    if normalized.startswith("is_") or normalized.startswith("has_"):
+    if normalized.startswith("is_") or normalized.startswith("has_") or normalized.endswith("_flag"):
         return _profile("boolean", 0.82, "Column name looks like a boolean flag", "flag")
 
     if "description" in normalized or normalized in {"summary", "title", "headline"}:
@@ -155,10 +159,12 @@ def detect_column_semantics(
 
 
 def _normalize(value: str) -> str:
-    return re.sub(r"[^a-z0-9_]+", "_", value.lower())
+    return re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
 
 
 def _looks_like_identifier(normalized: str) -> bool:
+    if is_serial_identifier(normalized):
+        return True
     if normalized in {"id", "uuid", "guid"}:
         return True
     return (
@@ -167,6 +173,14 @@ def _looks_like_identifier(normalized: str) -> bool:
         or normalized.endswith("_guid")
         or normalized.startswith("id_")
     )
+
+
+def is_serial_identifier(column: str) -> bool:
+    """Row numbering is not an entity identity or a business measure."""
+    return re.fullmatch(
+        r"(?:sr|sr_no|sr_number|s_no|sno|serial|serial_no|serial_number|row_no|row_number|record_no|record_number)(?:_\d+)?",
+        _normalize(column),
+    ) is not None
 
 
 def _has_date_like_values(

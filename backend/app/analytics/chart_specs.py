@@ -72,7 +72,7 @@ def _line_spec(chart: dict[str, Any]) -> dict[str, Any]:
                     {
                         "period": x_values[index],
                         "metric": metric,
-                        "value": _number(value),
+                        "value": None if value is None else _number(value),
                     }
                 )
 
@@ -134,12 +134,12 @@ def _stacked_bar_spec(chart: dict[str, Any]) -> dict[str, Any]:
         name = str(series.get("name") or "")
         for index, value in enumerate(_list(series.get("data"))):
             if index < len(categories):
-                rows.append({"category": categories[index], "series": name, "value": _number(value)})
+                rows.append({"category": categories[index], "series": name, "value": None if value is None else _number(value)})
 
     spec = _base_spec(chart, {"type": "bar", "tooltip": True}, rows)
     spec["encoding"] = {
         "x": {"field": "category", "type": "nominal", "title": _axis_title(chart, "x")},
-        "y": {"field": "value", "type": "quantitative", "title": _axis_title(chart, "y"), "stack": "zero"},
+        "y": {"field": "value", "type": "quantitative", "title": _axis_title(chart, "y"), "stack": None if chart.get("aggregation") == "average" else "zero"},
         "color": {"field": "series", "type": "nominal", "title": None},
         "tooltip": [
             {"field": "category", "type": "nominal"},
@@ -205,7 +205,8 @@ def _scatter_spec(chart: dict[str, Any]) -> dict[str, Any]:
 
 def _histogram_spec(chart: dict[str, Any]) -> dict[str, Any]:
     opt = _object(chart.get("echarts_option"))
-    x_axis = _object(opt.get("xAxis"))
+    horizontal = _object(opt.get("yAxis")).get("type") == "category"
+    x_axis = _object(opt.get("yAxis" if horizontal else "xAxis"))
     series = _object(_first(_list(opt.get("series"))))
     labels = [str(value) for value in _list(x_axis.get("data"))]
     values = [_number(value) for value in _list(series.get("data"))]
@@ -216,12 +217,15 @@ def _histogram_spec(chart: dict[str, Any]) -> dict[str, Any]:
     spec = _base_spec(chart, {"type": "bar", "tooltip": True}, rows)
     spec["encoding"] = {
         "x": {"field": "bucket", "type": "ordinal", "title": _axis_title(chart, "x")},
-        "y": {"field": "count", "type": "quantitative", "title": "Count"},
+        "y": {"field": "count", "type": "quantitative", "title": _axis_title(chart, "x") if horizontal else "Entries"},
         "tooltip": [
             {"field": "bucket", "type": "ordinal"},
             {"field": "count", "type": "quantitative"},
         ],
     }
+    if horizontal:
+        spec["encoding"]["x"], spec["encoding"]["y"] = spec["encoding"]["y"], spec["encoding"]["x"]
+        spec["encoding"]["y"]["title"] = _axis_title(chart, "y")
     return spec
 
 

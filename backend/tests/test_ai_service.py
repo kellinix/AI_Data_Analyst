@@ -469,26 +469,24 @@ def test_build_stats_summary_without_profile_json_formats_kpis_and_stats():
 # ── Chat ───────────────────────────────────────────────────────────────────
 
 
-async def test_chat_grounds_prompt_in_analysis_and_truncates_history(monkeypatch):
+async def test_chat_rejects_unverified_old_narrative_and_truncates_history(monkeypatch):
     usage = SimpleNamespace(prompt_tokens=120, completion_tokens=30)
-    fake = _FakeOpenAI(chat_outcome=_chat_completion("North leads returns.", usage))
+    fake = _FakeOpenAI(chat_outcome=_chat_completion(
+        json.dumps({"answer_kind": "measured", "fact_ids": ["invented_profit"]}), usage))
     monkeypatch.setattr(ai_service, "client", fake)
     history = [{"role": "user", "content": f"message {i}"} for i in range(15)]
-
     result = await AIService().chat(
         _analysis(summary="Returns concentrated in North."), history, "Which region?"
     )
-
-    assert result["content"] == "North leads returns."
-    assert result["metadata"] == {"prompt_tokens": 120, "completion_tokens": 30}
+    assert "information in this report" in result["content"]
+    assert result["metadata"]["status"] == "failed"
+    assert result["metadata"]["prompt_tokens"] == 120
     messages = fake.chat_calls[0]["messages"]
-    assert messages[0]["role"] == "system"
-    assert "Returns concentrated in North." in messages[0]["content"]
+    assert "Returns concentrated in North." not in messages[0]["content"]
     assert "Never make up numbers" in messages[0]["content"]
-    # system + last 10 history messages + the new user message
-    assert len(messages) == 12
-    assert messages[1]["content"] == "message 5"
+    assert len(messages) == 12 and messages[1]["content"] == "message 5"
     assert messages[-1] == {"role": "user", "content": "Which region?"}
+    assert fake.chat_calls[0]["response_format"] == {"type": "json_object"}
 
 
 async def test_chat_returns_friendly_error_instead_of_raising(monkeypatch):
@@ -499,47 +497,26 @@ async def test_chat_returns_friendly_error_instead_of_raising(monkeypatch):
     assert result == {
         "content": "I encountered an error. Please try again.",
         "chart_config": None,
-        "metadata": {},
+        "metadata": {"status": "failed", "model": ai_service.settings.openai_model},
     }
 
 
-async def test_chat_handles_empty_model_content(monkeypatch):
+async def test_chat_handles_empty_model_content_without_charging_success(monkeypatch):
     monkeypatch.setattr(ai_service, "client", _FakeOpenAI(chat_outcome=_chat_completion(None)))
-
     result = await AIService().chat(_analysis(), [], "Hello?")
-
-    assert result["content"] == "I couldn't generate a response."
-    assert result["metadata"] == {"prompt_tokens": 0, "completion_tokens": 0}
+    assert "information in this report" in result["content"]
+    assert result["metadata"]["status"] == "failed"
+    assert result["metadata"]["completion_tokens"] == 0
 
 
 def test_chat_context_reports_when_no_metadata_exists():
-    assert _build_chat_analysis_context(_analysis()) == (
-        "No computed analysis metadata is available yet."
-    )
+    assert _build_chat_analysis_context(_analysis()) == "No computed analysis metadata is available yet."
 
 
-def test_chat_context_includes_profile_quality_and_ordered_insights():
-    insights = [
-        SimpleNamespace(sort_order=2, type="trend", title="Second", description="b"),
-        SimpleNamespace(sort_order=1, type="anomaly", title="First", description="a"),
-    ]
-    analysis = _analysis(
-        metadata_={
-            "data_profile": {
-                "dataset": {"row_count": 936, "column_count": 12},
-                "metrics": {"kpis": [{"column": "revenue", "value": 5000, "type": "sum"}]},
-            },
-            "data_quality": {"score": 91, "issues": [{"description": "3 duplicate rows"}]},
-        },
-        insights=insights,
-    )
-
-    context = _build_chat_analysis_context(analysis)
-
-    assert "Profile JSON: 936 rows, 12 columns" in context
-    assert "revenue: 5000 (sum)" in context
-    assert "Data quality score: 91/100" in context
-    assert context.index("First") < context.index("Second")
+def test_chat_context_does_not_treat_stored_insight_prose_as_evidence():
+    analysis = _analysis(summary="Profit is 5000.", insights=[
+        SimpleNamespace(sort_order=1, type="trend", title="Unsupported", description="Profit is 5000.")])
+    assert "Profit" not in _build_chat_analysis_context(analysis)
 
 
 # ── Deterministic fallback summary ─────────────────────────────────────────

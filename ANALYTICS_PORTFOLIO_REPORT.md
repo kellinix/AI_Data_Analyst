@@ -1,5 +1,9 @@
 # Analytics Portfolio Report — Zephyr (AI Dashboard Generator)
 
+> Current implementation and outstanding work: [project status](docs/PROJECT_STATUS.md).
+> The scores below describe the original review, followed by dated follow-ups;
+> they have not been rescored after the latest code changes.
+
 > Self-assessment produced as part of a documentation and code-quality
 > review targeted at Senior Data Analyst / Analytics Engineer / AI Data
 > Analyst roles (OpenAI, NVIDIA, Capita, NHS, Microsoft, Amazon, and AI

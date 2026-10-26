@@ -17,6 +17,7 @@ from app.schemas.chat import (
     SendMessageRequest,
 )
 from app.services.ai_service import AIService
+from app.services.usage_events import record_chat_response
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -205,10 +206,15 @@ async def send_message(
             history=history,
             user_message=body.content,
         )
-        current_user.ai_queries_this_month = (current_user.ai_queries_this_month or 0) + 1
+        if response.get("metadata", {}).get("status") == "succeeded":
+            current_user.ai_queries_this_month = (current_user.ai_queries_this_month or 0) + 1
     except Exception as exc:
         logger.error("AI chat failed", exc=str(exc))
-        response = {"content": "I encountered an error while processing your question. Please try again.", "chart_config": None}
+        response = {
+            "content": "I encountered an error while processing your question. Please try again.",
+            "chart_config": None,
+            "metadata": {"status": "failed", "model": settings.openai_model},
+        }
 
     assistant_message = ChatMessage(
         session_id=session_id,
@@ -219,6 +225,10 @@ async def send_message(
     )
     db.add(assistant_message)
     await db.flush()
+    await record_chat_response(
+        db, user_id=current_user.id, message_id=assistant_message.id,
+        metadata=assistant_message.internal_metadata,
+    )
     await db.refresh(assistant_message)
 
     return ChatMessageResponse.model_validate(assistant_message)

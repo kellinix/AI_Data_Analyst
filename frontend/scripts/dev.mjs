@@ -9,6 +9,11 @@ import { spawn } from "node:child_process"
 
 const major = Number(process.versions.node.split(".")[0])
 const env = { ...process.env }
+// Local apps share localhost cookies across ports. Chunked auth sessions can
+// exceed Node's default 16 KiB limit before Next can handle the request.
+if (!(env.NODE_OPTIONS ?? "").includes("--max-http-header-size")) {
+  env.NODE_OPTIONS = `${env.NODE_OPTIONS ?? ""} --max-http-header-size=65536`.trim()
+}
 if (major >= 25 && !(env.NODE_OPTIONS ?? "").includes("webstorage")) {
   env.NODE_OPTIONS = `${env.NODE_OPTIONS ?? ""} --no-experimental-webstorage`.trim()
 }

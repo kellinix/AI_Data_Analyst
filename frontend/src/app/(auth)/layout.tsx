@@ -12,7 +12,7 @@ export default function AuthLayout({
   children: React.ReactNode
 }) {
   return (
-    <div className="grid min-h-screen lg:grid-cols-2">
+    <div className="grid min-h-screen bg-[#f8f5fc] dark:bg-[#130f23] lg:grid-cols-2">
       {/* Left: Form */}
       <div className="flex flex-col items-center justify-center px-8 py-12">
         {/* Logo */}
@@ -25,15 +25,17 @@ export default function AuthLayout({
       </div>
 
       {/* Right: Marketing panel */}
-      <div className="hidden bg-zinc-950 lg:flex lg:flex-col lg:items-center lg:justify-center lg:px-16">
+      <div className="relative hidden overflow-hidden bg-[#302056] lg:flex lg:flex-col lg:items-center lg:justify-center lg:px-16">
+        <div className="absolute -right-24 -top-24 h-80 w-80 rounded-full bg-fuchsia-400/20 blur-3xl" />
+        <div className="absolute -bottom-24 -left-16 h-80 w-80 rounded-full bg-teal-300/20 blur-3xl" />
         <div className="max-w-sm space-y-8">
           {/* Headline */}
           <div className="space-y-3">
-            <p className="text-sm font-medium uppercase tracking-widest text-blue-400">
+            <p className="text-sm font-bold uppercase tracking-widest text-teal-200">
               What you&apos;ll get
             </p>
             <h2 className="text-3xl font-bold leading-tight text-white">
-              From spreadsheet to strategic insight in seconds
+              Turn your data into a clearer picture.
             </h2>
           </div>
 
@@ -48,7 +50,7 @@ export default function AuthLayout({
               {
                 icon: "🤖",
                 title: "AI-powered insights",
-                desc: "GPT-4o analyses your data and explains what matters.",
+                desc: "Plain-language summaries grounded in the analysed file.",
               },
               {
                 icon: "💬",
@@ -58,12 +60,12 @@ export default function AuthLayout({
               {
                 icon: "📊",
                 title: "Beautiful charts",
-                desc: "Automatically chosen, perfectly designed.",
+                desc: "Explore useful views of the patterns in your data.",
               },
               {
                 icon: "📋",
                 title: "Actionable recommendations",
-                desc: "Every suggestion tied to evidence and ROI.",
+                desc: "Review recommendations alongside their supporting evidence.",
               },
             ].map((feature) => (
               <li key={feature.title} className="flex items-start gap-3">
@@ -78,21 +80,10 @@ export default function AuthLayout({
             ))}
           </ul>
 
-          {/* Testimonial */}
-          <div className="rounded-xl border border-white/10 bg-white/5 p-5">
-            <p className="text-sm italic text-zinc-300">
-              &ldquo;I uploaded our quarterly sales file and had a full
-              executive briefing ready in under 30 seconds. Remarkable.&rdquo;
-            </p>
-            <div className="mt-3 flex items-center gap-2">
-              <div className="h-7 w-7 rounded-full bg-gradient-to-br from-blue-400 to-violet-500" />
-              <div>
-                <p className="text-xs font-medium text-white">
-                  Sarah Mitchell
-                </p>
-                <p className="text-xs text-zinc-500">VP Sales, Acme Corp</p>
-              </div>
-            </div>
+          <div className="flex items-end gap-3 rounded-3xl border border-white/15 bg-white/10 p-7 shadow-2xl shadow-black/10">
+            {[36, 65, 48, 88, 71, 100, 79].map((height, index) => (
+              <div key={index} className="flex-1 rounded-t-lg" style={{ height: `${height}px`, backgroundColor: ["#A98BFF", "#63D8C4", "#FFAD8C", "#E476C7"][index % 4] }} />
+            ))}
           </div>
         </div>
       </div>

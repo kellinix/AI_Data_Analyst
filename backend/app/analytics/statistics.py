@@ -12,9 +12,10 @@ from typing import Any
 
 import duckdb
 
+from app.analytics.category_values import category_expression, category_label
 from app.analytics.data_quality import analyze_data_quality
 from app.analytics.kpi_detector import CURRENCY_KEYWORDS
-from app.analytics.semantic_detector import enrich_schema_with_semantics
+from app.analytics.semantic_detector import enrich_schema_with_semantics, is_serial_identifier
 from app.analytics.sql_utils import quote_identifier as _quote_identifier
 from app.analytics.text_matching import contains_keyword
 from app.core.logging import get_logger
@@ -72,9 +73,33 @@ class StatisticsEngine:
             "date_range": self._date_range(date_cols),
             "categorical_stats": categorical_stats,
             "data_quality": analyze_data_quality(self.conn, schema, numeric_stats, self.table),
-            "correlations": self._correlations(numeric_cols) if len(numeric_cols) >= 2 else {},
+            "correlations": self._correlations([c["name"] for c in schema if c["is_numeric"] and c.get("analysis_role") == "metric"]),
         }
+        result["entity_counts"] = self._entity_counts(schema)
         return result
+
+    def _entity_counts(self, schema: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        counts = []
+        for column in schema:
+            name = column["name"]
+            if is_serial_identifier(name):
+                continue
+            tokens = _name_tokens(name)
+            if not (column.get("analysis_role") == "identifier" or "id" in tokens or
+                    "name" in tokens and any(t in tokens for t in (
+                        "organisation", "organization", "company", "customer", "client",
+                        "employee", "patient", "supplier", "product", "project", "account"))):
+                continue
+            quoted = _quote_identifier(name)
+            distinct, populated = self.conn.execute(
+                f"SELECT COUNT(DISTINCT {quoted}), COUNT({quoted}) FROM {_quote_identifier(self.table)} "
+                f"WHERE {quoted} IS NOT NULL AND TRIM(CAST({quoted} AS VARCHAR)) <> '' "
+                f"AND LOWER(TRIM(CAST({quoted} AS VARCHAR))) <> 'unknown'"
+            ).fetchone()
+            counts.append({"column": name, "distinct_values": distinct, "populated_records": populated,
+                           "repeated_records": populated - distinct,
+                           "count_basis": "Distinct recorded values; real-world identity is not verified."})
+        return counts
 
     def _add_weighted_means(self, numeric_stats: dict[str, Any]) -> None:
         """Weight a percentage column's average by the money it applies to.
@@ -256,7 +281,7 @@ class StatisticsEngine:
         stats: dict[str, Any] = {}
         for col in limited:
             unique_count = unique_counts.get(col, 0)
-            safe_col = _quote_identifier(col)
+            safe_col = category_expression(col)
             try:
                 # Only get top values for low-cardinality columns. Each column
                 # needs its own GROUP BY, so these can't be batched like the
@@ -272,7 +297,7 @@ class StatisticsEngine:
                     """).fetchall()
                     stats[col] = {
                         "unique_count": unique_count,
-                        "top_values": [{"value": str(r[0]), "count": r[1]} for r in top],
+                        "top_values": [{"value": category_label(col, r[0]), "count": r[1]} for r in top],
                     }
                 else:
                     stats[col] = {"unique_count": unique_count, "top_values": []}
@@ -283,7 +308,7 @@ class StatisticsEngine:
     def _categorical_unique_counts(self, columns: list[str]) -> dict[str, int]:
         try:
             select_parts = [
-                f"COUNT(DISTINCT {_quote_identifier(col)})" for col in columns
+                f"COUNT(DISTINCT {category_expression(col)})" for col in columns
             ]
             row = self.conn.execute(
                 f"SELECT {', '.join(select_parts)} FROM {_quote_identifier(self.table)}"
@@ -297,7 +322,7 @@ class StatisticsEngine:
         for col in columns:
             try:
                 row = self.conn.execute(
-                    f"SELECT COUNT(DISTINCT {_quote_identifier(col)}) FROM {_quote_identifier(self.table)}"
+                    f"SELECT COUNT(DISTINCT {category_expression(col)}) FROM {_quote_identifier(self.table)}"
                 ).fetchone()
                 counts[col] = row[0] if row else 0
             except Exception as exc:

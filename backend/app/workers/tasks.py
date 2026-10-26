@@ -18,6 +18,7 @@ async def _mark_analysis_failed(analysis_id: str, error: str) -> None:
 
     from app.db.session import AsyncSessionLocal
     from app.models.analysis import Analysis, AnalysisStatus
+    from app.services.usage_events import finalize_analysis
 
     async with AsyncSessionLocal() as db:
         result = await db.execute(select(Analysis).where(Analysis.id == uuid.UUID(analysis_id)))
@@ -25,6 +26,10 @@ async def _mark_analysis_failed(analysis_id: str, error: str) -> None:
         if analysis:
             analysis.status = AnalysisStatus.FAILED.value
             analysis.error_message = error[:1024]
+            await finalize_analysis(
+                db, user_id=analysis.user_id, analysis_id=analysis.id,
+                status="failed", created_at=analysis.created_at,
+            )
             await db.commit()
 
 

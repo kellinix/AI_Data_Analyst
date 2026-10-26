@@ -273,3 +273,38 @@ async def test_verdict_survives_insight_regeneration_and_feeds_the_view(client, 
     assert float(view_row.mean_confidence) == 0.85
     assert float(view_row.helpful_rate) == 1.0
     assert float(view_row.brier_score) == pytest.approx(0.0225)
+
+
+async def test_account_deletion_cascades_owned_data(client, sessions, seeded, monkeypatch, tmp_path):
+    from unittest.mock import AsyncMock
+
+    from app.api.v1.endpoints import users
+    from app.models.export_event import ExportEvent
+    from app.models.subscription import Subscription
+
+    monkeypatch.setattr(users, "delete_auth_user", AsyncMock())
+    monkeypatch.setattr(settings, "upload_dir", str(tmp_path))
+    folder = tmp_path / str(seeded.owner.id)
+    folder.mkdir()
+    (folder / "sales.csv").write_text("private")
+    await client.put(_feedback_url(seeded), json={"verdict": "helpful"})
+    async with sessions() as session:
+        session.add(Subscription(user_id=seeded.owner.id, plan="free", status="active"))
+        session.add(ExportEvent(analysis_id=seeded.analysis.id, format="pdf"))
+        await session.commit()
+
+    response = await client.delete("/api/v1/users/me")
+    assert response.status_code == 204
+    assert not folder.exists()
+    async with sessions() as session:
+        assert await session.get(User, seeded.owner.id) is None
+        assert await session.get(User, seeded.stranger.id) is not None
+        assert await session.get(Analysis, seeded.analysis.id) is None
+        assert await session.get(Insight, seeded.recommendation.id) is None
+        for model, column, value in (
+            (UploadedFile, UploadedFile.user_id, seeded.owner.id),
+            (Subscription, Subscription.user_id, seeded.owner.id),
+            (RecommendationFeedback, RecommendationFeedback.user_id, seeded.owner.id),
+            (ExportEvent, ExportEvent.analysis_id, seeded.analysis.id),
+        ):
+            assert (await session.execute(select(model).where(column == value))).first() is None

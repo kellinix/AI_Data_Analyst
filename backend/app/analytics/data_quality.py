@@ -32,13 +32,14 @@ def analyze_data_quality(
             f"SELECT COUNT(*) - COUNT({quoted}) FROM {_quote_identifier(table)}",
         )
         null_fraction = null_count / row_count
-        if null_fraction > 0:
+        if null_fraction > 0 and name.lower() not in {"notes", "note", "comments", "comment", "remarks"}:
+            empty = null_count == row_count
             severity = "critical" if null_fraction > 0.5 else "high" if null_fraction > 0.2 else "low"
             issues.append({
-                "type": "missing_values",
+                "type": "empty_field" if empty else "missing_values",
                 "column": name,
-                "severity": severity,
-                "description": f"{null_fraction:.1%} of values are missing",
+                "severity": "low" if empty else severity,
+                "description": "No values are supplied; this field cannot support analysis. Confirm whether it is required." if empty else f"{null_fraction:.1%} of values are missing; completeness alone does not establish whether this field is required",
                 "affected_rows": null_count,
             })
             fixes.append({
@@ -76,7 +77,11 @@ def analyze_data_quality(
         })
 
     score = _quality_score(row_count, issues)
-    return {"score": score, "issues": issues[:25], "fixes": fixes[:10]}
+    severity_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+    issues.sort(key=lambda issue: (issue["type"] == "empty_field", severity_order[issue["severity"]], -issue.get("affected_rows", 0)))
+    return {"score": score, "issues": issues[:25], "issue_count": len(issues), "fixes": fixes[:10],
+            "empty_fields": [issue["column"] for issue in issues if issue["type"] == "empty_field"],
+            "scoring_method": "100 minus the largest partial-field coverage penalty and other check penalties. Entirely empty fields are reported separately, not assumed invalid. Missing-field penalties do not accumulate merely because a file has more columns."}
 
 
 def _numeric_quality_issues(
@@ -133,6 +138,8 @@ def _numeric_quality_issues(
                         )
                     ),
                     "affected_rows": count,
+                    "below_range_rows": below,
+                    "above_range_rows": count - below,
                     "bounds": {"lower": lower, "upper": upper},
                 })
 
@@ -168,8 +175,11 @@ def _ratio_severity(ratio: float) -> str:
 
 def _quality_score(row_count: int, issues: list[dict[str, Any]]) -> int:
     penalty = 0.0
+    missing_penalties = []
     severity_weight = {"low": 1.5, "medium": 4.0, "high": 8.0, "critical": 14.0}
     for issue in issues:
+        if issue.get("type") == "empty_field":
+            continue
         affected = issue.get("affected_rows") or 0
         affected_ratio = min(float(affected) / max(row_count, 1), 1.0)
         weight = severity_weight.get(issue.get("severity", "medium"), 4.0)
@@ -177,7 +187,12 @@ def _quality_score(row_count: int, issues: list[dict[str, Any]]) -> int:
         # from it — the score must not stay in the "healthy" band.
         if affected_ratio > 0.5:
             weight *= 2
-        penalty += weight * max(affected_ratio, 0.05)
+        impact = weight * max(affected_ratio, 0.05)
+        if issue.get("type") == "missing_values":
+            missing_penalties.append(impact)
+        else:
+            penalty += impact
+    penalty += max(missing_penalties, default=0.0)
     return max(0, min(100, int(round(100 - penalty))))
 
 

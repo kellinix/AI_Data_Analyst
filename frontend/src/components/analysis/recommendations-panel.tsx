@@ -16,27 +16,28 @@ import {
 import { Badge } from "@/components/ui/badge"
 import { useRecommendationFeedback } from "@/hooks/use-analyses"
 import { cn, formatCurrency, formatNumber } from "@/lib/utils"
-import type { Insight, RecommendationFeedbackVerdict } from "@/types"
+import { EntryViewer } from "./entry-viewer"
+import type { EvidenceEntryRequest, Insight, RecommendationFeedbackVerdict } from "@/types"
 
 const priorityConfig = {
   critical: {
     variant: "destructive" as const,
-    label: "Critical",
+    label: "Check first",
     dot: "bg-red-500",
   },
   high: {
     variant: "warning" as const,
-    label: "High",
+    label: "Check first",
     dot: "bg-amber-500",
   },
   medium: {
     variant: "secondary" as const,
-    label: "Medium",
+    label: "Worth reviewing",
     dot: "bg-blue-500",
   },
   low: {
     variant: "secondary" as const,
-    label: "Low",
+    label: "For reference",
     dot: "bg-zinc-400",
   },
 }
@@ -130,6 +131,8 @@ function RecommendationCard({
 }) {
   const config = priorityConfig[insight.importance]
   const data = insight.data as {
+    supporting_figures?: { basis: string; figures: { label: string; value: number | null }[]; context: Record<string, string> }
+    evidence_link?: EvidenceEntryRequest
     problem?: string
     evidence?: string
     expected_impact?: string
@@ -179,13 +182,18 @@ function RecommendationCard({
         <div className="mt-3 rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800/50">
           <p className="flex items-center gap-1.5 text-xs font-medium text-zinc-500 dark:text-zinc-400">
             <AlertCircle className="h-3.5 w-3.5" />
-            Evidence
+            What we found
           </p>
           <p className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
             {data.evidence}
           </p>
         </div>
       )}
+
+      {data.expected_impact && <div className="mt-3">
+        <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400">Why this helps</p>
+        <p className="mt-1 text-xs leading-relaxed text-zinc-600 dark:text-zinc-300">{data.expected_impact}</p>
+      </div>}
 
       {/* Metadata grid */}
       <div className="mt-4 grid grid-cols-2 gap-3">
@@ -210,7 +218,7 @@ function RecommendationCard({
             <Zap className="mt-0.5 h-4 w-4 flex-shrink-0 text-amber-500" />
             <div>
               <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-400">
-                Difficulty
+                Effort
               </p>
               <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
                 {data.difficulty}
@@ -223,7 +231,7 @@ function RecommendationCard({
             <User className="mt-0.5 h-4 w-4 flex-shrink-0 text-blue-500" />
             <div>
               <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-400">
-                Owner
+                Who could help
               </p>
               <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
                 {data.owner}
@@ -236,7 +244,7 @@ function RecommendationCard({
             <Clock className="mt-0.5 h-4 w-4 flex-shrink-0 text-violet-500" />
             <div>
               <p className="text-[10px] font-medium uppercase tracking-wide text-zinc-400">
-                Timeline
+                Suggested timing
               </p>
               <p className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
                 {data.estimated_completion}
@@ -246,6 +254,8 @@ function RecommendationCard({
         )}
       </div>
 
+      {data.supporting_figures && <details className="mt-3 text-sm"><summary className="cursor-pointer font-medium text-violet-700 dark:text-violet-300">See figures behind this action</summary><p className="mt-2 text-zinc-600 dark:text-zinc-300">{data.supporting_figures.basis}</p>{data.supporting_figures.figures.map((figure) => <p key={figure.label} className="mt-2">{figure.label}: {figure.value == null ? "Not available" : figure.value.toLocaleString(undefined, { maximumFractionDigits: 2 })}</p>)}{Object.entries(data.supporting_figures.context).map(([field, value]) => <p key={field} className="mt-2">{field}: {value}</p>)}</details>}
+      {analysisId && data.evidence_link && <EntryViewer analysisId={analysisId} request={data.evidence_link} title="View supporting records" />}
       {analysisId && <RecommendationFeedback analysisId={analysisId} insight={insight} />}
     </motion.div>
   )
@@ -310,7 +320,7 @@ export function RecommendationsPanel({ insights, analysisId }: RecommendationsPa
       <div className="mb-4 flex items-center gap-2">
         <Target className="h-5 w-5 text-orange-500" />
         <h2 className="text-base font-semibold text-zinc-900 dark:text-white">
-          Recommended Actions
+          What to do next
         </h2>
       </div>
       <div className="grid gap-4 md:grid-cols-2">

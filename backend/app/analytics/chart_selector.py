@@ -7,8 +7,11 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
+from app.analytics.admission_context import is_admission
 from app.analytics.kpi_detector import is_outcome_column, uses_average_aggregation
 from app.analytics.labels import derive_label, sentence_label
+from app.analytics.report_relevance import useful_charts
+from app.analytics.survey_context import survey_fields
 from app.analytics.text_matching import is_unreported_category
 
 # A numeric column null on more than this fraction of rows is sparse/
@@ -37,6 +40,18 @@ def select_charts(
     max_charts: int = 8,
 ) -> list[dict[str, Any]]:
     charts: list[dict[str, Any]] = []
+    survey = survey_fields(schema)
+    if survey:
+        chart = _horizontal_bar_chart(survey["country"], survey["percentage"], aggregation="average")
+        chart["echarts_option"]["_columns"]["survey_fields"] = survey
+        chart["echarts_option"]["xAxis"].update({"min": 0, "max": 100, "name": "Published percentage (%)"})
+        return [chart]
+    if is_admission(schema):
+        charts = [_horizontal_bar_chart(group, "chance_of_admit", aggregation="percent_rate") for group in ("research", "sop", "lor")]
+        correlation = correlations.get("cgpa|chance_of_admit", correlations.get("chance_of_admit|cgpa"))
+        if correlation is not None:
+            charts.append(_scatter_chart("cgpa", "chance_of_admit", correlation))
+        return charts[:max_charts]
 
     date_cols = [
         c["name"]
@@ -49,6 +64,11 @@ def select_charts(
         if c["is_numeric"]
         and c.get("analysis_role") == "metric"
         and _is_business_metric(c["name"])
+        and (numeric_stats.get(c["name"], {}).get("count", 1) or 0) > 0
+        and not (
+            numeric_stats.get(c["name"], {}).get("min") is not None
+            and numeric_stats[c["name"]].get("min") == numeric_stats[c["name"]].get("max")
+        )
     ]
     categorical_cols = sorted(
         [
@@ -63,6 +83,12 @@ def select_charts(
     date_cols = [
         col for col in date_cols if _has_usable_time_axis(col, date_range, numeric_stats, numeric_cols)
     ]
+
+    if not numeric_cols:
+        count_candidates = [*categorical_cols, *[c["name"] for c in schema if c.get("analysis_role") == "flag"]]
+        count_dimensions = [col for col in count_candidates if 2 <= categorical_stats.get(col, {}).get("unique_count", 0) <= 50]
+        for col in count_dimensions[:3]:
+            charts.append(_record_count_chart(col))
 
     if date_cols and numeric_cols:
         date_col = date_cols[0]
@@ -107,7 +133,8 @@ def select_charts(
         cat_stats = categorical_stats.get(cat_col, {})
         top_values = cat_stats.get("top_values", [])
         if len(top_values) >= 2 and numeric_cols and not any(chart.get("xAxis") == numeric_cols[0] and chart.get("yAxis") == cat_col for chart in charts):
-            charts.append(_horizontal_bar_chart(cat_col, numeric_cols[0], top_values))
+            role = next((c.get("analysis_role") for c in schema if c["name"] == cat_col), None)
+            charts.append(_horizontal_bar_chart(cat_col, numeric_cols[0], top_values, aggregation="average" if role == "flag" else None))
         if len(charts) >= max_charts:
             break
 
@@ -145,7 +172,7 @@ def select_charts(
     if numeric_cols:
         charts.append(_histogram_chart(numeric_cols[0], numeric_stats.get(numeric_cols[0], {})))
 
-    return charts[:max_charts]
+    return useful_charts(charts)[:max_charts]
 
 
 # Rows per month of span below which a date column is a scatter of dates
@@ -217,10 +244,12 @@ def _is_chart_dimension(
     categorical_stats: dict[str, Any],
 ) -> bool:
     role = column.get("analysis_role")
-    if role not in {"dimension", "temporal_dimension"}:
+    if role not in {"dimension", "temporal_dimension", "flag"}:
         return False
 
     normalized = _normalize(column["name"])
+    if role == "flag" and is_outcome_column(normalized):
+        return False
     if (
         normalized == "id"
         or normalized.endswith("_id")
@@ -232,7 +261,7 @@ def _is_chart_dimension(
 
     stats = categorical_stats.get(column["name"], {})
     unique_count = stats.get("unique_count", 0)
-    if unique_count and unique_count > 500:
+    if unique_count and unique_count > (8 if role == "flag" else 500):
         return False
     return True
 
@@ -246,6 +275,7 @@ def _dimension_score(column: str, categorical_stats: dict[str, Any]) -> float:
     if any(term in normalized for term in (
         "department", "ministry", "agency", "company", "organisation", "organization",
         "sponsor", "therapy", "area", "type", "phase", "status", "country", "region",
+        "store", "branch", "shop",
         "category", "segment", "channel", "team", "owner", "product",
     )):
         score += 10
@@ -253,6 +283,8 @@ def _dimension_score(column: str, categorical_stats: dict[str, Any]) -> float:
         score += 3
     if normalized == "year" or normalized.endswith("_year"):
         score += 6
+    if "holiday" in normalized:
+        score += 5
     unique_count = categorical_stats.get(column, {}).get("unique_count", 0)
     if 2 <= unique_count <= 30:
         score += 4
@@ -377,12 +409,12 @@ def _multi_line_chart(date_col: str, value_cols: list[str]) -> dict[str, Any]:
     }
 
 
-def _horizontal_bar_chart(cat_col: str, value_col: str, top_values: list[dict] | None = None) -> dict[str, Any]:
+def _horizontal_bar_chart(cat_col: str, value_col: str, top_values: list[dict] | None = None, aggregation: str | None = None) -> dict[str, Any]:
     top_values = top_values or []
     labels = [str(v["value"]) for v in top_values[:10]]
     cat_label = _humanize(cat_col)
     value_label = _humanize(value_col)
-    aggregation = _aggregation(value_col)
+    aggregation = aggregation or _aggregation(value_col)
     aggregation_word = "total" if aggregation == "sum" else "average"
     title = f"{value_label} by {cat_label}" if aggregation == "sum" else f"Avg {value_label} by {cat_label}"
     return {
@@ -406,6 +438,22 @@ def _horizontal_bar_chart(cat_col: str, value_col: str, top_values: list[dict] |
                 "name": value_col,
             }],
             "_columns": {"x": cat_col, "y": value_col, "orientation": "horizontal", "aggregation": aggregation},
+        },
+    }
+
+
+def _record_count_chart(column: str) -> dict[str, Any]:
+    label = _humanize(column)
+    return {
+        "id": _chart_id(), "type": "bar", "title": f"Records by {label}",
+        "description": f"Counts records in up to 15 largest {sentence_label(label)} groups with reported values; records are not necessarily unique entities",
+        "xAxis": "records", "yAxis": column, "series": ["records"], "aggregation": "count",
+        "color_scheme": ["#2563eb"],
+        "echarts_option": {
+            "xAxis": {"type": "value", "name": "Records"},
+            "yAxis": {"type": "category", "name": label, "data": []},
+            "series": [{"type": "bar", "name": "Records", "data": []}],
+            "_columns": {"category": column, "aggregation": "count"},
         },
     }
 
@@ -516,7 +564,7 @@ def _donut_chart(cat_col: str, top_values: list[dict]) -> dict[str, Any]:
         "title": f"{cat_label} breakdown",
         # Counts, not a total: this chart divides the number of entries, and
         # saying "the total" would misdescribe what the reader is looking at.
-        "description": f"How many fall into each {sentence_label(cat_label)}",
+        "description": f"Number of entries in each {sentence_label(cat_label)}. One entry is one line of data in this report.",
         "xAxis": None,
         "yAxis": None,
         "series": [cat_col],
@@ -578,7 +626,7 @@ def _histogram_chart(value_col: str, stats: dict[str, Any]) -> dict[str, Any]:
         "id": _chart_id(),
         "type": "histogram",
         "title": f"How {sentence_label(value_label)} is spread",
-        "description": f"How many fall into each {sentence_label(value_label)} range",
+        "description": f"Number of entries in each {sentence_label(value_label)} range. One entry is one line of data in this report.",
         "xAxis": value_col,
         "yAxis": "count",
         "series": [value_col],

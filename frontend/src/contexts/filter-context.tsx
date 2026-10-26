@@ -11,11 +11,15 @@ import {
   type ReactNode,
 } from "react"
 import { analysesApi } from "@/lib/api/analyses"
+import { useDashboardContext } from "@/contexts/dashboard-context"
 import type { ActiveFilter, ChartPatch, FilterableColumn, KpiPatch } from "@/types"
 
 interface FilterContextValue {
   activeFilters: ActiveFilter[]
   toggleValue: (column: string, value: string | number) => void
+  setDateRange: (column: string, start: string, end: string) => void
+  setNumericRange: (column: string, minimum: number, maximum: number) => void
+  clearFilter: (column: string) => void
   clearAll: () => void
   isFilterActive: (column: string, value: string | number) => boolean
   chartPatches: Record<string, ChartPatch>
@@ -29,6 +33,9 @@ interface FilterContextValue {
 const NOOP_CONTEXT: FilterContextValue = {
   activeFilters: [],
   toggleValue: () => {},
+  setDateRange: () => {},
+  setNumericRange: () => {},
+  clearFilter: () => {},
   clearAll: () => {},
   isFilterActive: () => false,
   chartPatches: {},
@@ -52,6 +59,7 @@ export function FilterProvider({
   filterableColumns: FilterableColumn[]
   children: ReactNode
 }) {
+  const dashboard = useDashboardContext()
   const [activeFilters, setActiveFilters] = useState<ActiveFilter[]>([])
   const [chartPatches, setChartPatches] = useState<Record<string, ChartPatch>>({})
   const [kpiPatches, setKpiPatches] = useState<Record<string, KpiPatch>>({})
@@ -67,6 +75,17 @@ export function FilterProvider({
     () => Object.fromEntries(filterableColumns.map((c) => [c.column, c.display_label])),
     [filterableColumns]
   )
+
+  const savedFiltersKey = JSON.stringify(dashboard?.layout?.spec.saved_filters ?? null)
+  useEffect(() => {
+    if (!dashboard?.layout) return
+    const filters = dashboard.layout.spec.saved_filters
+    setActiveFilters(filters.map((filter) => ({ ...filter,
+      display_label: columnLabels[filter.column] ?? filter.column,
+    })))
+  // A saved revision (including Undo) replaces the current filters.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [savedFiltersKey, columnLabels])
 
   const runQuery = useCallback(
     async (filters: ActiveFilter[]) => {
@@ -144,6 +163,37 @@ export function FilterProvider({
   )
 
   const clearAll = useCallback(() => setActiveFilters([]), [])
+  const clearFilter = useCallback((column: string) => {
+    setActiveFilters((prev) => prev.filter((filter) => filter.column !== column))
+  }, [])
+  const setDateRange = useCallback(
+    (column: string, start: string, end: string) => {
+      setActiveFilters((prev) => [
+        ...prev.filter((filter) => filter.column !== column),
+        {
+          column,
+          display_label: columnLabels[column] ?? column,
+          op: "date_between",
+          values: [start, end],
+        },
+      ])
+    },
+    [columnLabels]
+  )
+  const setNumericRange = useCallback(
+    (column: string, minimum: number, maximum: number) => {
+      setActiveFilters((prev) => [
+        ...prev.filter((filter) => filter.column !== column),
+        {
+          column,
+          display_label: columnLabels[column] ?? column,
+          op: "between",
+          values: [minimum, maximum],
+        },
+      ])
+    },
+    [columnLabels]
+  )
 
   const isFilterActive = useCallback(
     (column: string, value: string | number) =>
@@ -155,6 +205,9 @@ export function FilterProvider({
     () => ({
       activeFilters,
       toggleValue,
+      setDateRange,
+      setNumericRange,
+      clearFilter,
       clearAll,
       isFilterActive,
       chartPatches,
@@ -167,6 +220,9 @@ export function FilterProvider({
     [
       activeFilters,
       toggleValue,
+      setDateRange,
+      setNumericRange,
+      clearFilter,
       clearAll,
       isFilterActive,
       chartPatches,

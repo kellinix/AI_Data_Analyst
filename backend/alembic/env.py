@@ -12,9 +12,13 @@ from alembic import context
 from app.db.base import Base
 from app.models.analysis import Analysis, UploadedFile  # noqa: F401
 from app.models.chat import ChatMessage, ChatSession  # noqa: F401
+from app.models.dashboard_revision import DashboardRevision  # noqa: F401
+from app.models.export_event import ExportEvent  # noqa: F401
 from app.models.insight import Insight  # noqa: F401
+from app.models.metric_definition import MetricDefinition  # noqa: F401
 from app.models.recommendation_feedback import RecommendationFeedback  # noqa: F401
 from app.models.subscription import Subscription  # noqa: F401
+from app.models.usage_event import UsageEvent  # noqa: F401
 from app.models.user import User  # noqa: F401
 
 config = context.config
@@ -59,7 +63,9 @@ def do_run_migrations(connection) -> None:
 async def run_async_migrations() -> None:
     from sqlalchemy.ext.asyncio import create_async_engine
 
-    async_url = database_url.replace("postgresql://", "postgresql+asyncpg://")
+    async_url = database_url.replace(
+        "postgresql://", "postgresql+asyncpg://", 1
+    ).replace("postgres://", "postgresql+asyncpg://", 1)
     connectable = create_async_engine(async_url, poolclass=pool.NullPool)
 
     async with connectable.connect() as connection:

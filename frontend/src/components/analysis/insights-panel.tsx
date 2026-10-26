@@ -1,11 +1,11 @@
 "use client"
 
-import { useState } from "react"
 import { motion } from "framer-motion"
 import { TrendingUp, AlertTriangle, Lightbulb, Activity } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Badge } from "@/components/ui/badge"
-import type { Insight } from "@/types"
+import { EntryViewer } from "./entry-viewer"
+import type { EvidenceEntryRequest, Insight } from "@/types"
 
 const typeConfig = {
   trend: {
@@ -52,18 +52,12 @@ const importanceVariant = {
   critical: "destructive" as const,
 }
 
-function titleCase(value: string): string {
-  return value.charAt(0).toUpperCase() + value.slice(1)
+const priorityLabels: Record<string, string> = {
+  critical: "Check first", high: "Check first", medium: "Worth reviewing", low: "For reference",
 }
 
-function signalLabel(confidence: number): string {
-  if (confidence >= 0.85) return "Strong signal"
-  if (confidence >= 0.65) return "Good signal"
-  return "Worth a look"
-}
-
-function InsightCard({ insight, index }: { insight: Insight; index: number }) {
-  const [expanded, setExpanded] = useState(false)
+function InsightCard({ insight, index, analysisId }: { insight: Insight; index: number; analysisId?: string }) {
+  const evidenceLink = insight.data?.evidence_link as EvidenceEntryRequest | undefined
   const config = typeConfig[insight.type] ?? typeConfig.trend
   const Icon = config.icon
 
@@ -84,32 +78,13 @@ function InsightCard({ insight, index }: { insight: Insight; index: number }) {
               {insight.title}
             </h3>
             <Badge variant={importanceVariant[insight.importance]} className="flex-shrink-0 text-[10px]">
-              {titleCase(insight.importance)}
+              {priorityLabels[insight.importance] ?? "Worth reviewing"}
             </Badge>
           </div>
-          <p className={cn("text-sm leading-relaxed text-zinc-600 dark:text-zinc-300", !expanded && "line-clamp-2")}>
+          <p className="text-sm leading-relaxed text-zinc-600 dark:text-zinc-300">
             {insight.description}
           </p>
-          {insight.description.length > 120 && (
-            <button
-              onClick={() => setExpanded(!expanded)}
-              className="text-xs font-medium text-blue-600 hover:text-blue-500 dark:text-blue-400"
-            >
-              {expanded ? "Show less" : "Read more"}
-            </button>
-          )}
-          {/* Signal strength */}
-          <div className="flex items-center gap-2 pt-1">
-            <div className="h-1 w-24 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
-              <div
-                className="h-full rounded-full bg-blue-500 transition-all"
-                style={{ width: `${insight.confidence * 100}%` }}
-              />
-            </div>
-            <span className="text-[11px] text-zinc-400">
-              {signalLabel(insight.confidence)}
-            </span>
-          </div>
+          {analysisId && evidenceLink && <EntryViewer analysisId={analysisId} request={evidenceLink} />}
         </div>
       </div>
     </motion.div>
@@ -118,6 +93,7 @@ function InsightCard({ insight, index }: { insight: Insight; index: number }) {
 
 interface InsightsPanelProps {
   insights: Insight[]
+  analysisId?: string
 }
 
 function normalizeInsightKey(insight: Insight): string {
@@ -148,7 +124,7 @@ function dedupeInsights(insights: Insight[]): Insight[] {
   return deduped
 }
 
-export function InsightsPanel({ insights }: InsightsPanelProps) {
+export function InsightsPanel({ insights, analysisId }: InsightsPanelProps) {
   const displayInsights = dedupeInsights(
     insights.filter((i) => i.type !== "summary" && i.type !== "recommendation")
   )
@@ -163,11 +139,11 @@ export function InsightsPanel({ insights }: InsightsPanelProps) {
   return (
     <section>
       <h2 className="mb-4 text-base font-semibold text-zinc-900 dark:text-white">
-        AI Insights
+        What stands out
       </h2>
       <div className="grid gap-3 md:grid-cols-2">
         {displayInsights.map((insight, i) => (
-          <InsightCard key={insight.id} insight={insight} index={i} />
+          <InsightCard key={insight.id} insight={insight} index={i} analysisId={analysisId} />
         ))}
       </div>
     </section>

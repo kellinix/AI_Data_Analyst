@@ -31,6 +31,23 @@ class UsageStats(BaseModel):
     ai_queries_limit: int
 
 
+class UsageLedgerSummary(BaseModel):
+    calendar_month_start: datetime
+    accounting_mode: str = "legacy_counters_with_event_tracking"
+    analysis_completed_lifetime: int
+    analysis_completed_this_month: int
+    analysis_reserved: int
+    analysis_failed: int
+    ai_completed_lifetime: int
+    ai_completed_this_month: int
+    ai_failed: int
+    ai_legacy_unknown: int
+    prompt_tokens_recorded: int
+    completion_tokens_recorded: int
+    current_counter_analyses: int
+    current_counter_ai_queries: int
+
+
 class UserResponse(UserBase):
     model_config = ConfigDict(from_attributes=True)
 

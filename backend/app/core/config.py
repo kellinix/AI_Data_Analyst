@@ -36,7 +36,10 @@ class Settings(BaseSettings):
         return self.environment == "production"
 
     # ── CORS ───────────────────────────────────────────────────────────────
-    cors_origins: list[str] = ["http://localhost:3000"]
+    cors_origins: list[str] = Field(
+        default=["http://localhost:3000"],
+        validation_alias=AliasChoices("CORS_ORIGINS", "BACKEND_CORS_ORIGINS"),
+    )
     cors_allow_credentials: bool = True
     frontend_url: str = "http://localhost:3000"
 
@@ -56,13 +59,15 @@ class Settings(BaseSettings):
     )
     postgres_port: int = 5432
     postgres_user: str = "ai_dashboard_user"
-    postgres_password: str
+    postgres_password: str = ""
     postgres_db: str = "ai_dashboard"
 
     @property
     def database_url(self) -> str:
         if self.database_url_override:
-            return self.database_url_override
+            return self.database_url_override.replace(
+                "postgresql://", "postgresql+asyncpg://", 1
+            ).replace("postgres://", "postgresql+asyncpg://", 1)
         return (
             f"postgresql+asyncpg://{self.postgres_user}:{self.postgres_password}"
             f"@{self.postgres_server}:{self.postgres_port}/{self.postgres_db}"
@@ -72,6 +77,10 @@ class Settings(BaseSettings):
     def sync_database_url(self) -> str:
         if self.sync_database_url_override:
             return self.sync_database_url_override
+        if self.database_url_override:
+            return self.database_url_override.replace(
+                "postgresql+asyncpg://", "postgresql://", 1
+            ).replace("postgres://", "postgresql://", 1)
         return (
             f"postgresql://{self.postgres_user}:{self.postgres_password}"
             f"@{self.postgres_server}:{self.postgres_port}/{self.postgres_db}"
@@ -124,6 +133,8 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def require_production_secrets(self) -> Settings:
+        if not self.database_url_override and not self.postgres_password:
+            raise ValueError("Set DATABASE_URL or POSTGRES_PASSWORD")
         if self.is_production:
             missing = [
                 name
@@ -133,7 +144,6 @@ class Settings(BaseSettings):
                     "supabase_url",
                     "supabase_anon_key",
                     "supabase_service_role_key",
-                    "supabase_jwt_secret",
                 )
                 if not getattr(self, name)
             ]

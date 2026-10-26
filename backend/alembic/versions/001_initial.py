@@ -21,6 +21,8 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
+    # Fresh installations must not depend on Docker's optional init.sql.
+    op.execute('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"')
     # users
     op.create_table(
         "users",

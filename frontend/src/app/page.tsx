@@ -121,20 +121,6 @@ export default function LandingPage() {
               transition={{ duration: 0.5, ease: [0.22, 1, 0.36, 1] }}
               className="flex w-full max-w-2xl flex-col items-center gap-8 text-center"
             >
-              {/* Badge */}
-              <motion.div
-                initial={{ opacity: 0, y: 10 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.1, duration: 0.5 }}
-                className="inline-flex items-center gap-1.5 rounded-full border border-blue-200 bg-blue-50 px-3 py-1 text-xs font-medium text-blue-700 dark:border-blue-900 dark:bg-blue-950 dark:text-blue-400"
-              >
-                <span className="relative flex h-1.5 w-1.5">
-                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-blue-400 opacity-75" />
-                  <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-blue-500" />
-                </span>
-                Powered by GPT-4o · No configuration required
-              </motion.div>
-
               {/* Headline */}
               <motion.h1
                 initial={{ opacity: 0, y: 12 }}

@@ -8,6 +8,9 @@ A full-stack, production-shaped data analytics platform: async FastAPI + Celery 
 
 ## For reviewers: how this repo is organized
 
+The Android/iOS app lives in [`mobile/`](mobile/README.md). Its setup guide covers
+local server testing, development builds, Supabase email callbacks and validation.
+
 This README covers the product. The **`docs/analytics/`** folder is a from-scratch analytics-engineering review of the codebase — data architecture, a reusable data quality framework, a KPI/metric glossary, ER diagrams, a dashboard specification, worked business insights on a real dataset, and an explicit breakdown of what's deterministic vs. AI-generated in this system, with the hallucination-prevention mechanisms actually implemented in code. It's written to be checked against the source, not taken on faith — every non-obvious claim cites a `file:line`.
 
 | Document | What it covers |
@@ -122,7 +125,7 @@ git clone https://github.com/your-org/ai-dashboard-generator.git
 cd ai-dashboard-generator
 cp .env.example .env
 ```
-Fill in `.env`: `OPENAI_API_KEY` (from https://platform.openai.com) and `SUPABASE_URL` / `SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY` / `SUPABASE_JWT_SECRET` (from your Supabase project).
+Fill in `.env`: `OPENAI_API_KEY` (from https://platform.openai.com) and `SUPABASE_URL` / `SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY` (from your Supabase project). Set `SUPABASE_JWT_SECRET` only if that project issues legacy HS256 user tokens; projects using asymmetric signing are verified through their JWKS endpoint.
 
 Running the frontend outside Docker (`npm run dev` in `frontend/`)? Next.js only reads env files from its own directory, so copy the `NEXT_PUBLIC_*` lines into `frontend/.env.local` (gitignored) — without them every page returns 500.
 
@@ -189,13 +192,17 @@ Not included in this pass — generating them requires a live Supabase project a
 
 ## Roadmap
 
+Current completion notes and remaining work: [project status](docs/PROJECT_STATUS.md).
+The feature roadmap below is the original product plan; some listed items have
+since shipped.
+
 Full roadmap: [`docs/06_Feature_Roadmap.md`](docs/06_Feature_Roadmap.md). Near-term highlights: correlation-analysis insights, seasonal pattern detection, categorical/date-range dashboard filters, and — directly motivated by this review — a calibrated (not fixed-lookup) confidence score for AI recommendations, and closing the three schema gaps identified in [`docs/analytics/06_Dashboard_Specification.md §2.10`](docs/analytics/06_Dashboard_Specification.md#210-summary--whats-blocking-a-real-executive-dashboard-today) that currently block a real business-operations dashboard for the product itself.
 
 ---
 
 ## Environment variables
 
-See `.env.example` for all available options. Required for production: `SECRET_KEY`, `OPENAI_API_KEY`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `SUPABASE_JWT_SECRET`, `POSTGRES_*`, `REDIS_HOST`.
+See `.env.example` for all available options. Required for production: `SECRET_KEY`, `OPENAI_API_KEY`, `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `POSTGRES_*`, `REDIS_HOST`. `SUPABASE_JWT_SECRET` is required only for legacy HS256 user tokens.
 
 ## Deployment
 

@@ -43,7 +43,7 @@ def build_data_profile_schema(
         ],
         "metrics": {
             "kpis": [_compact_kpi(kpi) for kpi in kpis],
-            "numeric_statistics": _compact_numeric_stats(numeric_stats),
+            "numeric_statistics": _compact_numeric_stats({name: values for name, values in numeric_stats.items() if not any(c["name"] == name and c.get("analysis_role") == "identifier" for c in schema)}),
             "correlations": statistics.get("correlations", {}),
             "forecasts": forecasts[:5],
             "anomalies": anomalies[:10],
@@ -56,6 +56,7 @@ def build_data_profile_schema(
             for column, stats in list(categorical_stats.items())[:30]
         },
         "data_quality": statistics.get("data_quality", {}),
+        "analysis_evidence": statistics.get("analysis_evidence", {}),
         "relationships": _relationship_profile(upload_context),
         "cleaning": _cleaning_profile(upload_context),
         # `semantic_display` is deliberately not sent: every display label it
@@ -111,13 +112,15 @@ def _column_profile(
             "p50": stats.get("p50"),
             "p75": stats.get("p75"),
             "total": stats.get("total"),
+            "weighted_mean": stats.get("weighted_mean"),
+            "weight_column": stats.get("weight_column"),
         }
 
     if name in categorical_stats:
         stats = categorical_stats[name]
         profile["categorical_summary"] = {
             "unique_count": stats.get("unique_count"),
-            "top_values": stats.get("top_values", [])[:10],
+            "top_values": stats.get("top_values", [])[:100 if name.lower().endswith("question_code") or name.lower() == "answer" else 10],
         }
 
     return profile
@@ -133,6 +136,8 @@ def _compact_numeric_stats(numeric_stats: dict[str, Any]) -> dict[str, Any]:
             "mean": stats.get("mean"),
             "p50": stats.get("p50"),
             "total": stats.get("total"),
+            "weighted_mean": stats.get("weighted_mean"),
+            "weight_column": stats.get("weight_column"),
         }
         for column, stats in list(numeric_stats.items())[:30]
     }
@@ -145,6 +150,10 @@ def _compact_kpi(kpi: dict[str, Any]) -> dict[str, Any]:
         "value": kpi.get("value"),
         "is_total": kpi.get("is_total"),
         "is_currency": kpi.get("is_currency"),
+        "is_percent": kpi.get("is_percent", False),
+        "weighted_by": kpi.get("weighted_by"),
+        "currency": kpi.get("currency"),
+        "currency_symbol": kpi.get("currency_symbol"),
         "mean": kpi.get("mean"),
         "count": kpi.get("count"),
     }

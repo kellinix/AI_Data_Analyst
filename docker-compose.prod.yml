@@ -1,6 +1,8 @@
 # ============================================================
 # AI Dashboard Generator — Docker Compose (Production)
 # Usage: docker compose -f docker-compose.prod.yml up -d
+# The .env DATABASE_URL must point at postgres:5432, not localhost.
+# NEXT_PUBLIC_* values are embedded in the frontend image at build time.
 # ============================================================
 
 networks:
@@ -74,6 +76,24 @@ services:
   # ----------------------------------------------------------
   # FastAPI Backend
   # ----------------------------------------------------------
+  migrate:
+    image: ${DOCKER_REGISTRY}/ai-dashboard-backend:${DOCKER_IMAGE_TAG:-latest}
+    build:
+      context: ./backend
+      dockerfile: ../docker/backend.Dockerfile
+      target: production
+    networks:
+      - ai_dashboard_network
+    env_file:
+      - .env
+    environment:
+      - APP_ENV=production
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: alembic upgrade head
+    restart: "no"
+
   backend:
     image: ${DOCKER_REGISTRY}/ai-dashboard-backend:${DOCKER_IMAGE_TAG:-latest}
     build:
@@ -95,6 +115,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     command: >
       gunicorn app.main:app
       --worker-class uvicorn.workers.UvicornWorker
@@ -136,6 +158,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     # concurrency=4 against a 4G limit gives ~1G/task headroom: a single file
     # can be held 2-3x in memory during ingestion (polars -> pandas -> duckdb),
     # and max_upload_size_bytes allows 512MB files, so concurrency=8 here
@@ -166,6 +190,8 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
     command: celery -A app.workers.celery_app beat --loglevel=warning
     deploy:
       replicas: 1
@@ -179,6 +205,11 @@ services:
       context: ./frontend
       dockerfile: ../docker/frontend.Dockerfile
       target: production
+      args:
+        NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:?Set the public HTTPS website URL}
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:?Set the public HTTPS API URL}
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:?Set the Supabase HTTPS URL}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY:?Set the Supabase publishable key}
     container_name: ai_dashboard_frontend
     restart: always
     networks:

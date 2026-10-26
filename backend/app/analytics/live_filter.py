@@ -10,15 +10,18 @@ drift apart from having two independently-maintained copies of the SQL.
 from __future__ import annotations
 
 import copy
+import math
+from datetime import date
 from typing import Any, Literal
 
 import duckdb
 
+from app.analytics.category_values import category_expression, category_filter_value, category_label
 from app.analytics.chart_specs import build_visual_spec
 from app.analytics.sql_utils import quote_identifier as _quote_identifier
 from app.analytics.text_matching import is_unreported_category
 
-FilterOp = Literal["in", "between"]
+FilterOp = Literal["in", "between", "date_between"]
 
 # Only columns with these roles may be filtered — identifiers, free text, and
 # date/temporal columns are excluded because filtering on them isn't a
@@ -46,10 +49,34 @@ def validate_filters(
     validated = []
     for f in filters:
         column = by_name.get(f.get("column"))
-        if column is None or column.get("analysis_role") not in ALLOWED_FILTER_ROLES:
+        if column is None:
+            raise FilterValidationError(f"Column not filterable: {f.get('column')!r}")
+        if f.get("op") == "date_between":
+            if column.get("analysis_role") != "temporal_dimension" or not column.get("is_date"):
+                raise FilterValidationError(f"Date filter requires a typed date column: {f['column']}")
+            values = f.get("values")
+            if not isinstance(values, list) or len(values) != 2:
+                raise FilterValidationError("Date filter requires a start and end date")
+            try:
+                start, end = (date.fromisoformat(value) for value in values)
+            except (TypeError, ValueError) as exc:
+                raise FilterValidationError("Dates must use YYYY-MM-DD format") from exc
+            if any(not isinstance(value, str) or value != parsed.isoformat()
+                   for value, parsed in zip(values, (start, end), strict=True)) or start > end:
+                raise FilterValidationError("Date range must use valid ascending YYYY-MM-DD dates")
+            validated.append(f)
+            continue
+        if column.get("analysis_role") not in ALLOWED_FILTER_ROLES:
             raise FilterValidationError(f"Column not filterable: {f.get('column')!r}")
         if f.get("op") == "between" and not column.get("is_numeric"):
             raise FilterValidationError(f"'between' requires a numeric column: {f['column']}")
+        if f.get("op") == "between":
+            values = f.get("values")
+            if not isinstance(values, list) or len(values) != 2:
+                raise FilterValidationError("Numeric range requires a minimum and maximum")
+            if any(isinstance(value, bool) or not isinstance(value, int | float)
+                   or not math.isfinite(value) for value in values) or values[0] > values[1]:
+                raise FilterValidationError("Numeric range must contain finite ascending numbers")
         if not f.get("values"):
             continue
         validated.append(f)
@@ -65,14 +92,17 @@ def build_where_clause(filters: list[dict[str, Any]]) -> tuple[str, list[Any]]:
     for f in filters:
         column = _quote_identifier(f["column"])
         if f["op"] == "in":
-            values = [str(v) for v in f["values"]]
+            values = [category_filter_value(f["column"], v) for v in f["values"]]
             placeholders = ", ".join(["?"] * len(values))
-            clauses.append(f"CAST({column} AS VARCHAR) IN ({placeholders})")
+            clauses.append(f"{category_expression(f['column'])} IN ({placeholders})")
             params.extend(values)
         elif f["op"] == "between":
             lo, hi = f["values"][0], f["values"][1]
             clauses.append(f"{column} BETWEEN ? AND ?")
             params.extend([lo, hi])
+        elif f["op"] == "date_between":
+            clauses.append(f"CAST({column} AS DATE) BETWEEN CAST(? AS DATE) AND CAST(? AS DATE)")
+            params.extend(f["values"])
     return " AND ".join(clauses), params
 
 
@@ -110,7 +140,7 @@ def _populate_line_multi(
     opt["xAxis"]["data"] = [str(r[0]) for r in rows]
     for index, _col in enumerate(y_cols):
         opt["series"][index]["data"] = [
-            round(float(r[index + 1]), 2) if r[index + 1] is not None else 0 for r in rows
+            round(float(r[index + 1]), 2) if r[index + 1] is not None else None for r in rows
         ]
     return True
 
@@ -153,7 +183,7 @@ def _populate_bar(
     x_col, y_col = cols.get("x"), cols.get("y")
     if not (x_col and y_col):
         return False
-    x_identifier, y_identifier = _quote_identifier(x_col), _quote_identifier(y_col)
+    x_identifier, y_identifier = category_expression(x_col), _quote_identifier(y_col)
     aggregation = cols.get("aggregation", "sum")
     if aggregation == "percent_rate":
         agg_expr = f"100.0 * AVG({y_identifier})"
@@ -163,7 +193,7 @@ def _populate_bar(
         agg_expr = f"SUM({y_identifier})"
     rows = conn.execute(
         f"""
-        SELECT CAST({x_identifier} AS VARCHAR), {agg_expr} as value
+        SELECT CAST({x_identifier} AS VARCHAR), {agg_expr} as value, COUNT(*) as applicants
         FROM data
         WHERE {x_identifier} IS NOT NULL AND {y_identifier} IS NOT NULL{_extra_and(filter_sql)}
         GROUP BY {x_identifier}
@@ -172,8 +202,10 @@ def _populate_bar(
         """,
         filter_params,
     ).fetchall()
-    labels = [str(r[0]) for r in rows]
+    labels = [category_label(x_col, r[0]) for r in rows]
     values = [round(float(r[1]), 2) for r in rows]
+    counts = [int(r[2]) for r in rows]
+    opt["_group_counts"] = dict(zip(labels, counts, strict=True))
     if cols.get("orientation") == "horizontal":
         opt["yAxis"]["data"] = labels[::-1]
         opt["series"][0]["data"] = values[::-1]
@@ -202,9 +234,9 @@ def _populate_stacked_bar(
     x_col, y_col, series_col = cols.get("x"), cols.get("y"), cols.get("series_by")
     if not (x_col and y_col and series_col):
         return False
-    x_identifier = _quote_identifier(x_col)
+    x_identifier = category_expression(x_col)
     y_identifier = _quote_identifier(y_col)
-    series_identifier = _quote_identifier(series_col)
+    series_identifier = category_expression(series_col)
     # SUM and COUNT rather than the aggregate itself: values that say nothing
     # ("Exempt under Section 43...", "Unknown") are folded into one series
     # below, and an average has to be re-derived over the folded group rather
@@ -232,8 +264,8 @@ def _populate_stacked_bar(
     sums: dict[tuple[str, str], float] = {}
     counts: dict[tuple[str, str], int] = {}
     for category, series_value, total, count in rows:
-        category_name = str(category)
-        label = str(series_value)
+        category_name = category_label(x_col, category)
+        label = category_label(series_col, series_value)
         if is_unreported_category(label):
             label = _UNREPORTED_SERIES
         key = (category_name, label)
@@ -259,10 +291,10 @@ def _populate_stacked_bar(
     opt["series"] = [
         {
             "type": "bar",
-            "stack": "total",
+            **({} if averaged else {"stack": "total"}),
             "name": name,
             "emphasis": {"focus": "series"},
-            "data": [round(by_pair.get((category, name), 0.0), 2) for category in categories],
+            "data": [round(by_pair[(category, name)], 2) if (category, name) in by_pair else (None if averaged else 0.0) for category in categories],
         }
         for name in series_names
     ]
@@ -280,7 +312,7 @@ def _populate_donut(
     cat_col = cols.get("category")
     if not cat_col:
         return False
-    cat_identifier = _quote_identifier(cat_col)
+    cat_identifier = category_expression(cat_col)
     rows = conn.execute(
         f"""
         SELECT CAST({cat_identifier} AS VARCHAR), COUNT(*) as cnt
@@ -292,7 +324,22 @@ def _populate_donut(
         """,
         filter_params,
     ).fetchall()
-    opt["series"][0]["data"] = [{"name": str(r[0]), "value": int(r[1])} for r in rows]
+    opt["series"][0]["data"] = [{"name": category_label(cat_col, r[0]), "value": int(r[1])} for r in rows]
+    return True
+
+
+def _populate_record_count(conn, opt, cols, filter_sql, filter_params) -> bool:
+    column = cols.get("category")
+    if not column:
+        return False
+    expression = category_expression(column)
+    rows = conn.execute(
+        f"SELECT {expression}, COUNT(*) AS n FROM data "
+        f"WHERE {expression} IS NOT NULL{_extra_and(filter_sql)} "
+        f"GROUP BY {expression} ORDER BY n DESC LIMIT 15", filter_params,
+    ).fetchall()
+    opt["yAxis"]["data"] = [category_label(column, row[0]) for row in reversed(rows)]
+    opt["series"][0]["data"] = [int(row[1]) for row in reversed(rows)]
     return True
 
 
@@ -384,11 +431,7 @@ def _histogram_edges(values: list[float], min_value: float, max_value: float) ->
 
 
 def _format_band_value(value: float) -> str:
-    if abs(value) >= 1_000_000:
-        return f"{value / 1_000_000:,.0f}M"
-    if abs(value) >= 1_000:
-        return f"{value / 1_000:,.0f}K"
-    return f"{value:,.0f}"
+    return f"{value:,.2f}".rstrip("0").rstrip(".") if value % 1 else f"{value:,.0f}"
 
 
 def _populate_histogram(
@@ -413,6 +456,8 @@ def _populate_histogram(
     ).fetchall()
     values = [float(row[0]) for row in rows if row[0] is not None]
     if not values:
+        opt["xAxis"]["data"] = []
+        opt["series"][0]["data"] = []
         return True
     min_value, max_value = min(values), max(values)
     if min_value == max_value:
@@ -428,8 +473,8 @@ def _populate_histogram(
             if value < edges[index + 1] or index == len(counts) - 1:
                 counts[index] += 1
                 break
-    # The top band ends at the largest value, which formats to the same rounded
-    # label as its start ("5K-5K" for 5,000 to 5,118). Read it as open-ended.
+    # Very narrow bands can have identical rounded limits. Avoid displaying
+    # a zero-width range when the underlying full-precision limits differ.
     opt["xAxis"]["data"] = [
         f"{_format_band_value(edges[i])}+"
         if _format_band_value(edges[i]) == _format_band_value(edges[i + 1])
@@ -458,10 +503,15 @@ def populate_chart_option(
     chart_type = chart.get("type")
 
     matched = False
+    if cols.get("survey_fields"):
+        from app.analytics.survey_context import populate_survey
+        return populate_survey(conn, chart, filter_sql, filter_params)
     if chart_type == "line" and cols.get("ys"):
         matched = _populate_line_multi(conn, opt, cols, filter_sql, filter_params)
     elif chart_type == "line":
         matched = _populate_line_single(conn, opt, cols, filter_sql, filter_params)
+    elif chart_type == "bar" and cols.get("aggregation") == "count":
+        matched = _populate_record_count(conn, opt, cols, filter_sql, filter_params)
     elif chart_type == "bar" and cols.get("series_by"):
         matched = _populate_stacked_bar(conn, opt, cols, filter_sql, filter_params)
     elif chart_type == "bar":
@@ -505,18 +555,25 @@ def recompute_kpi(
     is_percent: bool,
     filter_sql: str = "",
     filter_params: list[Any] | None = None,
+    weighted_by: str | None = None,
 ) -> float | None:
     """Re-aggregate a single KPI column under a filter, using the same
     SUM/AVG/percent-rate choice the original KPI was computed with."""
     filter_params = filter_params or []
     col = _quote_identifier(column)
     if is_percent:
-        expr = f"100.0 * AVG({col})"
+        expr = f"100.0 * ROUND(AVG({col}), 12)" if column == "chance_of_admit" else f"100.0 * AVG({col})"
+    elif weighted_by:
+        weight = _quote_identifier(weighted_by)
+        expr = f"SUM({col} * {weight}) / NULLIF(SUM({weight}), 0)"
     elif is_total:
         expr = f"SUM({col})"
     else:
         expr = f"AVG({col})"
-    where_sql = f" WHERE {filter_sql}" if filter_sql else ""
+    conditions = [filter_sql] if filter_sql else []
+    if weighted_by and not is_percent:
+        conditions.extend([f"{col} IS NOT NULL", f"{weight} IS NOT NULL", f"{weight} > 0"])
+    where_sql = f" WHERE {' AND '.join(conditions)}" if conditions else ""
     row = conn.execute(f"SELECT {expr} FROM data{where_sql}", filter_params).fetchone()
     if not row or row[0] is None:
         return None

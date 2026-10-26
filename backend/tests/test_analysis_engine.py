@@ -75,10 +75,20 @@ def test_several_anomalies_become_one_card():
 
     title, description = consolidated_anomaly_card(anomalies)
 
-    # "Standout records in 3 measures" put three analyst words in one heading.
-    assert title == "Unusual figures in 3 areas"
+    assert title == "3 unusual results found"
     assert description.startswith("One entry reached 5,118.30 for Cost.")
     assert description.endswith("Variance and Benefits also look unusual.")
+
+
+def test_repeated_anomaly_labels_are_listed_once():
+    title, description = consolidated_anomaly_card([
+        {"title": "Unusually high or low Weekly Sales", "description": "Peak sales."},
+        {"title": "Unexpected weekly_sales movement", "description": "2010 peak."},
+        {"title": "Unexpected weekly_sales movement", "description": "2011 peak."},
+    ])
+
+    assert title == "3 unusual results found"
+    assert description == "Peak sales. Unexpected Weekly Sales movement also looks unusual."
 
 
 def test_only_money_charts_are_tagged_with_the_currency():

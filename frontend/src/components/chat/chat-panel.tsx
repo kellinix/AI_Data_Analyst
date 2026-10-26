@@ -7,6 +7,10 @@ import { X, Send, Loader2, Bot } from "lucide-react"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { chatApi } from "@/lib/api/chat"
+import { analysesApi } from "@/lib/api/analyses"
+import { parseDashboardCommand } from "@/lib/dashboard-commands"
+import { useDashboardContext } from "@/contexts/dashboard-context"
+import { useFilterContext } from "@/contexts/filter-context"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { ChatMessage } from "@/components/chat/chat-message"
 import type { ChartConfig } from "@/types"
@@ -15,6 +19,7 @@ const EChartsReact = dynamic(() => import("echarts-for-react"), { ssr: false })
 
 interface ChatPanelProps {
   analysisId: string
+  charts: ChartConfig[]
   onClose: () => void
 }
 
@@ -25,9 +30,13 @@ const SUGGESTIONS = [
   "What should we focus on next?",
 ]
 
-export function ChatPanel({ analysisId, onClose }: ChatPanelProps) {
+export function ChatPanel({ analysisId, charts, onClose }: ChatPanelProps) {
+  const dashboard = useDashboardContext()
+  const { activeFilters } = useFilterContext()
   const queryClient = useQueryClient()
   const [input, setInput] = useState("")
+  const [dashboardNotice, setDashboardNotice] = useState<string | null>(null)
+  const [commandBusy, setCommandBusy] = useState(false)
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null)
   const [activeChart, setActiveChart] = useState<ChartConfig | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -108,16 +117,40 @@ export function ChatPanel({ analysisId, onClose }: ChatPanelProps) {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
   }, [messages])
 
-  const handleSend = () => {
+  const handleSend = async () => {
     const trimmed = input.trim()
-    if (!trimmed || sendMessage.isPending || !activeSessionId) return
+    if (!trimmed || sendMessage.isPending || commandBusy) return
+    if (/^(?:(?:hide|show|move|color|colour) chart|(?:pin|unpin) metric|undo dashboard|save filters)\b/i.test(trimmed)) {
+      setCommandBusy(true)
+      try {
+        const metrics = /^(pin|unpin)\b/i.test(trimmed) ? await analysesApi.listMetrics(analysisId) : []
+        const { command, error } = parseDashboardCommand(trimmed, charts, metrics)
+        if (error) { setDashboardNotice(error); return }
+        if (command && dashboard?.layout) {
+          const saved = await dashboard.edit(command.action, command.chartId, command.metricFamilyId,
+            command.action === "save_filters" ? activeFilters : undefined, command.palette)
+          setDashboardNotice(saved ? `Dashboard updated: ${trimmed}` : "Could not save this dashboard change. Try again.")
+          if (saved) setInput("")
+          return
+        }
+        setDashboardNotice("Dashboard editor is still loading. Try again in a moment.")
+      } catch {
+        setDashboardNotice("Could not check the dashboard command. Try again.")
+      } finally { setCommandBusy(false) }
+      return
+    }
+    if (!activeSessionId) {
+      setDashboardNotice("The data chat is still connecting. Try again in a moment.")
+      return
+    }
+    setDashboardNotice(null)
     sendMessage.mutate(trimmed)
   }
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()
-      handleSend()
+      void handleSend()
     }
   }
 
@@ -140,7 +173,7 @@ export function ChatPanel({ analysisId, onClose }: ChatPanelProps) {
             <p className="text-sm font-semibold text-zinc-900 dark:text-white">
               Data Assistant
             </p>
-            <p className="text-[11px] text-zinc-400">Ask anything about your data</p>
+            <p className="text-[11px] text-zinc-400">Ask about data or edit this dashboard</p>
           </div>
         </div>
         <button
@@ -163,6 +196,7 @@ export function ChatPanel({ analysisId, onClose }: ChatPanelProps) {
               <ChatMessage
                 key={msg.id}
                 message={msg}
+                analysisId={analysisId}
                 onOpenChart={setActiveChart}
               />
             ))}
@@ -209,29 +243,33 @@ export function ChatPanel({ analysisId, onClose }: ChatPanelProps) {
 
       {/* Input */}
       <div className="border-t border-zinc-200 p-4 dark:border-zinc-800">
+        {dashboardNotice && <p role="status" className="mb-2 rounded-lg bg-violet-50 p-2 text-xs text-violet-800 dark:bg-violet-950/40 dark:text-violet-200">{dashboardNotice}</p>}
         <div className="flex items-end gap-2 rounded-xl border border-zinc-200 bg-white p-2.5 focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-400/20 dark:border-zinc-700 dark:bg-zinc-800 dark:focus-within:border-blue-500">
           <textarea
             ref={inputRef}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Ask about your data..."
+            placeholder='Ask about data or type: hide chart "Title"'
             rows={1}
             className="flex-1 resize-none bg-transparent text-sm text-zinc-900 placeholder-zinc-400 outline-none dark:text-white"
             style={{ maxHeight: 120 }}
           />
           <button
-            onClick={handleSend}
-            disabled={!input.trim() || sendMessage.isPending || !activeSessionId}
+            onClick={() => void handleSend()}
+            disabled={!input.trim() || sendMessage.isPending || commandBusy}
             className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-blue-600 text-white transition-colors hover:bg-blue-500 disabled:opacity-40"
           >
-            {sendMessage.isPending ? (
+            {sendMessage.isPending || commandBusy ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
             ) : (
               <Send className="h-3.5 w-3.5" />
             )}
           </button>
         </div>
+        <p className="mt-2 text-center text-[10px] text-zinc-500 dark:text-zinc-400">
+          Editor: hide/show chart “Title” · colour chart “Title” ocean · pin metric “Name” · save filters · undo dashboard
+        </p>
         <p className="mt-1.5 text-center text-[10px] text-zinc-400">
           AI-generated · Results may contain errors
         </p>

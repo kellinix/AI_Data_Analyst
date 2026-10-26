@@ -14,7 +14,7 @@ export default function RegisterPage() {
           Create your account
         </h1>
         <p className="text-sm text-zinc-500 dark:text-zinc-400">
-          Start analysing your data with AI — free for 14 days
+          Start with a free account
         </p>
       </div>
       <Suspense fallback={null}>

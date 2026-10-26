@@ -26,3 +26,9 @@ def test_distinct_evidence_is_kept():
     deterministic = [{"title": "Review standout Chol", "evidence": "One record reached 564.00."}]
 
     assert len(_merge_recommendations(ai, deterministic)) == 2
+
+
+def test_same_field_coverage_finding_is_not_repeated_with_different_wording():
+    ai = [{"title": "Missing values in Sr #_2", "evidence": "52.8% of Sr #_2 is missing"}]
+    deterministic = [{"title": "Review coverage", "evidence": "Sr #_2 has 231 missing entries", "data": {"column": "Sr #_2"}}]
+    assert len(_merge_recommendations(ai, deterministic)) == 1

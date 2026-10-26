@@ -122,12 +122,20 @@ class SemanticWrangler:
         }
         if df.is_empty():
             return SemanticWrangleResult(df, report)
+        from app.analytics.survey_context import survey_fields
+        if survey_fields([{"name": name} for name in df.columns]):
+            report["method"] = "preserve_structured_survey_categories"
+            return SemanticWrangleResult(df, report)
 
         cleaned = df.clone()
         candidate_columns = []
         candidate_counts = []
         for column in _candidate_category_columns(cleaned):
             counts = _string_value_counts(cleaned[column])
+            tokens = set(re.findall(r"[a-z]+", column.lower()))
+            code_values = sum(bool(re.fullmatch(r"[a-z]{1,8}\d+[a-z]?(?:_[a-z0-9]+)*", value, re.I)) for value in counts)
+            if tokens & {"code", "id", "key", "identifier"} or column.lower().endswith("code") or code_values >= max(2, len(counts) * .5):
+                continue
             if 2 <= len(counts) <= settings.semantic_wrangling_max_unique_values:
                 candidate_columns.append(column)
                 candidate_counts.append(counts)
