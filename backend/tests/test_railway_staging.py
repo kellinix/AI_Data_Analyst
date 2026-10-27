@@ -1,6 +1,9 @@
 import sys
 from types import SimpleNamespace
 
+import pytest
+
+from app.core.config import Settings
 from scripts import run_railway_staging
 
 
@@ -44,3 +47,34 @@ def test_non_root_runtime_leaves_volume_ownership_untouched(monkeypatch):
         SimpleNamespace(geteuid=lambda: 1001),
     )
     run_railway_staging.prepare_upload_volume()
+
+
+@pytest.mark.parametrize(
+    "configured, expected",
+    [
+        (
+            "https://zephyr-web-staging.up.railway.app",
+            ["https://zephyr-web-staging.up.railway.app"],
+        ),
+        (
+            "https://a.example, https://b.example",
+            ["https://a.example", "https://b.example"],
+        ),
+        (
+            '["http://localhost:3000", "http://localhost:8081"]',
+            ["http://localhost:3000", "http://localhost:8081"],
+        ),
+    ],
+)
+def test_cors_origins_accept_railway_url_and_existing_json(monkeypatch, configured, expected):
+    monkeypatch.delenv("CORS_ORIGINS", raising=False)
+    monkeypatch.setenv("BACKEND_CORS_ORIGINS", configured)
+
+    settings = Settings(
+        _env_file=None,
+        secret_key="test-secret",
+        openai_api_key="test-openai-key",
+        database_url="postgresql://test:test@localhost:5432/test",
+    )
+
+    assert settings.cors_origins == expected

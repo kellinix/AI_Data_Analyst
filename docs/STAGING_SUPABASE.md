@@ -8,17 +8,19 @@ the Supabase project supplies authentication. Its database connection string
 shown in the dashboard is not an application database credential until a
 password and architecture choice have been supplied.
 
-The new project is healthy but currently has no users, Google sign-in is
-disabled, its Auth Site URL is `http://localhost:3000`, and its redirect allow
-list is empty (checked 22 October 2026). Zephyr's current local web, mobile and
+The new project is healthy, Google sign-in is disabled, its Auth Site URL is
+`http://localhost:3000`, and its redirect allow list is empty (checked
+27 October 2026). Zephyr's current local web, mobile and
 backend `.env` files still point to the earlier project. Do not mix the earlier
 project's publishable or service-role keys with this URL.
 
-For a separate staging deployment, use this project's publishable key for
-`NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_ANON_KEY`, and
-`EXPO_PUBLIC_SUPABASE_ANON_KEY` only where the corresponding client is deployed.
-Put its service-role key only in the backend's private environment. Never put
-that key in a `NEXT_PUBLIC_` or `EXPO_PUBLIC_` variable.
+For this staging deployment, use this project's browser-safe legacy `anon` key
+for `NEXT_PUBLIC_SUPABASE_ANON_KEY` and `SUPABASE_ANON_KEY`. The backend's
+account deletion endpoint currently uses the legacy `service_role` JWT as a
+Bearer token, so put this project's service-role key only in the backend's
+private environment. Never put that key in a `NEXT_PUBLIC_` or `EXPO_PUBLIC_`
+variable. New Supabase publishable and secret keys need a separate compatibility
+check before replacing these legacy values.
 
 Before testing sign-in, set the Auth Site URL to the staging HTTPS website and
 allow the exact web callback `https://<staging-host>/auth/callback`. If testing
@@ -32,25 +34,44 @@ Build the web image with `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_API_URL`,
 values. These are embedded at build time; changing the running container's
 environment cannot replace them. Keep the existing local configuration intact.
 
-Staging still needs its Railway HTTPS domains, staging credentials, and an
-end-to-end sign-in, upload, analysis and export check before it can serve as a
-release gate.
+Staging still needs a successful Railway deployment and an end-to-end sign-in,
+upload, analysis and export check before it can serve as a release gate.
 
 ## Railway staging layout
 
-Use Railway's generated HTTPS domain for the Next.js website and another for
-the backend. Build the frontend with those final domains because `NEXT_PUBLIC_`
-settings are embedded at build time. Set both domains in Supabase Auth only
-after Railway has assigned them.
+Railway assigned `zephyr-web-staging.up.railway.app` to the Next.js website and
+`zephyr-backend-staging.up.railway.app` to the backend during the first deployment.
+The web build uses Railway reference variables so its embedded URLs use these
+domains:
+
+```text
+NEXT_PUBLIC_APP_URL=https://${{RAILWAY_PUBLIC_DOMAIN}}
+NEXT_PUBLIC_API_URL=https://${{zephyr-backend.RAILWAY_PUBLIC_DOMAIN}}
+```
+
+The backend's `BACKEND_CORS_ORIGINS` and `FRONTEND_URL` reference
+`https://${{zephyr-web.RAILWAY_PUBLIC_DOMAIN}}`. Confirm the resolved URLs in
+Railway after deployment, then set the exact web URL and callback in Supabase
+Auth. Railway documents [reference variables](https://docs.railway.com/variables/reference)
+and makes system variables available to [Dockerfile builds](https://docs.railway.com/builds/dockerfiles).
 
 The private Railway project is `Zephyr Staging`, environment `staging`:
 https://railway.com/project/8ca3a5c8-32a4-4f08-b18e-b5153f490f91?environmentId=bbc12aea-ffcb-4ebd-aad0-51da55113de1.
 Postgres and Redis are online. The `zephyr-backend` and `zephyr-web` services
-are staged and connected to `kellinix/AI_Data_Analyst` on the isolated
-`staging/railway-2026-10-26` branch. They do not yet have environment variables
-or domains; do not deploy them until those settings are complete. The backend
+are connected to `kellinix/AI_Data_Analyst` on the isolated
+`staging/railway-2026-10-26` branch. Their staging Supabase credentials and a
+separate `OPENAI_API_KEY` are configured in Railway. The first deployment on
+27 October 2026 left both services offline: Railway rejected the web build's
+Next.js 15.3.3 security advisories, and the backend failed to start because
+Pydantic Settings tried to decode a plain CORS URL as JSON. Local fixes update
+Next.js and accept both plain and JSON CORS origin settings; these fixes need an
+approved redeployment before the services can be retested. The backend
 has a staged persistent volume mounted at `/app/uploads`. Railway's GitHub app
 has access to only the Zephyr repository.
+
+The compatible frontend dependency updates leave two high-severity npm audit
+findings: PostCSS bundled by Next.js 15 and Zod 3. Addressing them requires
+major-version upgrades and regression testing before a production release.
 
 Use a single backend service with root directory `/backend`. Configure its
 Dockerfile builder, pre-deploy command `alembic upgrade head`, start command
@@ -72,9 +93,11 @@ API and workers. This setup requires enough memory for the API plus DuckDB
 analysis and is not assumed to fit a free 512 MB service.
 
 Railway restored Trial builds and marked its October outage resolved on
-23 October 2026. The remaining deployment steps are configuring staging-only
-credentials, assigning HTTPS domains,
-and running end-to-end checks. Do not copy production credentials
+23 October 2026. The remaining steps are explicitly approving a deployment of
+the local fixes, setting Supabase's Auth Site URL to
+`https://zephyr-web-staging.up.railway.app`, allowing the exact
+`https://zephyr-web-staging.up.railway.app/auth/callback` redirect, and running
+end-to-end checks. Do not copy production credentials
 into staging. Railway recommends rotating any sensitive variables stored
 during the October 21 incident; this new workspace had none.
 

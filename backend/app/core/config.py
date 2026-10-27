@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+import json
 from functools import lru_cache
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import (
     AliasChoices,
@@ -9,7 +10,7 @@ from pydantic import (
     field_validator,
     model_validator,
 )
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -36,7 +37,7 @@ class Settings(BaseSettings):
         return self.environment == "production"
 
     # ── CORS ───────────────────────────────────────────────────────────────
-    cors_origins: list[str] = Field(
+    cors_origins: Annotated[list[str], NoDecode] = Field(
         default=["http://localhost:3000"],
         validation_alias=AliasChoices("CORS_ORIGINS", "BACKEND_CORS_ORIGINS"),
     )
@@ -47,7 +48,12 @@ class Settings(BaseSettings):
     @classmethod
     def parse_cors(cls, v: Any) -> list[str]:
         if isinstance(v, str):
-            return [origin.strip() for origin in v.split(",")]
+            if v.lstrip().startswith("["):
+                parsed = json.loads(v)
+                if not isinstance(parsed, list):
+                    raise ValueError("CORS origins must be a list")
+                return parsed
+            return [origin.strip() for origin in v.split(",") if origin.strip()]
         return v
 
     # ── Database ───────────────────────────────────────────────────────────
