@@ -2,9 +2,17 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from app.api.v1.endpoints.health import _database_error_types
 from app.main import app
 
 client = TestClient(app)
+
+
+def test_database_health_log_excludes_connection_details():
+    error = RuntimeError("postgresql://user:secret@private-host/database")
+    error.orig = ConnectionRefusedError("private-host")
+
+    assert _database_error_types(error) == ["RuntimeError", "ConnectionRefusedError"]
 
 
 def test_health_endpoint():
