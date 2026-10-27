@@ -16,10 +16,16 @@ from pathlib import Path
 
 def prepare_upload_volume() -> None:
     """Make Railway's root-owned volume writable, then drop root privileges."""
-    if not hasattr(os, "geteuid") or os.geteuid() != 0:
+    if not hasattr(os, "geteuid"):
         return
 
     import pwd
+
+    # asyncpg probes ~/.postgresql for TLS files. A stale HOME=/root makes
+    # that probe fail after the process switches to appuser.
+    if os.geteuid() != 0:
+        os.environ["HOME"] = pwd.getpwuid(os.geteuid()).pw_dir
+        return
 
     user = pwd.getpwnam("appuser")
     upload_dir = os.environ.get("UPLOAD_DIR", "/app/uploads")
@@ -28,6 +34,7 @@ def prepare_upload_volume() -> None:
     os.initgroups(user.pw_name, user.pw_gid)
     os.setgid(user.pw_gid)
     os.setuid(user.pw_uid)
+    os.environ["HOME"] = user.pw_dir
 
 
 def commands() -> list[list[str]]:
