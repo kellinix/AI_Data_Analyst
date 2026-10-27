@@ -194,7 +194,7 @@ function generateRelationshipSuggestions(
             type: "separate",
             title: "Single file analysis",
             description:
-              "Only one file was uploaded, so InsightFlow will analyse it on its own.",
+              "Only one file was uploaded, so Zephyr will analyse it on its own.",
             confidence: 1,
             columns: [],
             files: [files[0].original_filename],
@@ -736,7 +736,7 @@ export function UploadWorkspace() {
               Automatic relationship suggestions
             </h2>
             <p className="mt-0.5 text-xs text-zinc-500">
-              InsightFlow detected likely ways these files or sheets relate. Review them before starting analysis.
+              Zephyr detected likely ways these files or sheets relate. Review them before starting analysis.
             </p>
           </div>
 

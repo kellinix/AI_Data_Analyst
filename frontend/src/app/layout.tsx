@@ -6,11 +6,11 @@ import "./globals.css"
 
 export const metadata: Metadata = {
   title: {
-    template: "%s | InsightFlow",
-    default: "InsightFlow - Instant Data Insights",
+    template: "%s | Zephyr",
+    default: "Zephyr - Clear insights from your data",
   },
   description:
-    "Upload any dataset and get instant AI-powered charts, insights, and forecasts in seconds. No SQL. No coding.",
+    "Upload a spreadsheet to see clear charts, useful findings, and answers about your data.",
   keywords: [
     "data analysis",
     "AI insights",
@@ -19,26 +19,26 @@ export const metadata: Metadata = {
     "CSV analysis",
     "data visualisation",
   ],
-  authors: [{ name: "InsightFlow" }],
-  creator: "InsightFlow",
+  authors: [{ name: "Zephyr" }],
+  creator: "Zephyr",
   icons: {
     icon: "/logo/06-favicon-32x32-production.svg",
   },
   metadataBase: new URL(
-    process.env.NEXT_PUBLIC_APP_URL ?? "https://aidashboard.app"
+    process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"
   ),
   openGraph: {
     type: "website",
     locale: "en_US",
     url: "/",
-    title: "InsightFlow",
-    description: "Instant AI-powered data insights from any spreadsheet",
-    siteName: "InsightFlow",
+    title: "Zephyr",
+    description: "Clear charts, useful findings, and answers from your spreadsheet",
+    siteName: "Zephyr",
   },
   twitter: {
     card: "summary_large_image",
-    title: "InsightFlow",
-    description: "Instant AI-powered data insights from any spreadsheet",
+    title: "Zephyr",
+    description: "Clear charts, useful findings, and answers from your spreadsheet",
   },
   robots: {
     index: true,

@@ -21,13 +21,20 @@ def _connection(rows: list[tuple[date, float]]) -> duckdb.DuckDBPyConnection:
 
 
 def test_forecasts_a_contiguous_monthly_series():
-    rows = [(date(2025, month, 1), 1000.0 + month * 50) for month in range(1, 13)]
+    rows = [(date(2025, month, 1), 1000.0 + month * 50 + (month % 3) * 10) for month in range(1, 13)]
 
     forecasts = generate_forecasts(_connection(rows), SCHEMA, KPIS)
 
     assert len(forecasts) == 1
     assert forecasts[0]["metric"] == "revenue"
     assert forecasts[0]["observations"] == 12
+
+
+def test_skips_short_or_perfectly_linear_history_without_a_defensible_range():
+    short = [(date(2025, month, 1), 1000.0 + month * 50) for month in range(1, 4)]
+    straight = [(date(2025, month, 1), 1000.0 + month * 50) for month in range(1, 13)]
+    assert generate_forecasts(_connection(short), SCHEMA, KPIS) == []
+    assert generate_forecasts(_connection(straight), SCHEMA, KPIS) == []
 
 
 def test_skips_dates_scattered_across_years():

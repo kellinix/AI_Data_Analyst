@@ -16,6 +16,9 @@ from app.analytics.sql_utils import quote_identifier as _quote_identifier
 from app.analytics.time_series import is_dense_monthly_series
 
 
+MIN_FORECAST_MONTHS = 6
+
+
 def generate_forecasts(
     conn: duckdb.DuckDBPyConnection,
     schema: list[dict[str, Any]],
@@ -63,7 +66,7 @@ def _forecast_metric(
         ORDER BY 1
         """
     ).fetchall()
-    if len(rows) < 3:
+    if len(rows) < MIN_FORECAST_MONTHS:
         return None
     if not is_dense_monthly_series([row[0] for row in rows]):
         return None
@@ -73,6 +76,10 @@ def _forecast_metric(
     slope, intercept = np.polyfit(x, y, 1)
     fitted = slope * x + intercept
     residual_std = float(np.std(y - fitted)) if len(y) > 2 else 0.0
+    # A perfectly straight history provides no measured variation for a
+    # prediction range. Reporting identical bounds would imply certainty.
+    if residual_std < 1e-8:
+        return None
 
     horizons = {"next_month": 1, "next_quarter": 3, "next_year": 12}
     predictions: dict[str, dict[str, float]] = {}

@@ -12,7 +12,7 @@ from app.analytics.plain_language import plain_english
 from app.analytics.summary_evidence import _finite, _format
 from app.services.chat_evidence import _friendly_fact
 
-VERSION = "plain_business_v4"
+VERSION = "plain_business_v5"
 
 
 def business_text(text: Any) -> str:
@@ -68,6 +68,21 @@ def forecast_wording(data: dict[str, Any]) -> tuple[str, str] | None:
         # Estimates are approximate; extra decimal places suggest precision
         # the model does not have. Retain small values rather than round to 0.
         return f"{number:,.0f}" if abs(number) >= 100 else _format(number)
+    months = _finite(data.get("observations"))
+    if months is not None and 0 < months < 6:
+        return (
+            f"Too little history to forecast {label}",
+            f"There are only {int(months)} months of figures for {label}. "
+            "That is too little to make a dependable estimate for next month. "
+            "Review the trend again when more months of figures are available.",
+        )
+    if (lower is not None and upper is not None and lower <= value <= upper
+            and estimate(lower) == estimate(upper)):
+        return (
+            f"No dependable forecast range for {label}",
+            f"The available figures do not show how much next month's {label} could vary. "
+            "Wait for more varied monthly results before using a forecast to make plans.",
+        )
     monthly_total = data.get("method") == "linear_regression_monthly"
     text = (f"For {label}, next month's total is estimated at about {estimate(value)}."
             if monthly_total else f"For {label}, next month's estimate is about {estimate(value)}.")
@@ -85,9 +100,6 @@ def forecast_wording(data: dict[str, Any]) -> tuple[str, str] | None:
         text += " Check whether your plans still work at both ends of this range."
     else:
         text += " No usable range is available to show how far the estimate could vary. Avoid making a firm commitment from this estimate alone."
-    months = _finite(data.get("observations"))
-    if months is not None and 0 < months < 6:
-        text += f" There are only {int(months)} months of figures to learn from."
     if monthly_total:
         text += " These are totals across the entries dated in each month."
     text += " Use this as a planning guide, not a promise. Review it when the next month's figures arrive."
@@ -235,9 +247,30 @@ def _contextual_action(result: dict, data: dict, metadata: dict) -> None:
         wording = forecast_wording(forecast) if forecast else None
         if wording:
             data["column"] = forecast["metric"]
-            result["title"] = f"Check next month's plans for {_label(measure)}"
-            result["description"] = wording[1]
-            data["expected_impact"] = "Helps you see whether plans need room for a different result, without treating the estimate as certain."
+            if wording[0].startswith("What may happen next"):
+                result["title"] = f"Check next month's plans for {_label(measure)}"
+                result["description"] = wording[1]
+                data["expected_impact"] = "Helps you see whether plans need room for a different result, without treating the estimate as certain."
+            else:
+                short_history = wording[0].startswith("Too little history")
+                result["title"] = (
+                    f"Wait for more history before forecasting {_label(measure)}"
+                    if short_history else f"Wait for a usable range before forecasting {_label(measure)}"
+                )
+                result["description"] = wording[1]
+                data["evidence"] = (
+                    f"Only {forecast['observations']} months of figures are available for this forecast."
+                    if short_history
+                    else "The saved forecast range does not show meaningful variation."
+                )
+                data["source_evidence"] = data["evidence"]
+                data["problem"] = "This file does not yet support a dependable forecast for this figure."
+                data["supporting_figures"] = {
+                    "basis": "The saved figures do not support a dependable prediction range.",
+                    "figures": [{"label": "Months of figures", "value": forecast.get("observations")}],
+                    "context": {"Measure": _label(measure)},
+                }
+                data["expected_impact"] = "Helps avoid making plans from an estimate the file cannot support."
 
 
 def _quality_issue(issue: dict[str, Any]) -> dict[str, Any]:

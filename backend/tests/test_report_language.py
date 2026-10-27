@@ -138,12 +138,19 @@ def test_unusual_amounts_name_the_measure_limits_and_only_known_direction(kind, 
 
 
 def test_forecast_gives_a_baseline_range_and_practical_caution_for_short_history():
-    _, text = forecast_wording({"metric": "weekly_sales", "latest_value": 100, "observations": 3,
+    title, text = forecast_wording({"metric": "weekly_sales", "latest_value": 100, "observations": 3,
         "predictions": {"next_month": {"value": 120, "lower": 20, "upper": 220}}})
-    assert "latest month's figure was 100" in text
-    assert "range is wide" in text and "both ends of this range" in text
-    assert "only 3 months" in text and "next month's figures arrive" in text
-    assert "too early to say" in text and "possible rise" not in text
+    assert title == "Too little history to forecast weekly sales"
+    assert "only 3 months" in text and "dependable estimate" in text
+    assert "120" not in text and "20 to 220" not in text
+
+
+def test_identical_displayed_forecast_bounds_are_not_reported_as_certain():
+    title, text = forecast_wording({"metric": "sales", "latest_value": 100,
+        "observations": 12, "predictions": {"next_month": {
+            "value": 15080, "lower": 15079.99, "upper": 15080.01}}})
+    assert title == "No dependable forecast range for sales"
+    assert "15,080 to 15,080" not in text and "possible rise" not in text
 
 
 @pytest.mark.parametrize(("latest", "direction"), [(100, "rise"), (200, "fall")])
@@ -231,3 +238,33 @@ def test_legacy_forecast_action_keeps_its_measured_context_on_repeated_reads():
     assert shown["title"] == "Check next month's plans for revenue"
     assert "possible rise" in shown["description"] and shown["data"]["column"] == "revenue"
     assert present_insight(shown, metadata) == shown
+
+
+@pytest.mark.parametrize(("forecast", "title"), [
+    ({"metric": "weekly_sales", "latest_value": 14_700, "observations": 3,
+      "predictions": {"next_month": {"value": 15_080, "lower": 15_080, "upper": 15_080}}},
+     "Wait for more history before forecasting weekly sales"),
+    ({"metric": "weekly_sales", "latest_value": 14_700, "observations": 12,
+      "predictions": {"next_month": {"value": 15_080, "lower": 15_079.99, "upper": 15_080.01}}},
+     "Wait for a usable range before forecasting weekly sales"),
+])
+def test_saved_unsupported_forecast_action_does_not_recommend_the_estimate(forecast, title):
+    from app.api.v1.endpoints.analyses import _insight_dicts
+
+    original = {"type": "recommendation", "title": "Prepare for Weekly Sales increase",
+                "description": "Plan around 15,080", "data": {"confidence_source": "rule:forecast",
+                    "column": "weekly_sales", "problem": "Sales may rise to 15,080",
+                    "evidence": "3 months support a forecast of 15,080"}}
+    metadata = {"forecasts": [forecast]}
+    shown = present_insight(original, metadata)
+    assert shown["title"] == title
+    assert "15,080" not in shown["description"]
+    assert "15,080" not in shown["data"]["evidence"]
+    assert "15,080" not in str(shown["data"]["supporting_figures"])
+    assert "15,080" not in shown["data"]["problem"]
+    assert present_insight(shown, metadata) == shown
+
+    insight = SimpleNamespace(**original, sort_order=0, importance="medium")
+    exported = _insight_dicts(SimpleNamespace(insights=[insight], metadata_=metadata))[0]
+    assert exported["title"] == shown["title"]
+    assert "15,080" not in exported["description"]
