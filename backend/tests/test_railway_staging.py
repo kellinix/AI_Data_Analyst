@@ -1,4 +1,5 @@
 import sys
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -47,6 +48,14 @@ def test_non_root_runtime_leaves_volume_ownership_untouched(monkeypatch):
         SimpleNamespace(geteuid=lambda: 1001),
     )
     run_railway_staging.prepare_upload_volume()
+
+
+def test_celery_beat_schedule_uses_writable_upload_volume(monkeypatch):
+    monkeypatch.setenv("UPLOAD_DIR", "/app/uploads")
+
+    beat = run_railway_staging.commands()[2]
+
+    assert beat[-2:] == ["--schedule", str(Path("/app/uploads") / "celerybeat-schedule")]
 
 
 @pytest.mark.parametrize(

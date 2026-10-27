@@ -11,6 +11,7 @@ import signal
 import subprocess
 import sys
 import time
+from pathlib import Path
 
 
 def prepare_upload_volume() -> None:
@@ -33,13 +34,15 @@ def commands() -> list[list[str]]:
     port = int(os.environ.get("PORT", "8000"))
     if not 1 <= port <= 65535:
         raise ValueError("PORT must be a TCP port")
+    beat_schedule = Path(os.environ.get("UPLOAD_DIR", "/app/uploads")) / "celerybeat-schedule"
     return [
         ["gunicorn", "app.main:app", "--worker-class", "uvicorn.workers.UvicornWorker",
          "--workers", "1", "--bind", f"0.0.0.0:{port}", "--timeout", "120",
          "--access-logfile", "-", "--error-logfile", "-"],
         ["celery", "-A", "app.workers.celery_app", "worker", "--loglevel=warning",
          "--concurrency=1", "--queues=analysis,default,celery"],
-        ["celery", "-A", "app.workers.celery_app", "beat", "--loglevel=warning"],
+        ["celery", "-A", "app.workers.celery_app", "beat", "--loglevel=warning",
+         "--schedule", str(beat_schedule)],
     ]
 
 

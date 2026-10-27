@@ -8,9 +8,11 @@ the Supabase project supplies authentication. Its database connection string
 shown in the dashboard is not an application database credential until a
 password and architecture choice have been supplied.
 
-The new project is healthy, Google sign-in is disabled, its Auth Site URL is
-`http://localhost:3000`, and its redirect allow list is empty (checked
-27 October 2026). Zephyr's current local web, mobile and
+The new project is healthy. Its Auth Site URL is
+`https://zephyr-web-staging.up.railway.app`, and its only allowed redirect is
+`https://zephyr-web-staging.up.railway.app/auth/callback` (checked
+27 October 2026). Email sign-in is enabled; Google sign-in is still disabled.
+Zephyr's current local web, mobile and
 backend `.env` files still point to the earlier project. Do not mix the earlier
 project's publishable or service-role keys with this URL.
 
@@ -22,9 +24,8 @@ private environment. Never put that key in a `NEXT_PUBLIC_` or `EXPO_PUBLIC_`
 variable. New Supabase publishable and secret keys need a separate compatibility
 check before replacing these legacy values.
 
-Before testing sign-in, set the Auth Site URL to the staging HTTPS website and
-allow the exact web callback `https://<staging-host>/auth/callback`. If testing
-the native app against this project, also allow `zephyr://auth/callback`.
+The staging web Auth URL and callback are configured. If testing the native app
+against this project, also allow `zephyr://auth/callback`.
 Google sign-in needs a Google OAuth client configured for this new Supabase
 project; enabling the provider requires its own client ID and secret. Email
 confirmation is currently enabled.
@@ -63,9 +64,12 @@ are connected to `kellinix/AI_Data_Analyst` on the isolated
 separate `OPENAI_API_KEY` are configured in Railway. The first deployment on
 27 October 2026 left both services offline: Railway rejected the web build's
 Next.js 15.3.3 security advisories, and the backend failed to start because
-Pydantic Settings tried to decode a plain CORS URL as JSON. Local fixes update
-Next.js and accept both plain and JSON CORS origin settings; these fixes need an
-approved redeployment before the services can be retested. The backend
+Pydantic Settings tried to decode a plain CORS URL as JSON. The approved second
+deployment, commit `0d37bbb`, brought the web service online; its `/api/health`
+returns `ok`. The backend still failed: Celery Beat tried to write its schedule
+in the read-only app directory. The staging launcher now stores that schedule
+on the writable upload volume. Verify backend health after deploying this fix
+before end-to-end testing. The backend
 has a staged persistent volume mounted at `/app/uploads`. Railway's GitHub app
 has access to only the Zephyr repository.
 
@@ -93,11 +97,9 @@ API and workers. This setup requires enough memory for the API plus DuckDB
 analysis and is not assumed to fit a free 512 MB service.
 
 Railway restored Trial builds and marked its October outage resolved on
-23 October 2026. The remaining steps are explicitly approving a deployment of
-the local fixes, setting Supabase's Auth Site URL to
-`https://zephyr-web-staging.up.railway.app`, allowing the exact
-`https://zephyr-web-staging.up.railway.app/auth/callback` redirect, and running
-end-to-end checks. Do not copy production credentials
+23 October 2026. The remaining steps are confirming backend health, configuring Google
+sign-in for this separate Supabase project if it is part of staging acceptance,
+and running end-to-end checks. Do not copy production credentials
 into staging. Railway recommends rotating any sensitive variables stored
 during the October 21 incident; this new workspace had none.
 
