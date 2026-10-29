@@ -401,7 +401,16 @@ This PRD covers the **MVP through Version 1.0** of AI Dashboard Generator. Featu
 
 ## 12. Subscription Plans
 
-### 12.1 Plan Overview
+> **Pilot decision (29 October 2026):** Zephyr is available on the Free plan
+> while nontechnical users test the product. Pro early access is planned at an
+> introductory **£19/month**, but checkout is not open and users are not charged.
+> The current enforced allowances are Free: 5 analyses and 20 follow-up questions
+> each month, plus 100 MB of saved files; planned Pro maps to the existing
+> `starter` tier: 20 analyses and 100 follow-up questions each month, plus 1 GB
+> of saved files. Business is deferred. The table and trial/overage policy below
+> are earlier product targets, not live features or current plan entitlements.
+
+### 12.1 Earlier plan targets (not live)
 
 | Feature | **Free** | **Pro** (£29/mo) | **Business** (£99/mo) | **Enterprise** (Custom) |
 |---------|----------|-----------------|----------------------|------------------------|

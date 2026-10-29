@@ -3,6 +3,7 @@
 import { useForm } from "react-hook-form"
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
+import Link from "next/link"
 import { useQueryClient } from "@tanstack/react-query"
 import { isAxiosError } from "axios"
 import { zodResolver } from "@hookform/resolvers/zod"
@@ -117,6 +118,19 @@ export function SettingsForm() {
             {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Save changes"}
           </Button>
         </form>
+      </section>
+
+      <Separator />
+
+      <section className="rounded-2xl border bg-white p-6 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/60">
+        <h2 className="text-base font-semibold text-zinc-900 dark:text-white">Your plan</h2>
+        <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-300">
+          {profile?.plan === "starter" ? "Pro" : profile?.plan === "professional" ? "Business" : profile?.plan === "enterprise" ? "Enterprise" : "Free"}
+          {profile?.plan === "free" && " · No payment method needed"}
+        </p>
+        <Link href="/pricing" className="mt-3 inline-block text-sm font-semibold text-violet-700 hover:underline dark:text-violet-300">
+          See plan allowances and planned pricing
+        </Link>
       </section>
 
       <Separator />

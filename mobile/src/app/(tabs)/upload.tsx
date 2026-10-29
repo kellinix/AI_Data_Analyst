@@ -63,7 +63,7 @@ export default function Upload() {
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}><View style={{ flex: 1 }}><Label>Clean data before analysis</Label><Body>Normalize dates, text, and numeric formats.</Body></View><Switch accessibilityLabel="Clean data before analysis" value={clean} onValueChange={setClean} disabled={busy} trackColor={{ true: colors.blue }} /></View>
       {!clean && <Body>Raw mode preserves the original values; text-formatted dates may prevent forecasting.</Body>}
     </Card>}
-    {quotaFull && <ErrorNotice message="You’ve used your monthly analysis allowance. Wait for your next billing cycle or update your plan on the website." />}
+    {quotaFull && <ErrorNotice message="You’ve used your analysis allowance for this month. You can create more analyses next month." />}
     {error && <ErrorNotice message={error} />}
     {busy && <Body>{stage} {progress > 0 && progress < 100 ? `${progress}%` : ''}</Body>}
     <Button title="Create analysis" icon="sparkles-outline" loading={busy} disabled={!asset || !!quotaFull} onPress={() => void create()} />

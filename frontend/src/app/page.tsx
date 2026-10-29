@@ -95,6 +95,12 @@ export default function LandingPage() {
         <BrandLogo />
         <nav className="flex items-center gap-1">
           <a
+            href="/pricing"
+            className="rounded-lg px-3.5 py-2 text-sm font-medium text-zinc-500 transition-colors hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white"
+          >
+            Pricing
+          </a>
+          <a
             href="/login"
             className="rounded-lg px-3.5 py-2 text-sm font-medium text-zinc-500 transition-colors hover:text-zinc-900 dark:text-zinc-400 dark:hover:text-white"
           >
@@ -166,7 +172,7 @@ export default function LandingPage() {
                 transition={{ delay: 0.35 }}
                 className="text-xs text-zinc-400 dark:text-zinc-600"
               >
-                CSV · Excel · JSON · Parquet · TSV · Up to 500 MB
+                CSV · Excel · JSON · Parquet · TSV
               </motion.p>
             </motion.div>
           ) : (

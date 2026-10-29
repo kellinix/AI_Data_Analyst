@@ -116,8 +116,8 @@ def ensure_analysis_quota(user: User) -> None:
     if (user.analyses_this_month or 0) >= limits["analyses"]:
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail=f"Monthly analysis limit reached ({limits['analyses']}). "
-            "Upgrade your plan or wait for the next billing cycle.",
+            detail=f"You have used your {limits['analyses']} analyses for this month. "
+            "You can create more analyses next month.",
         )
 
 
@@ -126,8 +126,8 @@ def ensure_ai_query_quota(user: User) -> None:
     if (user.ai_queries_this_month or 0) >= limits["ai_queries"]:
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail=f"Monthly AI query limit reached ({limits['ai_queries']}). "
-            "Upgrade your plan or wait for the next billing cycle.",
+            detail=f"You have used your {limits['ai_queries']} follow-up questions for this month. "
+            "You can ask more questions next month.",
         )
 
 
@@ -136,6 +136,6 @@ def ensure_storage_quota(user: User, additional_bytes: int) -> None:
     if (user.storage_used_bytes or 0) + additional_bytes > limits["storage"]:
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
-            detail=f"Storage limit reached ({limits['storage'] // (1024 * 1024)} MB). "
-            "Delete old files or upgrade your plan.",
+            detail=f"Your saved files have reached the {limits['storage'] // (1024 * 1024)} MB allowance. "
+            "Delete files you no longer need to make room.",
         )
