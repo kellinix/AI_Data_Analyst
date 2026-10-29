@@ -61,6 +61,30 @@ def test_unexplained_row_changes_are_reported():
     assert any("does not explain" in n for n in evidence["limitations"])
 
 
+def test_unchanged_cleaning_does_not_claim_a_change_and_excluded_sheets_are_plain():
+    stats = {
+        "schema": [
+            {"name": "shipment_id"}, {"name": "shipdate"},
+            {"name": "amount"}, {"name": "boxes"},
+        ],
+        "parser": {"excluded_sheets": [{"name": "Calendar", "reason": "No shared table fields"}]},
+    }
+    evidence = analysis_evidence(stats, {"cleaning": {"enabled": True, "report": {
+        "input_rows": 20, "output_rows": 20,
+    }}})
+    assert any("shipment records" in note for note in evidence["limitations"])
+    assert any("Worksheet Calendar was kept separate" in note for note in evidence["limitations"])
+    assert not any("Cleaning changed" in note for note in evidence["limitations"])
+
+
+def test_old_file_explains_why_a_current_forecast_is_not_offered():
+    evidence = analysis_evidence(
+        {"schema": [], "date_range": {"shipdate": {"min": "2023-01-01", "max": "2023-12-31"}}},
+        {},
+    )
+    assert any("too old for a current" in note for note in evidence["limitations"])
+
+
 def test_cleaning_preserves_source_gaps_even_after_unknown_labels():
     df = pl.DataFrame({"customer_name": ["A", "B", "C", "D"], "region": ["North", None, " ", None]})
     cleaned, report = FileProcessor().clean_dataframe(

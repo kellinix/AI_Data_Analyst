@@ -18,6 +18,26 @@ def test_minor_optional_source_gap_does_not_become_a_recommendation():
     )
     assert not recs
 
+
+def test_repeated_compact_source_id_does_not_trigger_entity_warning():
+    recs = generate_recommendations(
+        kpis=[], data_quality={"issues": []}, anomalies=[], forecasts=[],
+        statistics={"entity_counts": [{"column": "spid", "populated_records": 100,
+                                       "distinct_values": 5, "repeated_records": 95}]},
+    )
+    assert not recs
+
+
+def test_high_football_stat_does_not_become_an_error_recommendation():
+    recs = generate_recommendations(
+        kpis=[], data_quality={"issues": []},
+        anomalies=[{"column": "pk", "value": 3, "description": "One player scored 3 penalties."}],
+        forecasts=[], statistics={"schema": [
+            {"name": name} for name in ("player", "squad", "comp", "pos", "gls")
+        ]},
+    )
+    assert not recs
+
 LONG_CONTEXT_KEY = (
     "ipa_delivery_confidence_assessment_a_delivery_confidence_assessment_of_the_"
     "project_at_a_fixed_point_in_time_using_a_three_point_scale_red_amber_green"

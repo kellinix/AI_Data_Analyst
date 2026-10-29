@@ -20,6 +20,8 @@ from app.analytics.kpi_detector import _classify_column, _is_currency, detect_kp
         ("total", "other"),
         ("whole_life_costs", "cost"),
         ("units_sold", "orders"),
+        ("total_cos_used", "orders"),
+        ("kwh_consumed", "orders"),
         ("new_customers", "customers"),
         ("avg_order_value", "average"),
         ("customer_satisfaction_rating", "average"),
@@ -75,6 +77,8 @@ def test_a_percentage_kpi_uses_the_cost_weighted_average_when_one_exists():
         ("money", "sum"),
         ("total", "sum"),
         ("units_sold", "sum"),
+        ("total_cos_used", "sum"),
+        ("kwh_consumed", "sum"),
         ("avg_order_value", "average"),
         ("conversion_rate", "average"),
         ("customer_satisfaction_rating", "average"),
@@ -96,6 +100,13 @@ def test_narrative_columns_are_not_currency():
     assert _is_currency("departmental_narrative_on_budgeted_whole_life_costs") is True  # "costs"
     assert _is_currency("departmental_narrative_on_schedule") is False
     assert _is_currency("total_revenue") is True
+
+
+def test_hired_flag_is_reported_as_a_share_of_applications():
+    schema = [{"name": "hired", "is_numeric": True, "is_date": False, "analysis_role": "flag"}]
+    kpis = detect_kpis(schema, {"hired": {"mean": .2, "count": 180}})
+    assert kpis[0]["value"] == 20
+    assert kpis[0]["is_percent"]
 
 
 def test_detect_revenue_kpi():
@@ -168,6 +179,14 @@ def test_fallback_kpi_shows_average_not_raw_sum():
 
     assert kpis[0]["value"] == 131.6
     assert kpis[0]["is_total"] is False
+
+
+def test_per_unit_cost_is_averaged_not_summed():
+    schema = [{"name": "cost_per_box", "is_numeric": True, "analysis_role": "metric"}]
+    stats = {"cost_per_box": {"total": 146.23, "mean": 5.85, "count": 25}}
+    kpi = detect_kpis(schema, stats)[0]
+    assert kpi["value"] == 5.85
+    assert kpi["is_total"] is False
 
 
 def test_kpi_is_currency():

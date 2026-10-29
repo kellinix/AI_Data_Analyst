@@ -8,6 +8,7 @@ import uuid
 from typing import Any
 
 from app.analytics.admission_context import is_admission
+from app.analytics.football_context import is_football
 from app.analytics.kpi_detector import is_outcome_column, uses_average_aggregation
 from app.analytics.labels import derive_label, sentence_label
 from app.analytics.report_relevance import useful_charts
@@ -52,11 +53,19 @@ def select_charts(
         if correlation is not None:
             charts.append(_scatter_chart("cgpa", "chance_of_admit", correlation))
         return charts[:max_charts]
+    if is_football(schema):
+        return [
+            _horizontal_bar_chart(group, measure, aggregation="sum")
+            for group, measure in (("comp", "gls"), ("comp", "ast"), ("pos", "gls"))
+            if (numeric_stats.get(measure) or {}).get("count", 0) > 0
+            and (categorical_stats.get(group) or {}).get("unique_count", 0) >= 2
+        ][:max_charts]
 
     date_cols = [
         c["name"]
         for c in schema
-        if c["is_date"] or c.get("analysis_role") == "temporal_dimension"
+        if (c["is_date"] or c.get("analysis_role") == "temporal_dimension")
+        and not _is_event_or_birth_date(c["name"])
     ]
     numeric_cols = [
         c["name"]
@@ -143,7 +152,8 @@ def select_charts(
         top_values = cat_stats.get("top_values", [])
         if len(top_values) >= 2 and numeric_cols and not any(chart.get("xAxis") == numeric_cols[0] and chart.get("yAxis") == cat_col for chart in charts):
             role = next((c.get("analysis_role") for c in schema if c["name"] == cat_col), None)
-            charts.append(_horizontal_bar_chart(cat_col, numeric_cols[0], top_values, aggregation="average" if role == "flag" else None))
+            charts.append(_horizontal_bar_chart(cat_col, numeric_cols[0], top_values,
+                                                aggregation="average" if role == "flag" else None))
         if len(charts) >= max_charts:
             break
 
@@ -156,6 +166,8 @@ def select_charts(
             charts.append(_stacked_bar_chart(primary_category, numeric_cols[0], status_col))
 
     for cat_col in categorical_cols:
+        if cat_col in {"sheet", "source_file"}:
+            continue
         cat_stats = categorical_stats.get(cat_col, {})
         top_values = cat_stats.get("top_values", [])
         unique_count = cat_stats.get("unique_count", 0)
@@ -226,6 +238,12 @@ def _has_usable_time_axis(
     return rows / span_months >= _MIN_TIME_AXIS_DENSITY
 
 
+def _is_event_or_birth_date(column: str) -> bool:
+    """Event milestones and birth dates do not describe reporting periods."""
+    normalized = _normalize(column)
+    return any(word in normalized.split("_") for word in ("birth", "born", "start", "end", "deadline", "due"))
+
+
 def _year_month(value: Any) -> tuple[int, int] | None:
     text = str(value or "")
     if len(text) < 7 or not text[:4].isdigit() or not text[5:7].isdigit():
@@ -252,7 +270,9 @@ def _is_business_metric(column: str) -> bool:
         or "coord" in parts
         or normalized == "id"
         or normalized.endswith("_id")
+        or "_id_" in normalized
         or normalized.startswith("id_")
+        or "_stats_" in normalized
         or normalized.startswith("is_")
         or normalized.startswith("has_")
     )
@@ -263,6 +283,8 @@ def _metric_priority(column: str) -> int:
     words = set(normalized.split("_"))
     if words & {"revenue", "sales", "turnover", "gmv"}:
         return 0
+    if normalized == "kwh_consumed":
+        return 1
     if words & {"amount", "money"} or normalized in {"total", "net_total", "grand_total"}:
         return 1
     if words & {"profit", "income", "earnings"}:
@@ -281,7 +303,7 @@ def _is_chart_dimension(
     categorical_stats: dict[str, Any],
 ) -> bool:
     role = column.get("analysis_role")
-    if role not in {"dimension", "temporal_dimension", "flag"}:
+    if role not in {"dimension", "flag"}:
         return False
 
     normalized = _normalize(column["name"])
@@ -290,15 +312,18 @@ def _is_chart_dimension(
     if (
         normalized == "id"
         or normalized.endswith("_id")
+        or "_id_" in normalized
         or normalized.startswith("id_")
+        or "_stats_" in normalized
         or "description" in normalized
+        or any(word in normalized for word in ("commentary", "narrative", "notes", "remarks"))
         or normalized in {"summary", "title", "headline"}
     ):
         return False
 
     stats = categorical_stats.get(column["name"], {})
     unique_count = stats.get("unique_count", 0)
-    if unique_count and unique_count > (8 if role == "flag" else 500):
+    if unique_count < 2 or unique_count > (8 if role == "flag" else 500):
         return False
     return True
 
@@ -453,12 +478,15 @@ def _horizontal_bar_chart(cat_col: str, value_col: str, top_values: list[dict] |
     value_label = _humanize(value_col)
     aggregation = aggregation or _aggregation(value_col)
     aggregation_word = "total" if aggregation == "sum" else "average"
+    measure_description = sentence_label(value_label)
+    if aggregation == "sum" and measure_description.lower().startswith("total "):
+        measure_description = measure_description[6:]
     title = f"{value_label} by {cat_label}" if aggregation == "sum" else f"Avg {value_label} by {cat_label}"
     return {
         "id": _chart_id(),
         "type": "bar",
         "title": title,
-        "description": f"Compares the {aggregation_word} {sentence_label(value_label)} across each {sentence_label(cat_label)}",
+        "description": f"Compares {aggregation_word} {measure_description} across {sentence_label(cat_label)} groups",
         "xAxis": value_col,
         "yAxis": cat_col,
         "series": [value_col],
@@ -633,15 +661,16 @@ def _relationship_strength(correlation: float) -> str:
 
 
 def _scatter_chart(col_a: str, col_b: str, correlation: float) -> dict[str, Any]:
-    direction = "rise together" if correlation > 0 else "move in opposite directions"
     label_a = _humanize(col_a)
     label_b = _humanize(col_b)
     strength = _relationship_strength(correlation)
+    direction = "higher" if correlation > 0 else "lower"
     return {
         "id": _chart_id(),
         "type": "scatter",
         "title": f"{label_a} vs {label_b}",
-        "description": f"A {strength} relationship: as {sentence_label(label_a)} changes, {sentence_label(label_b)} tends to {direction}",
+        "description": (f"A {strength} relationship in these records: higher {sentence_label(label_a)} "
+                        f"usually appears with {direction} {sentence_label(label_b)}."),
         "xAxis": col_a,
         "yAxis": col_b,
         "series": [col_a, col_b],

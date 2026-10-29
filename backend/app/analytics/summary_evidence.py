@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import math
+import re
 from typing import Any
 
+from app.analytics.labels import derive_label
 from app.analytics.semantic_detector import is_serial_identifier
 
 
@@ -36,23 +38,40 @@ def build_summary_facts(
     schema = {c["name"]: c for c in statistics.get("schema", [])}
     from app.analytics.record_context import record_context
 
-    sales_file = (record_context(statistics) or {}).get("kind") == "sales_transaction"
+    record_kind = (record_context(statistics) or {}).get("kind")
+    sales_file = record_kind == "sales_transaction"
+    clinic_wait = bool(statistics.get("clinic_wait_attended_only"))
     evidence = statistics.get("analysis_evidence") or {}
     sampled = bool(statistics.get("sample_truncated"))
     scope = "analysed sample" if sampled else "analysed file"
 
     def label(column: str) -> str:
+        normalized_column = re.sub(r"[^a-z0-9]+", "_", column.lower()).strip("_")
+        if normalized_column.startswith("ipa_delivery_confidence_assessment"):
+            return "Delivery confidence assessment"
+        if normalized_column.startswith("financial_year_baseline"):
+            return "Financial year baseline"
+        if normalized_column.startswith("financial_year_variance_pct"):
+            return "Budget change"
+        if normalized_column == "total_cos_used":
+            return "Certificates of sponsorship used"
+        if normalized_column == "kwh_consumed":
+            return "Electricity used (kWh)"
+        if record_kind == "shipment" and normalized_column == "amount":
+            return "Shipment amount"
+        if clinic_wait and normalized_column == "wait_minutes":
+            return "Wait time for attended appointments (minutes)"
         if sales_file and column in {"money", "total"}:
             return "Sales Amount"
         if sales_file and column == "cash_type":
             return "Payment Method"
-        fallback = column.replace("_", " ")
+        fallback = derive_label(column)
         display = str(schema.get(column, {}).get("display_label") or "")
         # Display metadata can be model-assisted. Accept formatting changes,
         # not a new business meaning such as relabelling revenue as profit.
         def normalized(value: str) -> str:
             return "".join(c for c in value.casefold() if c.isalnum())
-        return display if display and normalized(display) == normalized(column) else fallback[:1].upper() + fallback[1:]
+        return display if display and normalized(display) == normalized(column) else fallback
 
     def add(id: str, text: str, source: str, calculation: str,
             values: dict[str, Any], priority: int, required: bool = False) -> None:
@@ -95,14 +114,16 @@ def build_summary_facts(
     renamed = report.get("renamed_columns") or {}
     gaps = [issue for issue in source_issues if issue.get("type") == "missing_values"
             and schema.get(renamed.get(issue.get("column"), issue.get("column")), {}).get("analysis_role") != "identifier"
-            and max(1, rows * .1) <= int(issue.get("affected_rows") or 0) < int(report.get("input_rows") or rows)]
+            and max(1, rows * .1) <= int(issue.get("affected_rows") or 0) < min(
+                int(report.get("input_rows") or rows), rows * .8)]
     if gaps:
         issue = max(gaps, key=lambda item: int(item.get("affected_rows") or 0))
         column, missing_count = str(issue.get("column")), int(issue["affected_rows"])
         location = "source file" if source_quality else "analysed file"
         add("missing", f"{label(renamed.get(column, column))} has {missing_count:,} missing values in the {location}; confirm whether that field is required.",
             "data_quality.source_quality.issues" if source_quality else "data_quality.issues",
-            "Missing-value count for this field", {"column": column, "missing_values": missing_count}, 1, True)
+            "Missing-value count for this field", {"column": column, "missing_values": missing_count,
+                                                   "display_label": label(renamed.get(column, column))}, 1, True)
 
     for index, kpi in enumerate(kpis[:8]):
         column = str(kpi.get("column") or "")
@@ -125,6 +146,8 @@ def build_summary_facts(
             formatted += "%"
         elif kpi.get("is_currency") and kpi.get("currency_symbol"):
             formatted = str(kpi["currency_symbol"]) + formatted
+        if "currency_m" in column.lower() and operation == "total":
+            formatted += " million"
         if weighted:
             text = f"{label(column)} averages {formatted} when weighted by {label(str(weighted))}."
             calculation = f"SUM({column} * {weighted}) / SUM({weighted}), using supplied values and positive supplied weights"
@@ -135,12 +158,15 @@ def build_summary_facts(
             calculation = f"{'SUM' if operation == 'total' else 'AVG'}({column})" + (" * 100" if kpi.get("is_percent") else "")
         add(f"metric_{index}", text, f"numeric_stats.{column}.{operation}", calculation,
             {"column": column, "value": value, "operation": operation, "weighted_by": weighted,
-             "display_value": formatted, "display_label": label(column)}, 2 if index < 2 else 4)
+             "display_value": formatted, "display_label": label(column),
+             "is_percent": bool(kpi.get("is_percent")),
+             "weight_display_label": label(str(weighted)) if weighted else None}, 2 if index < 2 else 4)
 
     # A distinct-ID count only helps the headline when some records repeat an
     # ID. Otherwise it restates the record count and obscures measured results.
     entities = [entity for entity in statistics.get("entity_counts", [])
                 if not is_serial_identifier(str(entity["column"]))
+                and not re.fullmatch(r"[a-z]{1,5}id", str(entity["column"]).lower())
                 and int(entity.get("repeated_records") or 0) > 0][:3]
     for index, entity in enumerate(entities):
         column = str(entity["column"])
@@ -151,7 +177,8 @@ def build_summary_facts(
 
     category_index = 0
     for column, category in statistics.get("categorical_stats", {}).items():
-        if schema.get(column, {}).get("analysis_role") not in {"dimension", "flag"} or rows <= 0:
+        if (schema.get(column, {}).get("analysis_role") not in {"dimension", "flag"}
+                or column in {"sheet", "source_file"} or rows <= 0):
             continue
         top = [item for item in category.get("top_values", [])
                if 0 < int(item.get("count") or 0) <= rows]
@@ -159,6 +186,8 @@ def build_summary_facts(
             continue
         item = max(top, key=lambda item: item["count"])
         count = int(item["count"])
+        if count / rows < .1 or (category.get("unique_count") is not None and int(category["unique_count"]) < 2):
+            continue
         add(f"category_{category_index}", f"{label(column)} has {count:,} records labelled '{item['value']}' ({count / rows:.1%} of all {rows:,} analysed records).",
             f"categorical_stats.{column}.top_values", "Category count / all analysed records * 100",
             {"column": column, "category": item["value"], "count": count, "denominator": rows,

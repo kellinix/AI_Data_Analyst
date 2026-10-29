@@ -59,6 +59,7 @@ def build_pdf_report(
     summary: str | None,
     insights: list[dict[str, Any]],
     charts: list[dict[str, Any]] | None = None,
+    limitations: list[str] | None = None,
 ) -> bytes:
     """Render the analysis narrative and its saved dashboard charts."""
     buffer = io.BytesIO()
@@ -89,6 +90,11 @@ def build_pdf_report(
         for line in summary.splitlines():
             if line.strip():
                 story.append(Paragraph(escape(line.strip()), body))
+    if limitations:
+        story.append(Paragraph("What these results cover", heading))
+        for note in limitations[:8]:
+            if note.strip():
+                story.append(Paragraph(escape(note.strip()), body))
 
     visual_charts = normalise_charts(useful_charts(charts or []))
     if visual_charts:
@@ -111,9 +117,13 @@ def build_pdf_report(
             is_currency = data.get("is_currency")
             formatted = (
                 f"{_currency_prefix(data)}{value:,.2f}" if is_currency and isinstance(value, int | float)
+                else f"{value:,.2f}".rstrip("0").rstrip(".")
+                if data.get("unit") == "million" and isinstance(value, int | float)
                 else f"{value:,.0f}" if isinstance(value, int | float)
                 else str(value) if value is not None else "N/A"
             )
+            if data.get("unit") == "million" and isinstance(value, int | float):
+                formatted += " million"
             rows.append([kpi.get("title", ""), formatted])
         table = Table(rows, colWidths=[9 * cm, 6 * cm])
         table.setStyle(_table_style())
@@ -164,6 +174,7 @@ def build_excel_report(
     summary: str | None,
     insights: list[dict[str, Any]],
     charts: list[dict[str, Any]] | None = None,
+    limitations: list[str] | None = None,
 ) -> bytes:
     """Render a multi-sheet workbook with editable charts and source values."""
     buffer = io.BytesIO()
@@ -187,6 +198,10 @@ def build_excel_report(
         overview.write(4, 0, "Executive summary")
         overview.write(4, 1, summary, wrap_fmt)
         overview.set_row(4, 60)
+    if limitations:
+        overview.write(6, 0, "What these results cover")
+        overview.write(6, 1, "\n".join(note for note in limitations[:8] if note.strip()), wrap_fmt)
+        overview.set_row(6, min(200, 22 * len(limitations[:8])))
 
     kpis = _kpi_insights(insights)
     if kpis:
@@ -199,7 +214,8 @@ def build_excel_report(
             data = kpi.get("data") or {}
             value = data.get("value")
             is_currency = data.get("is_currency")
-            sheet.write(row, 0, kpi.get("title", ""))
+            unit = " (millions)" if data.get("unit") == "million" and "million" not in str(kpi.get("title", "")).lower() else ""
+            sheet.write(row, 0, f"{kpi.get('title', '')}{unit}")
             if isinstance(value, int | float):
                 fmt = None
                 if is_currency:

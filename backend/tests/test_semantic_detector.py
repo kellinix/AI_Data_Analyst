@@ -3,6 +3,27 @@ from __future__ import annotations
 from app.analytics.semantic_detector import enrich_schema_with_semantics
 
 
+def test_two_named_operational_groups_are_dimensions_not_boolean_flags():
+    schema = [{"name": name, "dtype": "VARCHAR", "is_numeric": False, "is_date": False}
+              for name in ("shift", "hiring_stage", "appointment_status")]
+    categories = {name: {"unique_count": 2, "top_values": [{"value": "A", "count": 50}, {"value": "B", "count": 50}]}
+                  for name in ("shift", "hiring_stage", "appointment_status")}
+    assert all(item["analysis_role"] == "dimension" for item in enrich_schema_with_semantics(schema, {}, categories))
+
+
+def test_rank_and_compact_ids_are_not_metrics_but_football_counts_are():
+    names = ["rk", "rk_stats_keeper", "shipmentid", "spid", "pid", "gid", "gls", "ast", "mp", "column_1"]
+    schema = [{"name": name, "dtype": "DOUBLE", "is_numeric": True, "is_date": False}
+              for name in names]
+    stats = {name: {"min": 0, "max": 10, "unique_count": 8, "count": 100}
+             for name in names}
+    roles = {item["name"]: item["analysis_role"]
+             for item in enrich_schema_with_semantics(schema, stats, {})}
+    assert all(roles[name] == "identifier" for name in names[:6])
+    assert all(roles[name] == "metric" for name in ("gls", "ast", "mp"))
+    assert roles["column_1"] == "unknown"
+
+
 def test_detects_currency_metric_from_column_name():
     schema = [{"name": "total_revenue", "dtype": "DOUBLE", "is_numeric": True, "is_date": False}]
     enriched = enrich_schema_with_semantics(schema, {"total_revenue": {}}, {})

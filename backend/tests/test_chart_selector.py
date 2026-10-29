@@ -1,6 +1,42 @@
 from __future__ import annotations
 
 from app.analytics.chart_selector import select_charts
+from app.analytics.report_relevance import useful_charts
+
+
+def test_football_rank_is_not_a_time_axis_and_goals_lead():
+    schema = [{"name": name, "is_numeric": name in {"gls", "ast", "mp"},
+               "is_date": name == "rk_stats_playing_time",
+               "analysis_role": "temporal_dimension" if name == "rk_stats_playing_time" else
+               "metric" if name in {"gls", "ast", "mp"} else "dimension"}
+              for name in ("player", "squad", "comp", "pos", "gls", "ast", "mp", "rk_stats_playing_time")]
+    stats = {name: {"count": 100, "min": 0, "max": 10} for name in ("gls", "ast", "mp")}
+    categories = {name: {"unique_count": 3, "top_values": [{"value": "A", "count": 50}, {"value": "B", "count": 50}]}
+                  for name in ("comp", "pos")}
+    charts = select_charts(schema, stats, categories, {}, {})
+    assert charts[0]["xAxis"] == "gls" and charts[0]["yAxis"] == "comp"
+    assert not any(chart.get("xAxis") == "rk_stats_playing_time" for chart in charts)
+
+
+def test_binary_group_does_not_change_sum_of_produced_units_to_average():
+    schema = [
+        {"name": "shift", "is_numeric": False, "is_date": False, "analysis_role": "dimension"},
+        {"name": "product_line", "is_numeric": False, "is_date": False, "analysis_role": "dimension"},
+        {"name": "units_produced", "is_numeric": True, "is_date": False, "analysis_role": "metric"},
+    ]
+    categories = {name: {"unique_count": 2, "top_values": [{"value": "A", "count": 50}, {"value": "B", "count": 50}]}
+                  for name in ("shift", "product_line")}
+    charts = select_charts(schema, {"units_produced": {"count": 100, "min": 1, "max": 200}}, categories, {}, {})
+    assert all(chart["aggregation"] == "sum" for chart in charts if chart.get("type") == "bar" and chart.get("xAxis") == "units_produced")
+
+
+def test_one_category_bar_is_not_presented_as_a_comparison():
+    chart = {"type": "bar", "title": "Budget by category", "xAxis": "budget", "yAxis": "category",
+             "echarts_option": {"yAxis": {"type": "category", "data": ["Infrastructure"]},
+                               "series": [{"type": "bar", "data": [7310]}]}}
+    assert useful_charts([chart]) == []
+    chart["echarts_option"]["yAxis"]["data"].append("IT")
+    assert useful_charts([chart]) == [chart]
 
 
 def test_chart_selector_ignores_numeric_attributes():

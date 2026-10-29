@@ -134,6 +134,27 @@ def test_joins_excel_sheets_with_shared_dimension_and_distinct_metrics():
     assert rows["Gamma Ltd"]["Skilled Worker & Tier 2"] == 40.0
 
 
+def test_repeated_fact_keys_do_not_collapse_shipments_when_lookup_sheet_is_present():
+    processor = FileProcessor()
+    sheets = {
+        "Shipments": pl.DataFrame({
+            "column_1": ["Shipment ID", *[str(index) for index in range(20)]],
+            "column_2": ["Product ID", *(["P1"] * 10 + ["P2"] * 10)],
+            "column_3": ["Amount", *["10"] * 20],
+        }),
+        "Products": pl.DataFrame({
+            "column_1": ["Product ID", "P1", "P2"],
+            "column_2": ["Product", "Chocolate", "Caramel"],
+        }),
+    }
+    report = {}
+    normalized = processor._normalize_excel_sheets(sheets, report)
+    assert normalized.height == 20
+    assert normalized["Amount"].sum() == 200
+    assert report["included_sheets"] == ["Shipments"]
+    assert report["excluded_sheets"][0]["name"] == "Products"
+
+
 def test_clean_dataframe_imputes_missing_values_and_drops_rows_without_metrics():
     processor = FileProcessor()
     df = pl.DataFrame(

@@ -19,6 +19,7 @@ from typing import Any
 import polars as pl
 from openai import AsyncOpenAI
 
+from app.analytics.football_context import LABELS as FOOTBALL_LABELS
 from app.analytics.labels import derive_label, sentence_label
 from app.analytics.plain_language import plain_english
 from app.analytics.text_matching import shorten_label
@@ -392,6 +393,13 @@ def apply_display_metadata_to_charts(
             "title": override.get("title") or _friendly_chart_title(chart, labels),
             "description": override.get("description") or chart.get("description"),
         }
+        if labels.get("amount") == "Shipment amount" and "amount" in {
+            chart.get("xAxis"), chart.get("yAxis"), *(chart.get("series") or [])
+        }:
+            chart_copy["description"] = re.sub(
+                r"(?<!shipment )\bamount\b", "shipment amount",
+                str(chart_copy.get("description") or ""), flags=re.I,
+            )
         if (chart.get("type") == "bar" and chart.get("xAxis") in {"money", "total"}
                 and labels.get(chart.get("xAxis")) == "Sales Amount" and not chart.get("series_by")):
             action = "Average" if chart.get("aggregation") == "average" else "Total"
@@ -529,7 +537,13 @@ def _fallback_display_metadata(
 ) -> dict[str, Any]:
     from app.analytics.record_context import record_context
 
-    sales_file = (record_context(statistics) or {}).get("kind") == "sales_transaction"
+    kind = (record_context(statistics) or {}).get("kind")
+    sales_file = kind == "sales_transaction"
+    sponsorship_use = kind == "sponsorship_use"
+    energy_readings = kind == "energy_reading"
+    shipments = kind == "shipment"
+    football = kind == "football_player"
+    clinic_wait = bool(statistics.get("clinic_wait_attended_only"))
     columns = [
         {
             "name": column.get("name"),
@@ -541,6 +555,13 @@ def _fallback_display_metadata(
                 {"money": "Sales Amount", "total": "Sales Amount",
                  "cash_type": "Payment Method"}.get(str(column.get("name")))
                 if sales_file and column.get("name") in {"money", "total", "cash_type"}
+                else {"total_cos_used": "Certificates of sponsorship used", "sheet": "Source sheet"}[str(column.get("name"))]
+                if sponsorship_use and column.get("name") in {"total_cos_used", "sheet"}
+                else "Electricity used (kWh)" if energy_readings and column.get("name") == "kwh_consumed"
+                else "Shipment amount" if shipments and column.get("name") == "amount"
+                else FOOTBALL_LABELS[str(column.get("name"))]
+                if football and column.get("name") in FOOTBALL_LABELS
+                else "Wait time for attended appointments (minutes)" if clinic_wait and column.get("name") == "wait_minutes"
                 else derive_label(str(column.get("name")))
                 or _humanize_identifier(str(column.get("name")))
             ),
@@ -595,10 +616,12 @@ def _merge_display_metadata(
                 # when it is genuinely shorter. A successful response can still
                 # hand back a column's entire definition as its "label", and
                 # readability should not depend on which one arrives.
-                "label": fallback_label if (
-                    (name in {"money", "total"} and fallback_label == "Sales Amount")
-                    or (name == "cash_type" and fallback_label == "Payment Method")
-                ) else _preferred_label(
+                "label": fallback_label if fallback_label in {
+                    "Sales Amount", "Payment Method", "Certificates of sponsorship used",
+                    "Source sheet", "Electricity used (kWh)",
+                    "Shipment amount", *FOOTBALL_LABELS.values(),
+                    "Wait time for attended appointments (minutes)",
+                } else _preferred_label(
                     str(item.get("label") or ""),
                     fallback_label,
                     name,

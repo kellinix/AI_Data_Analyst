@@ -7,6 +7,8 @@ grounded forecast ranges without claiming more certainty than the data supports.
 
 from __future__ import annotations
 
+from datetime import date
+from statistics import median
 from typing import Any
 
 import duckdb
@@ -14,7 +16,6 @@ import numpy as np
 
 from app.analytics.sql_utils import quote_identifier as _quote_identifier
 from app.analytics.time_series import is_dense_monthly_series
-
 
 MIN_FORECAST_MONTHS = 6
 
@@ -25,6 +26,7 @@ def generate_forecasts(
     kpis: list[dict[str, Any]],
     table: str = "data",
     max_forecasts: int = 3,
+    reference_date: date | None = None,
 ) -> list[dict[str, Any]]:
     date_columns = [column["name"] for column in schema if column.get("is_date")]
     if not date_columns:
@@ -42,7 +44,8 @@ def generate_forecasts(
 
     forecasts: list[dict[str, Any]] = []
     for metric_column in metric_columns[:max_forecasts]:
-        forecast = _forecast_metric(conn, table, date_columns[0], metric_column)
+        forecast = _forecast_metric(conn, table, date_columns[0], metric_column,
+                                    reference_date or date.today())
         if forecast:
             forecasts.append(forecast)
     return forecasts
@@ -53,12 +56,14 @@ def _forecast_metric(
     table: str,
     date_column: str,
     metric_column: str,
+    reference_date: date,
 ) -> dict[str, Any] | None:
     rows = conn.execute(
         f"""
         SELECT
             DATE_TRUNC('month', {_quote_identifier(date_column)}) AS period,
-            SUM({_quote_identifier(metric_column)}) AS value
+            SUM({_quote_identifier(metric_column)}) AS value,
+            COUNT(DISTINCT CAST({_quote_identifier(date_column)} AS DATE)) AS recorded_days
         FROM {_quote_identifier(table)}
         WHERE {_quote_identifier(date_column)} IS NOT NULL
           AND {_quote_identifier(metric_column)} IS NOT NULL
@@ -66,6 +71,21 @@ def _forecast_metric(
         ORDER BY 1
         """
     ).fetchall()
+    if len(rows) < MIN_FORECAST_MONTHS:
+        return None
+    # A monthly total from an old extract is not a forward forecast, and a
+    # final month with only a few recorded days is not a full comparison month.
+    latest_date = conn.execute(
+        f"SELECT MAX(CAST({_quote_identifier(date_column)} AS DATE)) "
+        f"FROM {_quote_identifier(table)} WHERE {_quote_identifier(metric_column)} IS NOT NULL"
+    ).fetchone()[0]
+    if latest_date is None or (reference_date - latest_date).days > 120:
+        return None
+    partial_last_month = (
+        len(rows) >= 4 and rows[-1][2] < median(row[2] for row in rows[-4:-1]) * .5
+    )
+    if partial_last_month:
+        rows = rows[:-1]
     if len(rows) < MIN_FORECAST_MONTHS:
         return None
     if not is_dense_monthly_series([row[0] for row in rows]):
@@ -106,6 +126,11 @@ def _forecast_metric(
         "date_column": date_column,
         "method": "linear_regression_monthly",
         "observations": len(rows),
+        "excluded_partial_last_month": partial_last_month,
+        "forecast_period": (
+            f"{rows[-1][0].year + (rows[-1][0].month == 12):04d}-"
+            f"{rows[-1][0].month % 12 + 1:02d}"
+        ),
         "latest_value": round(float(latest), 2),
         "monthly_slope": round(float(slope), 2),
         "change_percent_next_month": round(change_percent, 2),

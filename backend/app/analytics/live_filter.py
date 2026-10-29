@@ -126,14 +126,14 @@ def _populate_line_multi(
         for i, col in enumerate(y_cols)
     )
     x_identifier = _quote_identifier(x_col)
+    period_expr = _line_period_expression(conn, x_identifier, cols, filter_sql, filter_params)
     rows = conn.execute(
         f"""
-        SELECT CAST({x_identifier} AS VARCHAR) AS period, {select_columns}
+        SELECT CAST({period_expr} AS VARCHAR) AS period, {select_columns}
         FROM data
         WHERE {x_identifier} IS NOT NULL{_extra_and(filter_sql)}
-        GROUP BY {x_identifier}
-        ORDER BY {x_identifier}
-        LIMIT 100
+        GROUP BY {period_expr}
+        ORDER BY {period_expr}
         """,
         filter_params,
     ).fetchall()
@@ -156,21 +156,60 @@ def _populate_line_single(
     if not (x_col and y_col):
         return False
     x_identifier, y_identifier = _quote_identifier(x_col), _quote_identifier(y_col)
+    period_expr = _line_period_expression(conn, x_identifier, cols, filter_sql, filter_params)
     aggregate = "SUM" if cols.get("aggregation") == "sum" else "AVG"
     rows = conn.execute(
         f"""
-        SELECT CAST({x_identifier} AS VARCHAR), {aggregate}({y_identifier})
+        SELECT CAST({period_expr} AS VARCHAR), {aggregate}({y_identifier})
         FROM data
         WHERE {x_identifier} IS NOT NULL AND {y_identifier} IS NOT NULL{_extra_and(filter_sql)}
-        GROUP BY {x_identifier}
-        ORDER BY {x_identifier}
-        LIMIT 100
+        GROUP BY {period_expr}
+        ORDER BY {period_expr}
         """,
         filter_params,
     ).fetchall()
     opt["xAxis"]["data"] = [str(r[0]) for r in rows]
     opt["series"][0]["data"] = [round(float(r[1]), 2) if r[1] is not None else 0 for r in rows]
     return True
+
+
+def _line_period_expression(
+    conn: duckdb.DuckDBPyConnection, x_identifier: str, cols: dict[str, Any],
+    filter_sql: str, filter_params: list[Any],
+) -> str:
+    """Keep every date; group a crowded daily chart into full months."""
+    date_expr = f"TRY_CAST({x_identifier} AS DATE)"
+    if cols.get("time_grain") == "month":
+        _mark_partial_final_month(conn, date_expr, cols, filter_sql, filter_params)
+        return f"DATE_TRUNC('month', {date_expr})"
+    distinct_dates, unparseable = conn.execute(
+        f"""SELECT COUNT(DISTINCT {x_identifier}),
+                   COUNT(*) FILTER (WHERE {date_expr} IS NULL)
+            FROM data WHERE {x_identifier} IS NOT NULL{_extra_and(filter_sql)}""",
+        filter_params,
+    ).fetchone()
+    if distinct_dates > 100 and unparseable == 0:
+        cols["time_grain"] = "month"
+        _mark_partial_final_month(conn, date_expr, cols, filter_sql, filter_params)
+        return f"DATE_TRUNC('month', {date_expr})"
+    return x_identifier
+
+
+def _mark_partial_final_month(
+    conn: duckdb.DuckDBPyConnection, date_expr: str, cols: dict[str, Any],
+    filter_sql: str, filter_params: list[Any],
+) -> None:
+    from statistics import median
+
+    rows = conn.execute(
+        f"SELECT COUNT(DISTINCT {date_expr}) AS days FROM data "
+        f"WHERE {date_expr} IS NOT NULL{_extra_and(filter_sql)} "
+        f"GROUP BY DATE_TRUNC('month', {date_expr}) ORDER BY DATE_TRUNC('month', {date_expr})",
+        filter_params,
+    ).fetchall()
+    cols["partial_last_month"] = bool(
+        len(rows) >= 4 and rows[-1][0] < median(row[0] for row in rows[-4:-1]) * .5
+    )
 
 
 def _populate_bar(

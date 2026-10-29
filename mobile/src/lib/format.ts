@@ -17,11 +17,12 @@ export function entryValue(value: unknown, isDate = false): string {
 export function formatMetric(insight: Insight): string {
   const value = insight.data?.value;
   if (typeof value !== 'number' || !Number.isFinite(value)) return '—';
+  const unit = insight.data.unit === 'million' ? ' million' : '';
   if (insight.data.is_percent) return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 1 }).format(value)}%`;
   if (insight.data.is_currency && typeof insight.data.currency === 'string' && /^[A-Z]{3}$/.test(insight.data.currency)) {
-    return new Intl.NumberFormat(undefined, { style: 'currency', currency: insight.data.currency, notation: 'compact', maximumFractionDigits: 1 }).format(value);
+    return new Intl.NumberFormat(undefined, { style: 'currency', currency: insight.data.currency, notation: unit ? 'standard' : 'compact', maximumFractionDigits: 1 }).format(value) + unit;
   }
-  return new Intl.NumberFormat(undefined, { notation: 'compact', maximumFractionDigits: 1 }).format(value);
+  return new Intl.NumberFormat(undefined, { notation: unit ? 'standard' : 'compact', maximumFractionDigits: 1 }).format(value) + unit;
 }
 export const count = (value: number | null | undefined) => value == null ? '—' : new Intl.NumberFormat().format(value);
 export const date = (value: string) => new Date(value).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });

@@ -67,6 +67,7 @@ function KpiCard({
   // Intl defaults to three fraction digits, so an average variance rendered as
   // "-4.414" on a card whose whole job is the headline number.
   const numberFormat: Intl.NumberFormatOptions = { maximumFractionDigits: 2 }
+  const unit = insight.data?.unit === "million" ? " million" : ""
   const formattedValue =
     value !== undefined && value !== null
       ? currency
@@ -77,6 +78,7 @@ function KpiCard({
         ? `${formatNumber(value, numberFormat)}%`
         : formatNumber(value, numberFormat)
       : "—"
+  const displayedValue = value !== undefined && value !== null ? `${formattedValue}${unit}` : formattedValue
 
   return (
     <motion.div
@@ -100,7 +102,7 @@ function KpiCard({
 
       <div className="space-y-1">
         <p className="text-3xl font-bold tracking-tight text-zinc-900 dark:text-white">
-          {formattedValue}
+          {displayedValue}
         </p>
         {changePercent !== undefined && (
           <div

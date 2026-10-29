@@ -14,6 +14,14 @@ def useful_charts(charts: list[dict[str, Any]]) -> list[dict[str, Any]]:
         kind = chart.get("type")
         if kind == "histogram":
             continue
+        if kind == "bar":
+            series = (chart.get("echarts_option") or {}).get("series") or []
+            categories = next((item.get("data") for item in (
+                (chart.get("echarts_option") or {}).get("xAxis"),
+                (chart.get("echarts_option") or {}).get("yAxis"),
+            ) if isinstance(item, dict) and item.get("type") == "category"), None)
+            if isinstance(categories, list) and len(categories) == 1 and series:
+                continue
         if kind == "scatter" and "weak relationship" in str(chart.get("description", "")).lower():
             continue
         if kind in {"pie", "donut"} and has_measures:
@@ -37,6 +45,8 @@ def useful_insights(insights: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if insight.get("type") != "summary" and insight.get("importance") == "low":
             continue
         if insight.get("type") == "recommendation" and title.startswith("track ") and title.endswith(" regularly"):
+            continue
+        if insight.get("type") == "recommendation" and (insight.get("data") or {}).get("confidence_source") == "rule:tracking":
             continue
         key = (insight.get("type"), title, str(insight.get("description") or "").strip().lower())
         if key not in seen:

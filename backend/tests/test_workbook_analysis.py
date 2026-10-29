@@ -130,7 +130,7 @@ def test_unstable_monthly_trend_does_not_claim_directional_change():
         conn.execute("CREATE TABLE data AS SELECT CAST('2020-01-01' AS DATE) + i * INTERVAL 1 MONTH AS date, CASE WHEN i % 2 = 0 THEN 100.0 ELSE 220.0 END AS weekly_sales FROM range(18) t(i)")
         stats = StatisticsEngine(conn).describe_all()
         kpis = detect_kpis(stats["schema"], stats["numeric_stats"])
-        forecasts = generate_forecasts(conn, stats["schema"], kpis)
+        forecasts = generate_forecasts(conn, stats["schema"], kpis, reference_date=date(2021, 7, 1))
         assert len(forecasts) == 1
         assert forecasts[0]["change_direction_supported"] is False
 

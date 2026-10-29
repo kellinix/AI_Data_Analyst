@@ -50,7 +50,11 @@ def generate_recommendations(
             "data": {"evidence": evidence, "owner": "Data Operations", "difficulty": "Easy"},
         })
     recommendations.extend(_forecast_recommendations(forecasts, kpis))
-    recommendations.extend(_anomaly_recommendations(anomalies))
+    from app.analytics.record_context import record_context
+    # A high player statistic alone is normally performance, not a file
+    # problem or a decision. Avoid asking users to investigate it as an error.
+    if (record_context(statistics or {}) or {}).get("kind") != "football_player":
+        recommendations.extend(_anomaly_recommendations(anomalies))
     recommendations.extend(_counting_recommendations(statistics or {}))
 
     if not recommendations and kpis:
@@ -79,7 +83,13 @@ def generate_recommendations(
 def _counting_recommendations(statistics: dict[str, Any]) -> list[dict[str, Any]]:
     """Repeated entities are a counting limitation, not evidence of poor performance."""
     for measure in statistics.get("entity_counts", []):
-        if is_serial_identifier(str(measure.get("column") or "")):
+        name = str(measure.get("column") or "")
+        if is_serial_identifier(name):
+            continue
+        # Compact source-system IDs (for example SPID on every shipment)
+        # routinely repeat by design. A generic "check repeated IDs" action
+        # cannot establish an error or a useful business decision from that.
+        if len(name) <= 5 and "_" not in name and name.lower().endswith("id"):
             continue
         populated = measure.get("populated_records", 0)
         repeated = measure.get("repeated_records", 0)

@@ -106,3 +106,26 @@ def test_exports_do_not_invent_us_dollars_for_unknown_currency():
     workbook = load_workbook(io.BytesIO(build_excel_report(**args)))
     assert workbook["Key Metrics"]["B2"].value == 115431.58
     assert "$" not in workbook["Key Metrics"]["B2"].number_format
+
+
+def test_exports_explain_scope_and_show_million_unit():
+    insights = [{"type": "summary", "title": "Project value", "data": {"value": 12.5, "unit": "million"}}]
+    args = {
+        "name": "Projects", "row_count": 19, "column_count": 5,
+        "summary": "This file contains 19 projects.", "insights": insights,
+        "limitations": ["Project counts describe rows, not distinct projects."],
+    }
+    pdf = build_pdf_report(**args)
+    content = b"\n".join(
+        zlib.decompress(base64.a85decode(stream.strip(), adobe=True))
+        for stream in re.findall(rb"stream\n(.*?)endstream", pdf, re.S)
+    )
+    assert b"What these results cover" in content
+    assert b"Project counts describe rows" in content
+    assert b"12.5 million" in content
+
+    workbook = load_workbook(io.BytesIO(build_excel_report(**args)))
+    assert workbook["Overview"]["A7"].value == "What these results cover"
+    assert "Project counts describe rows" in workbook["Overview"]["B7"].value
+    assert workbook["Key Metrics"]["A2"].value == "Project value (millions)"
+    assert workbook["Key Metrics"]["B2"].value == 12.5

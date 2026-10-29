@@ -888,13 +888,16 @@ async def export_pdf(
     db: DB,
 ):
     analysis = await _load_analysis_for_export(analysis_id, current_user, db)
+    presented_metadata, summary = present_metadata(getattr(analysis, "metadata_", None), analysis.summary)
     pdf_bytes = build_pdf_report(
         name=analysis.name,
         row_count=analysis.row_count,
         column_count=analysis.column_count,
-        summary=present_metadata(getattr(analysis, "metadata_", None), analysis.summary)[1],
+        summary=summary,
         insights=_insight_dicts(analysis),
-        charts=[present_histogram(c, record_context(analysis.metadata_ or {})) for c in analysis.charts or []],
+        charts=[present_time_line(present_histogram(c, record_context(analysis.metadata_ or {})))
+                for c in analysis.charts or []],
+        limitations=((presented_metadata or {}).get("analysis_evidence") or {}).get("limitations"),
     )
     filename = f"{analysis.name.replace(' ', '_').lower()}.pdf"
     db.add(ExportEvent(analysis_id=analysis.id, format="pdf"))
@@ -913,13 +916,16 @@ async def export_excel(
     db: DB,
 ):
     analysis = await _load_analysis_for_export(analysis_id, current_user, db)
+    presented_metadata, summary = present_metadata(getattr(analysis, "metadata_", None), analysis.summary)
     excel_bytes = build_excel_report(
         name=analysis.name,
         row_count=analysis.row_count,
         column_count=analysis.column_count,
-        summary=present_metadata(getattr(analysis, "metadata_", None), analysis.summary)[1],
+        summary=summary,
         insights=_insight_dicts(analysis),
-        charts=[present_histogram(c, record_context(analysis.metadata_ or {})) for c in analysis.charts or []],
+        charts=[present_time_line(present_histogram(c, record_context(analysis.metadata_ or {})))
+                for c in analysis.charts or []],
+        limitations=((presented_metadata or {}).get("analysis_evidence") or {}).get("limitations"),
     )
     filename = f"{analysis.name.replace(' ', '_').lower()}.xlsx"
     db.add(ExportEvent(analysis_id=analysis.id, format="excel"))

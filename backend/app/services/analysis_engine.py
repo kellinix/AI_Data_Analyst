@@ -36,8 +36,15 @@ from app.analytics.analysis_evidence import (
     select_recommendations,
 )
 from app.analytics.anomaly_detection import detect_anomalies
-from app.analytics.chart_selector import select_charts
+from app.analytics.chart_selector import _horizontal_bar_chart, select_charts
 from app.analytics.chart_specs import attach_visual_specs
+from app.analytics.football_context import (
+    clarify_football_chart,
+    clarify_football_display,
+    football_kpis,
+    football_summary,
+    is_football,
+)
 from app.analytics.forecasting import generate_forecasts
 from app.analytics.kpi_detector import detect_kpis
 from app.analytics.live_filter import populate_chart_option
@@ -220,7 +227,8 @@ class AnalysisEngine:
                 title = "Average undergraduate grade (out of 10)"
             if kpi.get("is_currency"):
                 value_word = "Total" if is_total else "Average"
-                description = f"{value_word} {kpi_label}: {kpi['value']:,.2f}"
+                unit = " million" if "currency_m" in kpi["column"].lower() else ""
+                description = f"{value_word} {kpi_label}: {kpi['value']:,.2f}{unit}"
             insight = Insight(
                 analysis_id=analysis.id,
                 type="summary",
@@ -234,6 +242,7 @@ class AnalysisEngine:
                     "is_currency": kpi.get("is_currency", False),
                     "currency": kpi.get("currency"),
                     "currency_symbol": kpi.get("currency_symbol"),
+                    "unit": "million" if "currency_m" in kpi["column"].lower() else None,
                     "is_percent": is_percent or kpi.get("is_percent", False),
                     "kpi_type": kpi.get("kpi_type"),
                     "mean": kpi.get("mean"),
@@ -421,17 +430,21 @@ async def compute_analysis(
 
         # Step 2: Compute statistics
         statistics = StatisticsEngine(conn).describe_all()
-        statistics["parser"] = file_processor._parser_metadata(storage_path, extension)
+        cleaning = upload_context.get("cleaning", {}) if isinstance(upload_context, dict) else {}
+        source_parser = (cleaning.get("report") or {}).get("parser") if isinstance(cleaning, dict) else None
+        statistics["parser"] = source_parser or file_processor._parser_metadata(storage_path, extension)
         if truncated:
             statistics["sample_truncated"] = True
             statistics["sample_row_limit"] = file_processor.SAMPLE_ROWS
         _adjust_portfolio_data_quality(statistics, upload_context)
-        statistics["analysis_evidence"] = analysis_evidence(statistics, upload_context)
         statistics["data_quality"]["scope"] = "Checks on records used for analysis; missing fields may be optional. This score does not verify real-world accuracy."
-        cleaning = upload_context.get("cleaning", {}) if isinstance(upload_context, dict) else {}
         source_quality = (cleaning.get("report") or {}).get("source_quality")
         if source_quality:
             statistics["data_quality"]["source_quality"] = source_quality
+        _adjust_unnamed_sparse_quality(statistics, upload_context)
+        _adjust_football_data_quality(statistics, upload_context)
+        _adjust_clinic_wait_quality(statistics, conn, upload_context)
+        statistics["analysis_evidence"] = analysis_evidence(statistics, upload_context)
         await progress(35)
 
         clarify_statistics(statistics)
@@ -443,6 +456,8 @@ async def compute_analysis(
             schema=statistics["schema"],
             numeric_stats=statistics["numeric_stats"],
         )
+        if is_football(statistics["schema"]):
+            kpis = football_kpis(statistics)
         currency = _resolve_currency(statistics, upload_context)
         if currency:
             statistics["currency"] = currency
@@ -460,6 +475,13 @@ async def compute_analysis(
             date_range=statistics["date_range"],
             correlations=statistics["correlations"],
         )
+        if statistics.get("clinic_wait_attended_only"):
+            charts = [chart for chart in charts if not (
+                chart.get("xAxis") == "wait_minutes" and chart.get("yAxis") == "appointment_status"
+            )]
+            if (statistics.get("categorical_stats", {}).get("clinic", {}).get("unique_count", 0) >= 2
+                    and statistics.get("numeric_stats", {}).get("wait_minutes", {}).get("count", 0) > 0):
+                charts.append(_horizontal_bar_chart("clinic", "wait_minutes", aggregation="average"))
         charts = _populate_charts(conn, charts)
         semantic_display = await SemanticWrangler().build_display_metadata(
             file_name=file_name,
@@ -467,8 +489,22 @@ async def compute_analysis(
             charts=charts,
             upload_context=upload_context,
         )
+        if is_football(statistics["schema"]):
+            clarify_football_display(semantic_display)
         statistics = apply_display_metadata_to_statistics(statistics, semantic_display)
         charts = apply_display_metadata_to_charts(charts, semantic_display)
+        if statistics.get("clinic_wait_attended_only"):
+            for chart in charts:
+                if chart.get("xAxis") == "wait_minutes" and chart.get("yAxis") == "clinic":
+                    chart["title"] = "Average wait by clinic"
+                    chart["description"] = (
+                        "Average recorded wait in minutes for attended appointments "
+                        "at each clinic. Cancelled appointments are excluded."
+                    )
+                    chart["echarts_option"]["xAxis"]["name"] = "Wait time (minutes)"
+        if is_football(statistics["schema"]):
+            for chart in charts:
+                clarify_football_chart(chart)
         if is_admission(statistics["schema"]):
             statistics["semantic_display"] = semantic_display
             clarify_statistics(statistics)
@@ -553,6 +589,9 @@ async def compute_analysis(
         if is_admission(statistics["schema"]):
             ai_result["executive_summary"] = admission_summary(statistics)
             summary_checks = {"method": "admission_measured_v1", "facts": [], "scope": "All analysed applicant records"}
+        if is_football(statistics["schema"]):
+            ai_result["executive_summary"] = football_summary(statistics)
+            summary_checks = {"method": "football_measured_v1", "facts": [], "scope": "All analysed player records"}
         if survey_fields(statistics["schema"]):
             published = statistics["numeric_stats"][survey_fields(statistics["schema"])["percentage"]]["count"]
             ai_result["executive_summary"] = (f"This file contains {row_count:,} published survey result records, not individual respondents.\n"
@@ -745,6 +784,135 @@ def consolidated_anomaly_card(anomalies: list[dict[str, Any]]) -> tuple[str, str
         else f"{len(anomalies)} unusual results found"
     )
     return title, description
+
+
+def _adjust_clinic_wait_quality(
+    statistics: dict[str, Any], conn: duckdb.DuckDBPyConnection, upload_context: Any,
+) -> None:
+    """Treat blank waits on cancelled visits as inapplicable, not bad data."""
+    from app.analytics.record_context import record_context
+
+    if (record_context(statistics) or {}).get("kind") != "clinic_appointment":
+        return
+    if not {"wait_minutes", "appointment_status"}.issubset(
+        {item["name"] for item in statistics.get("schema") or []}
+    ):
+        return
+    cancelled, other_missing, other_recorded, attended = conn.execute(
+        """SELECT
+             COUNT(*) FILTER (WHERE lower(appointment_status) IN ('cancelled', 'canceled') AND wait_minutes IS NULL),
+             COUNT(*) FILTER (WHERE coalesce(lower(appointment_status), '') NOT IN ('cancelled', 'canceled') AND wait_minutes IS NULL),
+             COUNT(*) FILTER (WHERE coalesce(lower(appointment_status), '') <> 'attended' AND wait_minutes IS NOT NULL),
+             COUNT(*) FILTER (WHERE lower(appointment_status) = 'attended' AND wait_minutes IS NOT NULL)
+           FROM data"""
+    ).fetchone()
+    if not cancelled or other_missing or other_recorded or not attended:
+        return
+    statistics["clinic_wait_attended_only"] = True
+    cleaning = upload_context.get("cleaning", {}) if isinstance(upload_context, dict) else {}
+    renamed = (cleaning.get("report") or {}).get("renamed_columns") or {}
+    quality = statistics.get("data_quality") or {}
+    from app.analytics.data_quality import _quality_score
+
+    for report in (quality, quality.get("source_quality") or {}):
+        issues = report.get("issues") or []
+        kept = [issue for issue in issues if not (
+            issue.get("type") in {"missing_values", "empty_field"}
+            and renamed.get(issue.get("column"), issue.get("column")) == "wait_minutes"
+        )]
+        if len(kept) != len(issues):
+            report["issues"] = kept
+            report["score"] = _quality_score(int(statistics.get("row_count") or 0), kept)
+    quality["fixes"] = [fix for fix in quality.get("fixes", [])
+                        if fix.get("id") != "fill_missing_wait_minutes"]
+    quality["optional_fields_note"] = (
+        "Cancelled appointments have no wait time. The wait average uses attended "
+        "appointments with a recorded wait."
+    )
+
+
+def _adjust_unnamed_sparse_quality(statistics: dict[str, Any], upload_context: Any) -> None:
+    """An almost empty unnamed workbook column is not a business measure."""
+    rows = int(statistics.get("row_count") or 0)
+    if not rows:
+        return
+    schema = statistics.get("schema") or []
+    unnamed = {item["name"] for item in schema if re.fullmatch(r"column_\d+", item["name"])}
+    if not unnamed:
+        return
+    cleaning = upload_context.get("cleaning", {}) if isinstance(upload_context, dict) else {}
+    renamed = (cleaning.get("report") or {}).get("renamed_columns") or {}
+    quality = statistics.get("data_quality") or {}
+    from app.analytics.data_quality import _quality_score
+
+    excluded: set[str] = set()
+    for report in (quality, quality.get("source_quality") or {}):
+        issues = report.get("issues") or []
+        retained = []
+        for issue in issues:
+            column = renamed.get(issue.get("column"), issue.get("column"))
+            if (column in unnamed and issue.get("type") in {"missing_values", "empty_field"}
+                    and int(issue.get("affected_rows") or 0) >= rows * .8):
+                excluded.add(column)
+            else:
+                retained.append(issue)
+        if len(retained) != len(issues):
+            report["issues"] = retained
+            report["score"] = _quality_score(rows, retained)
+    if excluded:
+        quality["fixes"] = [fix for fix in quality.get("fixes", []) if not any(
+            str(fix.get("id", "")) == f"fill_missing_{column}" for column in excluded
+        )]
+        quality["optional_fields_note"] = (
+            "An almost empty unnamed column was left out of missing-data scoring. "
+            "Ask the file owner what it represents before using it."
+        )
+
+
+def _adjust_football_data_quality(statistics: dict[str, Any], upload_context: Any) -> None:
+    """Do not grade outfield players for missing goalkeeper-only columns."""
+    schema = statistics.get("schema") or []
+    if not is_football(schema):
+        return
+    names = [column["name"] for column in schema]
+    if "rk_stats_keeper" not in names or "rk_stats_shooting" not in names:
+        return
+    start, end = names.index("rk_stats_keeper"), names.index("rk_stats_shooting")
+    if end <= start:
+        return
+    keeper_fields = set(names[start:end])
+    # Goals per shot on target is undefined when a player has no shot on
+    # target; its blanks must not be read as missing goals.
+    conditional_ratios = {"g_sot", "mn_sub", "mn_start"} & set(names)
+    quality = statistics.get("data_quality") or {}
+    rows = int(statistics.get("row_count") or 0)
+    cleaning = upload_context.get("cleaning", {}) if isinstance(upload_context, dict) else {}
+    renamed = (cleaning.get("report") or {}).get("renamed_columns") or {}
+    from app.analytics.data_quality import _quality_score
+
+    for report in (quality, quality.get("source_quality") or {}):
+        issues = report.get("issues") or []
+        if not isinstance(issues, list):
+            continue
+        retained = [issue for issue in issues if not (
+            issue.get("type") in {"missing_values", "empty_field"}
+            and ((renamed.get(issue.get("column"), issue.get("column")) in keeper_fields
+                  and int(issue.get("affected_rows") or 0) >= rows * .8)
+                 or (renamed.get(issue.get("column"), issue.get("column")) in conditional_ratios
+                     and int(issue.get("affected_rows") or 0) >= rows * .5))
+        )]
+        if len(retained) != len(issues):
+            report["issues"] = retained
+            report["score"] = _quality_score(rows, retained)
+    fixes = quality.get("fixes") or []
+    quality["fixes"] = [fix for fix in fixes if not any(
+        str(fix.get("id", "")) == f"fill_missing_{column}" for column in keeper_fields | conditional_ratios
+    )]
+    quality["optional_fields_note"] = (
+        "Goalkeeper-only columns were excluded from missing-data scoring because "
+        "they do not apply to most outfield player records. Ratios that need "
+        "a shot or substitute appearance were also excluded when that input was absent."
+    )
 
 
 def _adjust_portfolio_data_quality(

@@ -48,6 +48,8 @@ def derive_label(column: str) -> str:
     tokens = [token for token in re.split(r"[^A-Za-z0-9]+", str(column).lower()) if token]
     if not tokens:
         return ""
+    if tokens[:5] == ["total", "baseline", "whole", "life", "costs"] and "currency" in tokens:
+        return "Whole-life baseline costs (millions)"
 
     tokens, unit = _extract_unit(tokens)
     tokens = _cut_at_qualifier(tokens)
@@ -75,6 +77,7 @@ def sentence_label(label: str) -> str:
         stripped = word.strip("()")
         keep_case = (
             stripped.isupper()
+            or stripped.lower() in {"kwh", "mwh"}
             or any(character.isdigit() for character in stripped)
             or not stripped.isalpha()
         )
@@ -92,7 +95,7 @@ def _extract_unit(tokens: list[str]) -> tuple[list[str], str]:
         index = tokens.index("currency")
         rest = tokens[index + 1:]
         if rest and rest[0] == "m":
-            return tokens[:index] + rest[1:], "(M)"
+            return tokens[:index] + rest[1:], "(millions)"
         return tokens[:index] + rest, ""
     return tokens, ""
 

@@ -68,6 +68,13 @@ AVERAGE_METRIC_KEYWORDS = (
     "consistency",
 )
 
+SPORT_COUNT_COLUMNS = {
+    "mp", "starts", "gls", "ast", "g_a", "g_pk", "pk", "pkatt",
+    "crdy", "crdr", "g_a_pk", "saves", "ga", "sota", "cs",
+    "sh", "sot", "compl", "subs", "unsub", "fls", "fld",
+    "off", "crs", "int", "tklw", "og",
+}
+
 
 def enrich_schema_with_semantics(
     schema: list[dict[str, Any]],
@@ -99,14 +106,22 @@ def detect_column_semantics(
     if normalized in {"source_file", "sheet"}:
         return _profile("source", 0.96, "Column identifies the source table or workbook sheet", "dimension")
 
+    if re.fullmatch(r"column_\d+", normalized):
+        return _profile("unknown", 0.95, "Unnamed source column needs a supplied label", "unknown")
+
     if normalized in {"store", "store_number", "store_no", "store_num", "branch", "branch_number", "branch_no", "shop", "shop_number"}:
         return _profile("categorical_dimension", 0.94, "Column identifies a location or store group", "dimension")
+    if normalized in {"shift", "hiring_stage", "appointment_status"}:
+        return _profile("categorical_dimension", 0.94, "Named operational group, not a yes/no flag", "dimension")
 
     if _looks_like_year(normalized, column, numeric_stats):
         return _profile("year", 0.94, "Column name and values look like calendar years", "temporal_dimension")
 
     if _looks_like_identifier(normalized):
         return _profile("identifier", 0.9, "Column name looks like a record identifier", "identifier")
+
+    if normalized in SPORT_COUNT_COLUMNS:
+        return _profile("count", 0.9, "Named count of football events or appearances", "metric")
 
     if normalized.startswith("is_") or normalized.startswith("has_") or normalized.endswith("_flag"):
         return _profile("boolean", 0.82, "Column name looks like a boolean flag", "flag")
@@ -165,7 +180,9 @@ def _normalize(value: str) -> str:
 def _looks_like_identifier(normalized: str) -> bool:
     if is_serial_identifier(normalized):
         return True
-    if normalized in {"id", "uuid", "guid"}:
+    if normalized in {"id", "uuid", "guid", "shipmentid", "spid", "pid", "gid", "gmppidnumber"}:
+        return True
+    if normalized.startswith("rk_stats_"):
         return True
     return (
         normalized.endswith("_id")
@@ -178,7 +195,7 @@ def _looks_like_identifier(normalized: str) -> bool:
 def is_serial_identifier(column: str) -> bool:
     """Row numbering is not an entity identity or a business measure."""
     return re.fullmatch(
-        r"(?:sr|sr_no|sr_number|s_no|sno|serial|serial_no|serial_number|row_no|row_number|record_no|record_number)(?:_\d+)?",
+        r"(?:sr|sr_no|sr_number|s_no|sno|serial|serial_no|serial_number|row_no|row_number|record_no|record_number|rk|rank)(?:_\d+)?",
         _normalize(column),
     ) is not None
 
@@ -206,7 +223,6 @@ def _looks_like_date_name(normalized: str) -> bool:
     parts = set(normalized.split("_"))
     return (
         "date" in parts
-        or "time" in parts
         or "timestamp" in parts
         or normalized.endswith("_at")
         or normalized in {"period", "month", "datetime"}

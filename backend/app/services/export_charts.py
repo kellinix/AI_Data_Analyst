@@ -138,6 +138,10 @@ def _tick(value: float) -> str:
     return f"{value:.0f}" if abs(value) >= 10 else f"{value:.2g}"
 
 
+def _bar_value(value: float) -> str:
+    return f"{value:,.0f}" if abs(value) >= 10 else f"{value:,.2f}".rstrip("0").rstrip(".")
+
+
 class PdfChart(Flowable):
     """Compact, vector chart drawn from the same values as the dashboard."""
 
@@ -167,7 +171,9 @@ class PdfChart(Flowable):
             c.setStrokeColor(colors.HexColor("#E8E0F0"))
             c.line(x, line_y, x + width, line_y)
             c.setFillColor(colors.HexColor("#716B86"))
-            c.drawRightString(x - 5, line_y - 2, _tick(low + (high - low) * tick / 4))
+            value = low + (high - low) * tick / 4
+            label = f"{value:,.0f}" if abs(high - low) < 1_000 and abs(value) >= 10 else _tick(value)
+            c.drawRightString(x - 5, line_y - 2, label)
 
     def _axes(self) -> None:
         chart, c = self.chart, self.canv
@@ -230,7 +236,7 @@ class PdfChart(Flowable):
 
     def _horizontal(self) -> None:
         chart, c = self.chart, self.canv
-        x0, y0, w = 145, 25, 295
+        x0, y0, w = 165, 25, 240
         count = len(chart.categories)
         values = [value for _, data in chart.series for value in data if value is not None]
         low, high = _range(values)
@@ -239,7 +245,7 @@ class PdfChart(Flowable):
             y = y0 + (index + .5) * 23
             c.setFont("Helvetica", 8)
             c.setFillColor(colors.HexColor("#29213F"))
-            c.drawRightString(x0 - 9, y - 2, _short(label, 25))
+            c.drawRightString(x0 - 9, y - 2, _short(label, 35))
             for series_index, (_, data) in enumerate(chart.series):
                 value = data[index]
                 if value is None:
@@ -247,6 +253,10 @@ class PdfChart(Flowable):
                 end = x0 + w * (value - low) / (high - low)
                 c.setFillColor(colors.HexColor(chart.palette[series_index % len(chart.palette)]))
                 c.rect(min(baseline, end), y - 5, max(1, abs(end - baseline)), 10, fill=1, stroke=0)
+                if len(chart.series) == 1 and not chart.stacked:
+                    c.setFillColor(colors.HexColor("#29213F"))
+                    c.setFont("Helvetica", 7)
+                    c.drawRightString(458, y - 2, _bar_value(value))
         c.setStrokeColor(colors.HexColor("#E8E0F0"))
         c.line(baseline, y0, baseline, y0 + count * 23)
         c.setFillColor(colors.HexColor("#716B86"))

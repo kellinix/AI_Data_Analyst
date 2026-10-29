@@ -11,6 +11,30 @@ from app.services.investigation import ComparisonPlan, EntryRequest, entries
 from app.services.report_language import present_metadata
 
 
+def test_common_non_sales_files_name_what_each_record_represents():
+    examples = [
+        (["player", "squad", "comp", "pos", "gls"], "player records"),
+        (["shipmentid", "shipdate", "amount", "boxes"], "shipment records"),
+        (["gmpp_id_number", "project_name", "department"], "project records"),
+        (["sponsor_name", "route", "status"], "sponsor register records"),
+        (["organisation_name", "total_cos_used"], "sponsorship-use records"),
+    ]
+    for names, expected in examples:
+        metadata = {"schema": [{"name": name} for name in names]}
+        assert record_context(metadata)["plural"] == expected
+
+
+def test_operational_files_name_their_records_instead_of_generic_entries():
+    examples = [
+        (["appointment_date", "clinic", "appointment_status", "wait_minutes"], "appointment records"),
+        (["batch_date", "product_line", "units_produced"], "production batches"),
+        (["reading_date", "site", "kwh_consumed"], "energy readings"),
+        (["application_date", "department", "hiring_stage", "hired"], "job applications"),
+    ]
+    for names, expected in examples:
+        assert record_context({"schema": [{"name": name} for name in names]})["plural"] == expected
+
+
 def weekly_metadata():
     return {'schema': [{'name': name, 'is_date': name == 'week_start_date', 'is_numeric': name in {'revenue', 'units_sold'},
                         'analysis_role': 'metric' if name in {'revenue', 'units_sold'} else 'temporal_dimension' if name == 'week_start_date' else 'dimension'}

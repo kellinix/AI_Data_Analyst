@@ -59,3 +59,12 @@ def test_sales_donut_names_the_record_and_payment_method_without_changing_counts
     assert shown["title"] == "Number of sales records by payment method"
     assert shown["description"] == "Number of sales records for each payment method."
     assert shown["echarts_option"] == chart["echarts_option"]
+
+
+def test_donut_names_the_actual_record_type_for_other_industries():
+    chart = {"type": "donut", "title": "Status breakdown", "series": ["appointment_status"],
+             "echarts_option": {"series": [{"data": [{"name": "Attended", "value": 8},
+                                                     {"name": "Cancelled", "value": 2}]}]}}
+    shown = present_histogram(chart, {"kind": "clinic_appointment", "plural": "appointment records"})
+    assert shown["title"] == "Number of appointment records by appointment status"
+    assert shown["description"] == "Number of appointment records for each appointment status."

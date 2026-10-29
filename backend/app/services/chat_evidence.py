@@ -54,9 +54,12 @@ def _friendly_fact(fact: dict[str, Any]) -> str:
                    "weighted_mean": f"Average {column}", "min": f"The lowest {column}",
                    "max": f"The highest {column}"}
         if operation in phrases:
+            if values.get("column") == "hired" and values.get("is_percent"):
+                return f"{display} of the job applications are marked as hired."
             text = f"{phrases[operation]} is {display}."
             if values.get("weighted_by"):
-                text += f" Entries with higher {_label(values['weighted_by'])} count more toward this average."
+                weight_label = values.get("weight_display_label") or values["weighted_by"]
+                text += f" Entries with higher {_label(weight_label)} count more toward this average."
             return text
     if column and "category" in values:
         count, total = int(values["count"]), int(values["denominator"])

@@ -284,6 +284,7 @@ class FileProcessor:
     ) -> dict[str, Any]:
         df = self._read_file(input_path, extension)
         cleaned, report = self.clean_dataframe(df, options)
+        report["parser"] = self._parser_metadata(input_path, extension)
 
         parquet_path = Path(parquet_output_path)
         csv_path = Path(csv_output_path)
@@ -876,6 +877,23 @@ class FileProcessor:
         joined = self._join_sheets_by_common_dimensions(frames)
         if joined is not None:
             return joined
+        primary_index = max(range(len(frames)), key=lambda index: frames[index].height)
+        primary = frames[primary_index]
+        supporting = [(name, frame) for index, (name, frame) in enumerate(zip(names, frames, strict=True))
+                      if index != primary_index]
+        if supporting and all(
+            primary.height >= 5 * frame.height and set(primary.columns) != set(frame.columns)
+            for _name, frame in supporting
+        ):
+            # A large fact table plus small lookup sheets is not a set of
+            # interchangeable observations. Keep the fact rows intact when
+            # no safe one-to-one join is available.
+            report["excluded_sheets"].extend({
+                "name": name, "rows": frame.height,
+                "reason": "Supporting sheet has different fields and cannot be joined without changing the main record count.",
+            } for name, frame in supporting)
+            report["included_sheets"] = [names[primary_index]]
+            return primary
         frames = [
             frame.with_columns(pl.lit(sheet_name).alias("Sheet"))
             for sheet_name, frame in zip(names, frames, strict=True)
@@ -893,6 +911,10 @@ class FileProcessor:
             if column in common_columns and not _is_numeric_dtype(frames[0][column].dtype)
         ]
         if not join_columns:
+            return None
+        if any(frame.select(join_columns).n_unique() != frame.height for frame in frames):
+            # Aggregating repeated fact keys would turn individual sales or
+            # shipment records into group totals and silently lose rows.
             return None
 
         numeric_sets = [

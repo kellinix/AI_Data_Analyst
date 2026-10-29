@@ -7,7 +7,7 @@ from copy import deepcopy
 from datetime import datetime
 from typing import Any
 
-from app.analytics.labels import sentence_label
+from app.analytics.labels import derive_label, sentence_label
 from app.analytics.plain_language import plain_english
 from app.analytics.record_context import record_context
 from app.analytics.summary_evidence import _finite, _format
@@ -38,11 +38,17 @@ def business_text(text: Any) -> str:
         (r"\bAvg\b", "Average"),
         (r"\bKPIs\b", "key figures"),
         (r"\bmedian\b", "middle value"),
+        (r"\bKwh Consumed\b", "electricity used (kWh)"),
         (r"\bExact duplicates removed after normalization\b", "Repeated entries removed after tidying names and formats"),
         (r"\bSimilar entries removed by fuzzy matching\b", "Similar entries removed during cleaning"),
     )
     for pattern, replacement in replacements:
         value = re.sub(pattern, replacement, value, flags=re.I)
+    value = re.sub(
+        r"\b\d{4}-\d{2}-\d{2}T00:00:00\b",
+        lambda match: datetime.fromisoformat(match.group(0)).strftime("%d %b %Y").lstrip("0"),
+        value,
+    )
     return value
 
 
@@ -50,11 +56,45 @@ def _label(column: Any) -> str:
     return sentence_label(business_text(str(column or "figure").replace("_", " ")))
 
 
+def _field_label(column: Any, metadata: dict[str, Any]) -> str:
+    """Resolve a quality issue's original header to its short saved label."""
+    name = str(column or "")
+    report = (((metadata.get("upload_context") or {}).get("cleaning") or {}).get("report") or {})
+    normalized = (report.get("renamed_columns") or {}).get(name, name)
+    if str(normalized).lower() == "sot":
+        return "shots on target"
+    if (record_context(metadata) or {}).get("kind") == "football_player":
+        from app.analytics.football_context import LABELS
+        if str(normalized).lower() in LABELS:
+            return sentence_label(LABELS[str(normalized).lower()])
+    for field in metadata.get("schema") or []:
+        if field.get("name") == normalized:
+            return sentence_label(business_text(str(field.get("display_label") or derive_label(normalized))))
+    return sentence_label(business_text(derive_label(normalized)))
+
+
 def chart_description(text: str | None) -> str | None:
     """Clarify legacy count captions without changing chart values or scope."""
     if text is None:
         return None
     return re.sub(r"^How many (?:fall|falls) into each\b", "Number of entries in each", text, flags=re.I)
+
+
+def _name_records(text: str, context: dict[str, Any] | None) -> str:
+    if not context:
+        return text
+    singular, plural = context.get("singular", "record"), context.get("plural", "records")
+    # Undo plain_english's generic record -> entry conversion without
+    # creating phrases such as "player player records".
+    as_entries = re.sub(r"\brecords\b", "entries", plural, flags=re.I)
+    as_entry = re.sub(r"\brecord\b", "entry", singular, flags=re.I)
+    def substitute(pattern: str, replacement: str, value: str) -> str:
+        return re.sub(pattern, lambda match: replacement.capitalize()
+                      if match.group(0)[0].isupper() else replacement, value, flags=re.I)
+    text = substitute(rf"\b{re.escape(as_entries)}\b", plural, text)
+    text = substitute(rf"\b{re.escape(as_entry)}\b", singular, text)
+    text = substitute(r"\bentries\b", plural, text)
+    return substitute(r"\bentry\b", singular, text)
 
 
 def forecast_wording(data: dict[str, Any]) -> tuple[str, str] | None:
@@ -186,10 +226,25 @@ def present_insight(insight: dict[str, Any], metadata: dict[str, Any] | None = N
                 data[key] = business_text(data[key])
         if metadata is not None:
             _contextual_action(result, data, metadata)
-            if (record_context(metadata) or {}).get("kind") == "sales_transaction":
+            record_kind = (record_context(metadata) or {}).get("kind")
+            if record_kind == "shipment" and source == "rule:forecast" and data.get("column") == "amount":
+                result["title"] = re.sub(r"\bAmount\b", "shipment amount", str(result.get("title") or ""), flags=re.I)
+            if record_kind == "sales_transaction":
                 result["title"] = re.sub(r"\bMoney\b", "sales amount", str(result.get("title") or ""), flags=re.I)
                 if isinstance(data.get("evidence"), str):
                     data["evidence"] = re.sub(r"\bMoney\b", "sales amount", data["evidence"], flags=re.I)
+    if metadata is not None:
+        context = record_context(metadata)
+        for key in ("title", "description"):
+            if isinstance(result.get(key), str):
+                result[key] = _name_records(result[key], context)
+                if (context or {}).get("kind") == "football_player":
+                    result[key] = re.sub(r"\bsot\b", "shots on target", result[key], flags=re.I)
+        for key in ("evidence", "problem", "expected_impact"):
+            if isinstance(data.get(key), str):
+                data[key] = _name_records(data[key], context)
+                if (context or {}).get("kind") == "football_player":
+                    data[key] = re.sub(r"\bsot\b", "shots on target", data[key], flags=re.I)
     data["presentation_version"] = VERSION
     result["data"] = data
     return result
@@ -208,14 +263,14 @@ def _contextual_action(result: dict, data: dict, metadata: dict) -> None:
     source = data.get("confidence_source")
     if spec and spec["kind"] == "anomaly":
         item = spec["anomaly"]
-        measure, value = _label(item.get("column")), _finite(item.get("value"))
+        measure, value = _field_label(item.get("column"), metadata), _finite(item.get("value"))
         if value is not None:
             result["title"] = f"Review the {measure} entry of {_format(value)}"
             result["description"] = (f"Open the supporting entry and check {measure} against the original file. "
                                      "Compare it with entries for similar dates or groups. If the difference is expected, keep it; correct it only if the source confirms a mistake.")
             data["evidence"] = anomaly_wording(item)[1]
     elif spec and spec["kind"] == "repeat_values":
-        measure = _label(spec["column"])
+        measure = _field_label(spec["column"], metadata)
         result["title"] = f"Check repeated {measure} values before counting"
         result["description"] = (f"Open the repeated {measure} entries. Decide whether you want to count entries or different names or IDs, "
                                  "then use the same method for every group. A repeated value may represent separate activity.")
@@ -227,7 +282,7 @@ def _contextual_action(result: dict, data: dict, metadata: dict) -> None:
             issue = next((item for item in ((metadata.get("data_quality") or {}).get("source_quality") or {}).get("issues", [])
                           if _label(item.get("column")) == _label(field)), None)
         if issue:
-            measure, kind = _label(issue.get("column")), issue.get("type")
+            measure, kind = _field_label(issue.get("column"), metadata), issue.get("type")
             data["evidence"] = _quality_issue(issue)["description"]
             if kind in {"missing_values", "empty_field"}:
                 result["title"] = f"Decide whether the blank {measure} details are needed"
@@ -332,7 +387,7 @@ def present_metadata(metadata: dict[str, Any] | None, summary: str | None) -> tu
     if result.get("presentation_version") == VERSION:
         context = record_context(result)
         if context and summary:
-            summary = re.sub(r"\bentries\b", context["plural"], summary, flags=re.I)
+            summary = _name_records(summary, context)
         return result, summary
     checks = (result.get("analysis_evidence") or {}).get("summary_checks") or {}
     facts = checks.get("facts") or []
@@ -352,7 +407,9 @@ def present_metadata(metadata: dict[str, Any] | None, summary: str | None) -> tu
                 fact["text"] = sentence
             summary = "\n".join(sentences)
     evidence = result.get("analysis_evidence") or {}
-    evidence["limitations"] = [business_text(note) for note in evidence.get("limitations", [])]
+    context = record_context(result)
+    evidence["limitations"] = [_name_records(business_text(note), context)
+                               for note in evidence.get("limitations", [])]
     for change in (evidence.get("cleaning") or {}).get("row_changes", []):
         change["reason"] = business_text(change.get("reason"))
     for item in evidence.get("entity_counts", []):
@@ -375,8 +432,7 @@ def present_metadata(metadata: dict[str, Any] | None, summary: str | None) -> tu
         if isinstance(source, dict):
             source["issues"] = [_quality_issue(issue) for issue in source.get("issues", [])]
             source["scope"] = "This describes missing information in your original file, before cleaning. Blank fields may be optional."
-    context = record_context(result)
     if context and summary:
-        summary = re.sub(r"\bentries\b", context["plural"], summary, flags=re.I)
+        summary = _name_records(summary, context)
     result["presentation_version"] = VERSION
     return result, summary

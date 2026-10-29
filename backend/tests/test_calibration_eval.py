@@ -289,7 +289,7 @@ async def test_one_dataset_runs_through_the_production_pipeline(tmp_path, monkey
         assert record["source"].startswith("rule:")
         assert record["label"]["method"] == "rule"
         assert record["label"]["correct"] is not None or record["label"]["reason"]
-    assert result["forecasts"], "cleaned weekly data should yield forecasts"
+    assert not result["forecasts"], "historical benchmark files should not claim a current forecast"
 
     summary = summarize([result], {"generated_at": "t", "benchmark_version": "v"})
     assert summary["datasets"] == 1

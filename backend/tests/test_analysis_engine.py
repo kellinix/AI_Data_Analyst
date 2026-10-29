@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import duckdb
 import pytest
 
 from app.services import analysis_engine
@@ -8,6 +9,25 @@ from app.services.analysis_engine import (
     consolidated_anomaly_card,
     disclose_excluded_points,
 )
+
+
+def test_cancelled_appointments_do_not_make_wait_completeness_look_bad():
+    conn = duckdb.connect(":memory:")
+    conn.execute("CREATE TABLE data (appointment_status VARCHAR, wait_minutes DOUBLE)")
+    conn.execute("INSERT INTO data VALUES ('Attended', 20), ('Attended', 30), ('Cancelled', NULL)")
+    stats = {
+        "row_count": 3,
+        "schema": [{"name": name} for name in ("appointment_date", "clinic", "appointment_status", "wait_minutes")],
+        "data_quality": {"score": 90, "issues": [{"type": "missing_values", "column": "wait_minutes", "affected_rows": 1}],
+                         "source_quality": {"score": 90, "issues": [{"type": "missing_values", "column": "wait_minutes", "affected_rows": 1}]},
+                         "fixes": [{"id": "fill_missing_wait_minutes"}]},
+    }
+    analysis_engine._adjust_clinic_wait_quality(stats, conn, {"cleaning": {"report": {}}})
+    assert stats["clinic_wait_attended_only"]
+    assert stats["data_quality"]["issues"] == []
+    assert stats["data_quality"]["source_quality"]["issues"] == []
+    assert stats["data_quality"]["fixes"] == []
+    conn.close()
 
 
 def test_points_a_log_scale_cannot_plot_are_disclosed():

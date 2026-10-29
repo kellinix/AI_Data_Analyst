@@ -41,12 +41,20 @@ def _record_wording(chart: dict, context: dict | None) -> dict:
 
 
 def present_histogram(chart: dict[str, Any], context: dict | None = None) -> dict[str, Any]:
-    if chart.get("type") == "donut" and context and context.get("kind") == "sales_transaction":
+    if chart.get("type") == "donut" and context:
         result = deepcopy(chart)
         group = str((result.get("series") or [result.get("xAxis") or "group"])[0])
         group_label = "payment method" if group == "cash_type" else sentence_label(derive_label(group))
-        result["title"] = f"Number of sales records by {group_label}"
-        result["description"] = f"Number of sales records for each {group_label}."
+        records = context.get("plural") or ("sales records" if context.get("kind") == "sales_transaction" else "records")
+        result["title"] = f"Number of {records} by {group_label}"
+        result["description"] = f"Number of {records} for each {group_label}."
+        return result
+    if chart.get("type") == "bar" and chart.get("aggregation") == "count" and context:
+        result = deepcopy(chart)
+        records = context.get("plural", "records")
+        group = sentence_label(derive_label(str(chart.get("yAxis") or "group")))
+        result["title"] = f"Number of {records} by {group}"
+        result["description"] = f"Number of {records} for each {group}."
         return result
     if chart.get("type") != "histogram":
         return chart
@@ -94,4 +102,11 @@ def present_histogram(chart: dict[str, Any], context: dict | None = None) -> dic
     result["echarts_option"] = option
     from app.analytics.chart_specs import build_visual_spec
     result["visual_spec"] = build_visual_spec(result)
+    if context and context.get("plural"):
+        records = context["plural"]
+        result["description"] = result["description"].replace("entries", records)
+        result["xAxis"] = records.capitalize()
+        option["xAxis"]["name"] = records.capitalize()
+        option["series"][0]["name"] = records.capitalize()
+        result["visual_spec"] = build_visual_spec(result)
     return _record_wording(result, context)

@@ -26,7 +26,8 @@ def present_time_line(chart: dict[str, Any]) -> dict[str, Any]:
         return result
     columns = option.get("_columns") or {}
     measure = sentence_label(str((option.get("yAxis") or {}).get("name") or derive_label(str(chart.get("yAxis") or "value"))))
-    period = "week" if str(columns.get("x", "")).lower() == "week_start_date" else "date"
+    period = ("month" if columns.get("time_grain") == "month" else
+              "week" if str(columns.get("x", "")).lower() == "week_start_date" else "date")
     aggregation = columns.get("aggregation") or chart.get("aggregation")
     if aggregation == "sum":
         description = f"Total for each {period}." if measure.lower() == "total" else f"Total {measure} for each {period}."
@@ -34,6 +35,8 @@ def present_time_line(chart: dict[str, Any]) -> dict[str, Any]:
         description = f"Average {measure} for each {period}."
     else:
         description = str(chart.get("description") or "")
+    if period == "month" and columns.get("partial_last_month"):
+        description += " The final month has fewer recorded dates than earlier months and may be incomplete."
     result["description"] = description
     axis.update({"boundaryGap": False, "nameLocation": "middle", "nameGap": 32,
                  "axisLabel": {**(axis.get("axisLabel") or {}), "fontSize": 10, "showMinLabel": True, "showMaxLabel": True}})

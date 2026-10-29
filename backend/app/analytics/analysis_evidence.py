@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any
 
 from app.analytics.category_values import normalized_geography
@@ -12,12 +13,29 @@ def analysis_evidence(statistics: dict[str, Any], upload_context: Any) -> dict[s
     if not isinstance(cleaning, dict):
         cleaning = {}
     report = cleaning.get("report") or {}
-    notes = ["Counts describe records unless a distinct-value measure is explicitly stated."]
+    from app.analytics.record_context import record_context
+
+    context = record_context(statistics)
+    noun = (context or {}).get("plural", "records")
+    notes = [f"Counts describe {noun} unless a count of different names or IDs is clearly stated."]
     if any(normalized_geography(c["name"]) for c in statistics.get("schema", [])):
         notes.append("Geographic groups combine case, spacing and hyphen variants; source values are preserved and names are not verified against an external geographic reference.")
     if not statistics.get("date_range") and not any(c.get("analysis_role") == "temporal_dimension" for c in statistics.get("schema", [])):
         notes.append(
             "No usable date series was detected; this file alone cannot establish growth or change over time."
+        )
+    recorded_dates = []
+    for bounds in (statistics.get("date_range") or {}).values():
+        if not isinstance(bounds, dict) or not bounds.get("max"):
+            continue
+        try:
+            recorded_dates.append(date.fromisoformat(str(bounds["max"])[:10]))
+        except ValueError:
+            continue
+    if recorded_dates and (date.today() - max(recorded_dates)).days > 120:
+        notes.append(
+            f"The latest recorded date is {max(recorded_dates):%d %b %Y}. "
+            "These figures are too old for a current forward-looking forecast."
         )
     if not any(c.get("analysis_role") == "metric" for c in statistics.get("schema", [])):
         notes.append(
@@ -27,9 +45,14 @@ def analysis_evidence(statistics: dict[str, Any], upload_context: Any) -> dict[s
         notes.append(
             f"Results cover the first {statistics.get('sample_row_limit'):,} records, not the full file."
         )
+    optional_note = (statistics.get("data_quality") or {}).get("optional_fields_note")
+    if optional_note:
+        notes.append(optional_note)
     changes = []
     for sheet in statistics.get("parser", {}).get("excluded_sheets", []):
-        notes.append(f"Worksheet {sheet['name']} was excluded from record counts: {sheet['reason']}")
+        notes.append(
+            f"Worksheet {sheet['name']} was kept separate because it does not list the same type of {noun}."
+        )
     removal_keys = {
         "dropped_empty_rows": "Empty records removed",
         "dropped_rows_missing_critical_metrics": "Records without required measures removed",
@@ -53,9 +76,10 @@ def analysis_evidence(statistics: dict[str, Any], upload_context: Any) -> dict[s
             "unexplained_row_change": unexplained,
             "reconciled": unexplained == 0,
         }
-        notes.append(
-            f"Cleaning changed the file from {before:,} to {after:,} records; counts refer to the cleaned file."
-        )
+        if before != after:
+            notes.append(
+                f"Cleaning changed the file from {before:,} to {after:,} {noun}; counts use the cleaned file."
+            )
         if unexplained:
             notes.append(
                 f"The cleaning report does not explain a net change of {unexplained:,} records; review it before relying on totals."

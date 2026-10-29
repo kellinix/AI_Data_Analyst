@@ -15,17 +15,17 @@ from app.analytics.labels import derive_label, sentence_label
 GMPP_COLUMNS = [
     (
         "financial_year_baseline_currency_m_including_non_government_costs",
-        "Financial Year Baseline (M)",
+        "Financial Year Baseline (millions)",
     ),
     (
         "financial_year_forecast_currency_m_including_non_government_costs",
-        "Financial Year Forecast (M)",
+        "Financial Year Forecast (millions)",
     ),
     (
         "total_baseline_whole_life_costs_currency_m_including_non_government_costs",
-        "Total Baseline Whole Life Costs (M)",
+        "Whole-life baseline costs (millions)",
     ),
-    ("total_baseline_benefits_currency_m", "Total Baseline Benefits (M)"),
+    ("total_baseline_benefits_currency_m", "Total Baseline Benefits (millions)"),
     ("financial_year_variance_pct", "Financial Year Variance %"),
     ("gmpp_id_number", "GMPP ID Number"),
     ("department", "Department"),
@@ -67,7 +67,7 @@ def test_ordinary_short_names_are_left_alone():
 def test_sentence_label_keeps_units_and_acronyms_readable():
     """Chart descriptions lowercased the whole label, so the unit rendered as
     "(m)" and an acronym as "ipa" mid-sentence."""
-    assert sentence_label("Financial Year Baseline (M)") == "financial year baseline (M)"
+    assert sentence_label("Financial Year Baseline (millions)") == "financial year baseline (millions)"
     assert sentence_label("IPA Delivery Confidence Assessment") == "IPA delivery confidence assessment"
     assert sentence_label("Financial Year Variance %") == "financial year variance %"
     assert sentence_label("Department") == "department"

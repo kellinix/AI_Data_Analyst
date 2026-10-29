@@ -42,7 +42,7 @@ NON_KPI_NUMERIC_KEYWORDS = [
 OUTCOME_KEYWORDS = [
     "target", "outcome", "label", "churned", "converted", "survived",
     "fraud", "clicked", "purchased", "responded", "approved", "won",
-    "success", "disease", "readmitted", "defaulted",
+    "success", "disease", "readmitted", "defaulted", "hired",
 ]
 
 
@@ -156,10 +156,16 @@ CURRENCY_KEYWORDS = [
     "spend", "value", "valuation", "gmv", "mrr", "arr", "aov", "money",
 ]
 
-_AVERAGE_NAME_KEYWORDS = ["pct", "percent", "percentage", "rate", "price", *AVERAGE_METRIC_KEYWORDS]
+_AVERAGE_NAME_KEYWORDS = ["pct", "percent", "percentage", "rate", "price", "per", *AVERAGE_METRIC_KEYWORDS]
 
 
 def _classify_column(col: str) -> str | None:
+    if col == "kwh_consumed":
+        return "orders"
+    if col == "total_cos_used":
+        # Each row is an organisation's count for a reported source sheet;
+        # averaging those counts hides the overall number of certificates.
+        return "orders"
     # A row-level Total is additive, but its unit is unknown without context.
     if col in {"total", "net_total", "grand_total"}:
         return "other"

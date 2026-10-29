@@ -124,6 +124,7 @@ test('metric formatting preserves percentages, negative values, and unknown curr
   assert.ok(formatMetric(metric({ value: 12.5, is_percent: true })).endsWith('%'));
   assert.ok(formatMetric(metric({ value: -1000 })).startsWith('-'));
   assert.ok(formatMetric(metric({ value: 1500, is_currency: true, currency: 'GBP' })).includes('£'));
+  assert.match(formatMetric(metric({ value: 7310.95, is_currency: true, currency: 'GBP', unit: 'million' })), /million$/);
   assert.ok(!formatMetric(metric({ value: 1500, is_currency: true })).includes('$'));
   assert.equal(formatMetric(metric({ value: NaN })), '—');
 });

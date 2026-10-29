@@ -3,6 +3,8 @@ from __future__ import annotations
 import duckdb
 import pytest
 
+from app.analytics.chart_selector import _time_series_chart
+from app.analytics.line_presentation import present_time_line
 from app.analytics.live_filter import (
     FilterValidationError,
     _histogram_edges,
@@ -14,6 +16,31 @@ from app.analytics.live_filter import (
     validate_filters,
 )
 from app.api.v1.endpoints.analyses import _derive_filterable_columns
+
+
+def test_long_daily_series_keeps_all_dates_by_grouping_full_months():
+    with duckdb.connect(":memory:") as conn:
+        conn.execute("CREATE TABLE data AS SELECT DATE '2025-01-01' + CAST(i AS INTEGER) AS sale_date, 1.0 AS revenue FROM range(180) t(i)")
+        chart = _time_series_chart("sale_date", "revenue")
+        populate_chart_option(conn, chart)
+        option = chart["echarts_option"]
+        assert option["_columns"]["time_grain"] == "month"
+        assert len(option["xAxis"]["data"]) == 6
+        assert sum(option["series"][0]["data"]) == 180
+        assert "each month" in present_time_line(chart)["description"]
+        populate_chart_option(conn, chart, '"sale_date" >= ?', ["2025-04-01"])
+        assert sum(option["series"][0]["data"]) == 90
+
+
+def test_monthly_chart_warns_when_last_month_has_few_recorded_dates():
+    with duckdb.connect(":memory:") as conn:
+        conn.execute("CREATE TABLE data AS SELECT DATE '2026-01-01' + CAST(i AS INTEGER) AS sale_date, 1.0 AS revenue FROM range(120) t(i) UNION ALL SELECT DATE '2026-05-01', 5.0")
+        chart = _time_series_chart("sale_date", "revenue")
+        populate_chart_option(conn, chart)
+    option = chart["echarts_option"]
+    assert sum(option["series"][0]["data"]) == 125
+    assert option["_columns"]["partial_last_month"]
+    assert "may be incomplete" in present_time_line(chart)["description"]
 
 SCHEMA = [
     {"name": "cp", "is_numeric": True, "analysis_role": "dimension"},
