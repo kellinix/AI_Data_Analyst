@@ -186,6 +186,10 @@ def present_insight(insight: dict[str, Any], metadata: dict[str, Any] | None = N
                 data[key] = business_text(data[key])
         if metadata is not None:
             _contextual_action(result, data, metadata)
+            if (record_context(metadata) or {}).get("kind") == "sales_transaction":
+                result["title"] = re.sub(r"\bMoney\b", "sales amount", str(result.get("title") or ""), flags=re.I)
+                if isinstance(data.get("evidence"), str):
+                    data["evidence"] = re.sub(r"\bMoney\b", "sales amount", data["evidence"], flags=re.I)
     data["presentation_version"] = VERSION
     result["data"] = data
     return result

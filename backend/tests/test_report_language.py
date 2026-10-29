@@ -11,6 +11,20 @@ from app.schemas.analysis import InsightResponse
 from app.services.report_language import forecast_wording, present_insight, present_metadata
 
 
+def test_sales_tracking_action_names_the_sales_amount():
+    metadata = {"schema": [
+        {"name": "date", "is_date": True, "analysis_role": "temporal_dimension"},
+        {"name": "money", "is_numeric": True, "analysis_role": "metric"},
+        {"name": "cash_type", "analysis_role": "dimension"},
+    ]}
+    insight = {"type": "recommendation", "title": "Track Money regularly",
+               "description": "Use money as a measure.",
+               "data": {"confidence_source": "rule:tracking", "evidence": "Money is 100."}}
+    shown = present_insight(insight, metadata)
+    assert shown["title"] == "Keep an eye on sales amount"
+    assert shown["data"]["evidence"] == "sales amount is 100."
+
+
 def test_forecast_explains_uncertainty_without_a_confidence_claim():
     data = {"metric": "revenue", "latest_value": 100, "confidence": .99,
             "change_direction_supported": True,

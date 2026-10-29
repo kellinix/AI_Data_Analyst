@@ -55,6 +55,19 @@ def test_sales_outcome_leads_when_input_prices_appear_first():
     assert any(chart["xAxis"] == "total" and chart["yAxis"] == "branch" for chart in charts)
 
 
+def test_invoice_arithmetic_does_not_become_a_scatter_insight():
+    schema = [
+        {"name": name, "is_numeric": True, "is_date": False, "analysis_role": "metric"}
+        for name in ("total", "tax_5_pct", "gross_income", "cogs", "unit_price", "quantity")
+    ]
+    stats = {name: {"count": 100, "min": 1, "max": 20} for name in ("total", "tax_5_pct", "gross_income", "cogs", "unit_price", "quantity")}
+    charts = select_charts(schema, stats, {}, {}, {
+        "tax_5_pct|total": 0.99, "cogs|gross_income": 0.95,
+        "unit_price|tax_5_pct": 0.85, "quantity|total": 0.84,
+    })
+    assert not any(chart["type"] == "scatter" for chart in charts)
+
+
 TIME_SCHEMA = [
     {"name": "period_date", "is_numeric": False, "is_date": True, "analysis_role": "temporal_dimension"},
     {"name": "revenue", "is_numeric": True, "is_date": False, "analysis_role": "metric"},

@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any
 
 from reportlab.lib import colors
@@ -144,7 +145,7 @@ class PdfChart(Flowable):
         super().__init__()
         self.chart = chart
         self.width = 460
-        self.height = (max(220, len(chart.categories) * 23 + 45) if chart.horizontal
+        self.height = (max(95, len(chart.categories) * 23 + 45) if chart.horizontal
                        else max(250, len(chart.categories) * 18 + 38) if chart.kind == "donut"
                        else 250)
 
@@ -175,7 +176,7 @@ class PdfChart(Flowable):
         if chart.stacked:
             values.extend(sum(max(0, data[i] or 0) for _, data in chart.series)
                           for i in range(len(chart.categories)))
-        low, high = _range(values)
+        low, high = _range(values, include_zero=chart.kind != "line")
         self._grid(x0, y0, w, h, low, high)
         count = len(chart.categories)
         if not count:
@@ -184,7 +185,13 @@ class PdfChart(Flowable):
             x = x0 + w * (index / max(1, count - 1) if chart.kind == "line" else (index + .5) / count)
             c.setFillColor(colors.HexColor("#716B86"))
             c.setFont("Helvetica", 7)
-            c.drawCentredString(x, y0 - 13, _short(chart.categories[index], 16))
+            label = chart.categories[index]
+            if chart.kind == "line":
+                try:
+                    label = datetime.fromisoformat(label).strftime("%b %Y")
+                except ValueError:
+                    pass
+            c.drawCentredString(x, y0 - 13, _short(label, 16))
         baseline = y0 + h * (0 - low) / (high - low)
         for series_index, (name, data) in enumerate(chart.series):
             color = colors.HexColor(chart.palette[series_index % len(chart.palette)])

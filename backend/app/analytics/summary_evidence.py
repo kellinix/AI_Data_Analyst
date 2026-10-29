@@ -34,11 +34,18 @@ def build_summary_facts(
     rows = int(statistics.get("row_count") or 0)
     fields = int(statistics.get("column_count") or len(statistics.get("schema", [])))
     schema = {c["name"]: c for c in statistics.get("schema", [])}
+    from app.analytics.record_context import record_context
+
+    sales_file = (record_context(statistics) or {}).get("kind") == "sales_transaction"
     evidence = statistics.get("analysis_evidence") or {}
     sampled = bool(statistics.get("sample_truncated"))
     scope = "analysed sample" if sampled else "analysed file"
 
     def label(column: str) -> str:
+        if sales_file and column in {"money", "total"}:
+            return "Sales Amount"
+        if sales_file and column == "cash_type":
+            return "Payment Method"
         fallback = column.replace("_", " ")
         display = str(schema.get(column, {}).get("display_label") or "")
         # Display metadata can be model-assisted. Accept formatting changes,
@@ -128,7 +135,7 @@ def build_summary_facts(
             calculation = f"{'SUM' if operation == 'total' else 'AVG'}({column})" + (" * 100" if kpi.get("is_percent") else "")
         add(f"metric_{index}", text, f"numeric_stats.{column}.{operation}", calculation,
             {"column": column, "value": value, "operation": operation, "weighted_by": weighted,
-             "display_value": formatted}, 2 if index < 2 else 4)
+             "display_value": formatted, "display_label": label(column)}, 2 if index < 2 else 4)
 
     entities = [entity for entity in statistics.get("entity_counts", [])
                 if not is_serial_identifier(str(entity["column"]))][:3]
@@ -152,7 +159,7 @@ def build_summary_facts(
         add(f"category_{category_index}", f"{label(column)} has {count:,} records labelled '{item['value']}' ({count / rows:.1%} of all {rows:,} analysed records).",
             f"categorical_stats.{column}.top_values", "Category count / all analysed records * 100",
             {"column": column, "category": item["value"], "count": count, "denominator": rows,
-             "percent": count / rows * 100}, 3)
+             "percent": count / rows * 100, "display_label": label(column)}, 3)
         category_index += 1
         if category_index >= 4:
             break
@@ -167,7 +174,8 @@ def build_summary_facts(
         add(f"forecast_{index}", f"For {label(column)}, the next-month model range of {_format(low)} to {_format(high)} includes the latest month's {_format(latest)}; the direction of change is uncertain.",
             f"forecasts.{index}.predictions.next_month", "Compare latest monthly value with next-month model range",
             {"column": column, "latest": latest, "lower": low, "upper": high,
-             "method": forecast.get("method"), "observations": forecast.get("observations")}, 3)
+             "method": forecast.get("method"), "observations": forecast.get("observations"),
+             "display_label": label(column)}, 3)
 
     if not statistics.get("date_range") and not any(c.get("analysis_role") == "temporal_dimension" for c in schema.values()):
         add("snapshot", "No usable date series was detected, so this file cannot establish growth or change over time.",

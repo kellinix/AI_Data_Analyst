@@ -41,7 +41,7 @@ def _unique_facts(facts: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def _friendly_fact(fact: dict[str, Any]) -> str:
     values = fact.get("values") or {}
-    column = _label(values.get("column", ""))
+    column = _label(values.get("display_label") or values.get("column", ""))
     operation = values.get("operation")
     if column and operation and _finite(values.get("value")) is not None:
         display = values.get("display_value")
@@ -50,7 +50,7 @@ def _friendly_fact(fact: dict[str, Any]) -> str:
             # Recover only their server-rendered amount, retaining currency/%.
             match = re.search(r"(?:sums to|averages) (.+?) (?:across|when weighted by)", fact.get("text", ""))
             display = match[1] if match and str(fact["id"]).startswith("metric_") else _format(float(values["value"]))
-        phrases = {"total": f"Total {column}", "mean": f"Average {column}",
+        phrases = {"total": "Total" if column.lower() == "total" else f"Total {column}", "mean": f"Average {column}",
                    "weighted_mean": f"Average {column}", "min": f"The lowest {column}",
                    "max": f"The highest {column}"}
         if operation in phrases:

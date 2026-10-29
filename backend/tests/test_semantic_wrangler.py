@@ -234,3 +234,24 @@ def test_bar_chart_titles_survive_full_display_metadata_round_trip():
     updated_rate = next(c for c in updated if c["id"] == rate["id"])
     assert updated_bar["title"] == "Avg Chol by Cp"
     assert updated_rate["title"] == "Target Rate by Cp"
+
+
+def test_sales_amount_bar_caption_uses_its_display_label():
+    chart = {"id": "sales", "type": "bar", "xAxis": "total", "yAxis": "branch",
+             "aggregation": "sum", "description": "Compares the total total across each branch",
+             "echarts_option": {"xAxis": {}, "yAxis": {}, "series": []}}
+    display = {"columns": [{"name": "total", "label": "Sales Amount"},
+                           {"name": "branch", "label": "Branch"}], "charts": []}
+    shown = apply_display_metadata_to_charts([chart], display)[0]
+    assert shown["description"] == "Total sales amount for each branch."
+
+
+def test_sales_payment_method_label_overrides_raw_cash_type_title():
+    chart = {"id": "payment", "type": "bar", "xAxis": "money", "yAxis": "cash_type",
+             "aggregation": "sum", "echarts_option": {"xAxis": {}, "yAxis": {}, "series": []}}
+    display = {"columns": [{"name": "money", "label": "Sales Amount"},
+                           {"name": "cash_type", "label": "Payment Method"}],
+               "charts": [{"id": "payment", "title": "Money by Cash Type"}]}
+    shown = apply_display_metadata_to_charts([chart], display)[0]
+    assert shown["title"] == "Sales Amount by Payment Method"
+    assert shown["description"] == "Total sales amount for each payment method."

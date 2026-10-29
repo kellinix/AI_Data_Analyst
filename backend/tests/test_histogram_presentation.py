@@ -49,3 +49,13 @@ def test_tied_and_capped_saved_ranges_do_not_invent_a_unique_leader_or_full_scop
     assert '2 ranges share the highest count' in shown['description']
     assert 'first 10,000 entries' in shown['description']
     assert 'Most common range' not in shown['description']
+
+
+def test_sales_donut_names_the_record_and_payment_method_without_changing_counts():
+    chart = {"type": "donut", "title": "Cash Type breakdown", "series": ["cash_type"],
+             "echarts_option": {"series": [{"data": [{"name": "card", "value": 9},
+                                                     {"name": "cash", "value": 1}]}]}}
+    shown = present_histogram(chart, {"kind": "sales_transaction"})
+    assert shown["title"] == "Sales records by payment method"
+    assert shown["description"] == "Number of sales records for each payment method."
+    assert shown["echarts_option"] == chart["echarts_option"]

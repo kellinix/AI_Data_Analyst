@@ -233,6 +233,7 @@ class AnalysisEngine:
                     "value": kpi.get("value"),
                     "is_currency": kpi.get("is_currency", False),
                     "currency": kpi.get("currency"),
+                    "currency_symbol": kpi.get("currency_symbol"),
                     "is_percent": is_percent or kpi.get("is_percent", False),
                     "kpi_type": kpi.get("kpi_type"),
                     "mean": kpi.get("mean"),

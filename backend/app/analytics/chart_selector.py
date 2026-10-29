@@ -172,6 +172,7 @@ def select_charts(
             (pair, value)
             for pair, value in correlations.items()
             if all(column in metric_columns for column in pair.split("|"))
+            and not _is_invoice_component_pair(pair)
         ]
         if valid_correlations:
             top_corr = max(valid_correlations, key=lambda item: abs(item[1]))
@@ -182,6 +183,15 @@ def select_charts(
         charts.append(_histogram_chart(numeric_cols[0], numeric_stats.get(numeric_cols[0], {})))
 
     return useful_charts(charts)[:max_charts]
+
+
+def _is_invoice_component_pair(pair: str) -> bool:
+    """Skip plots of invoice inputs against amounts calculated from them."""
+    components = {
+        "unit_price", "quantity", "tax", "tax_5_pct", "gross_income", "cogs",
+        "total", "net_total", "grand_total", "gross_margin_percentage",
+    }
+    return set(pair.split("|")) <= components
 
 
 # Rows per month of span below which a date column is a scatter of dates
@@ -595,7 +605,10 @@ def _donut_chart(cat_col: str, top_values: list[dict]) -> dict[str, Any]:
         "xAxis": None,
         "yAxis": None,
         "series": [cat_col],
-        "color_scheme": ["#2563eb", "#10b981", "#f59e0b", "#8b5cf6", "#ef4444"],
+        "color_scheme": [
+            "#2563eb", "#10b981", "#f59e0b", "#8b5cf6",
+            "#ef4444", "#06b6d4", "#db2777", "#64748b",
+        ],
         "echarts_option": {
             "tooltip": {"trigger": "item"},
             "series": [{

@@ -9,6 +9,7 @@ from app.analytics.summary_evidence import build_summary_facts, render_summary
 from app.services import analysis_engine
 from app.services.ai_service import _coerce_analysis_json
 from app.services.file_processor import FileProcessor
+from app.services.report_language import present_metadata
 
 
 def _sales():
@@ -24,6 +25,43 @@ def _sales():
             {"value": "West", "count": 236}]}},
         "date_range": {"date": {"min": "2025-01-01", "max": "2025-12-31"}},
     }
+
+
+def test_sales_total_uses_a_meaningful_name_without_repeating_total():
+    stats = {
+        "row_count": 2, "column_count": 3,
+        "schema": [
+            {"name": "date", "is_date": True, "analysis_role": "temporal_dimension"},
+            {"name": "total", "is_numeric": True, "analysis_role": "metric"},
+            {"name": "payment", "analysis_role": "dimension"},
+        ],
+        "numeric_stats": {"total": {"total": 50, "count": 2}},
+        "categorical_stats": {}, "date_range": {"date": {"min": "2025-01-01", "max": "2025-01-02"}},
+    }
+    facts = build_summary_facts(stats, [{"column": "total", "is_total": True, "value": 50}])
+    summary, checks = render_summary(facts, ["metric_0"])
+    _, shown = present_metadata({**stats, "analysis_evidence": {"summary_checks": checks}}, summary)
+    assert "Total sales amount is 50." in shown
+    assert "Total total" not in shown
+
+
+def test_sales_cash_type_summary_says_payment_method():
+    stats = {
+        "row_count": 10, "column_count": 3,
+        "schema": [
+            {"name": "date", "is_date": True, "analysis_role": "temporal_dimension"},
+            {"name": "money", "is_numeric": True, "analysis_role": "metric"},
+            {"name": "cash_type", "analysis_role": "dimension"},
+        ],
+        "numeric_stats": {"money": {"total": 100, "count": 10}},
+        "categorical_stats": {"cash_type": {"top_values": [
+            {"value": "card", "count": 9}, {"value": "cash", "count": 1}]}},
+        "date_range": {"date": {"min": "2025-01-01", "max": "2025-01-10"}},
+    }
+    facts = build_summary_facts(stats, [{"column": "money", "is_total": True, "value": 100}])
+    summary, checks = render_summary(facts, ["category_0"])
+    _, shown = present_metadata({**stats, "analysis_evidence": {"summary_checks": checks}}, summary)
+    assert "for payment method" in shown
 
 
 def test_freeform_equal_representation_claim_is_never_used():

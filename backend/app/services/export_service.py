@@ -24,6 +24,13 @@ from app.analytics.report_relevance import useful_charts, useful_insights
 from app.services.export_charts import PdfChart, add_excel_charts, normalise_charts
 
 _IMPORTANCE_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+_KNOWN_CURRENCY_SYMBOLS = {"USD": "$", "GBP": "£", "EUR": "€", "JPY": "¥"}
+
+
+def _currency_prefix(data: dict[str, Any]) -> str:
+    code = str(data.get("currency") or "").upper()
+    symbol = data.get("currency_symbol") or _KNOWN_CURRENCY_SYMBOLS.get(code)
+    return str(symbol) if symbol else f"{code} " if code else ""
 
 
 def _kpi_insights(insights: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -80,10 +87,9 @@ def build_pdf_report(
 
     if summary:
         story.append(Paragraph("Executive Summary", heading))
-        for sentence in summary.split(". "):
-            sentence = sentence.strip()
-            if sentence:
-                story.append(Paragraph(escape(sentence if sentence.endswith(".") else f"{sentence}."), body))
+        for line in summary.splitlines():
+            if line.strip():
+                story.append(Paragraph(escape(line.strip()), body))
 
     visual_charts = normalise_charts(useful_charts(charts or []))
     if visual_charts:
@@ -99,20 +105,20 @@ def build_pdf_report(
 
     kpis = _kpi_insights(insights)
     if kpis:
-        story.append(Paragraph("Key Metrics", heading))
         rows = [["Metric", "Value"]]
         for kpi in kpis:
-            value = (kpi.get("data") or {}).get("value")
-            is_currency = (kpi.get("data") or {}).get("is_currency")
+            data = kpi.get("data") or {}
+            value = data.get("value")
+            is_currency = data.get("is_currency")
             formatted = (
-                f"${value:,.2f}" if is_currency and isinstance(value, int | float)
+                f"{_currency_prefix(data)}{value:,.2f}" if is_currency and isinstance(value, int | float)
                 else f"{value:,.0f}" if isinstance(value, int | float)
                 else str(value) if value is not None else "N/A"
             )
             rows.append([kpi.get("title", ""), formatted])
         table = Table(rows, colWidths=[9 * cm, 6 * cm])
         table.setStyle(_table_style())
-        story.append(table)
+        story.append(KeepTogether([Paragraph("Key Metrics", heading), table]))
 
     findings = _finding_insights(insights)
     if findings:
@@ -167,7 +173,7 @@ def build_excel_report(
         "bold": True, "bg_color": "#1e3a8a", "font_color": "white", "border": 1,
     })
     wrap_fmt = workbook.add_format({"text_wrap": True, "valign": "top"})
-    currency_fmt = workbook.add_format({"num_format": "$#,##0.00"})
+    currency_formats: dict[str, Any] = {}
 
     overview = workbook.add_worksheet("Overview")
     overview.set_column(0, 0, 24)
@@ -191,11 +197,20 @@ def build_excel_report(
         sheet.write(0, 0, "Metric", header_fmt)
         sheet.write(0, 1, "Value", header_fmt)
         for row, kpi in enumerate(kpis, start=1):
-            value = (kpi.get("data") or {}).get("value")
-            is_currency = (kpi.get("data") or {}).get("is_currency")
+            data = kpi.get("data") or {}
+            value = data.get("value")
+            is_currency = data.get("is_currency")
             sheet.write(row, 0, kpi.get("title", ""))
             if isinstance(value, int | float):
-                sheet.write_number(row, 1, value, currency_fmt if is_currency else None)
+                fmt = None
+                if is_currency:
+                    prefix = _currency_prefix(data)
+                    if prefix not in currency_formats:
+                        currency_formats[prefix] = workbook.add_format({
+                            "num_format": f'"{prefix}"#,##0.00' if prefix else "#,##0.00",
+                        })
+                    fmt = currency_formats[prefix]
+                sheet.write_number(row, 1, value, fmt)
             else:
                 sheet.write(row, 1, value if value is not None else "N/A")
 

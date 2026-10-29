@@ -89,3 +89,20 @@ def test_invalid_or_unpopulated_charts_are_excluded_without_invented_values():
         {"type": "scatter", "title": "Bad", "echarts_option": {"series": [{"data": [[1, "nan"]]}]}},
     ]
     assert len(normalise_charts(charts)) == 7
+
+
+def test_exports_do_not_invent_us_dollars_for_unknown_currency():
+    insights = [{"type": "summary", "title": "Sales Amount",
+                 "data": {"value": 115431.58, "is_currency": True, "currency": None}}]
+    args = {"name": "Coffee", "row_count": 3636, "column_count": 6,
+            "summary": None, "insights": insights}
+    pdf = build_pdf_report(**args)
+    page_content = b"\n".join(
+        zlib.decompress(base64.a85decode(stream.strip(), adobe=True))
+        for stream in re.findall(rb"stream\n(.*?)endstream", pdf, re.S)
+    )
+    assert b"115,431.58" in page_content
+    assert b"$115,431.58" not in page_content
+    workbook = load_workbook(io.BytesIO(build_excel_report(**args)))
+    assert workbook["Key Metrics"]["B2"].value == 115431.58
+    assert "$" not in workbook["Key Metrics"]["B2"].number_format

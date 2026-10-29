@@ -20,7 +20,7 @@ def test_start_is_the_first_recorded_amount_not_an_invented_zero():
     assert option['xAxis']['_monthYearLabels']['2025-02-03'] == 'Feb 2025'
     assert option['series'][0]['data'] == original['echarts_option']['series'][0]['data']
     assert 'markPoint' not in option['series'][0]
-    assert '3 Feb 2025, 144,076.51' in shown.description
+    assert 'First recorded point' not in shown.description
     assert 'Total revenue for each week' in shown.description
     assert original == before and ChartConfig(**shown.model_dump()) == shown
 

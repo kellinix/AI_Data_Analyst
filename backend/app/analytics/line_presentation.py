@@ -6,7 +6,7 @@ from datetime import datetime
 from typing import Any
 
 from app.analytics.labels import derive_label, sentence_label
-from app.analytics.summary_evidence import _finite, _format
+from app.analytics.summary_evidence import _finite
 
 
 def present_time_line(chart: dict[str, Any]) -> dict[str, Any]:
@@ -24,20 +24,17 @@ def present_time_line(chart: dict[str, Any]) -> dict[str, Any]:
     measured = [(index, _finite(value)) for index, value in enumerate(values) if index < len(dates) and _finite(value) is not None]
     if not measured:
         return result
-    index, value = measured[0]
-    date_label = str(dates[index])
-    try:
-        date_label = datetime.fromisoformat(date_label).strftime("%d %b %Y").lstrip("0")
-    except ValueError:
-        pass
-    amount = f"{chart['currency']} " if chart.get("currency") else ""
-    amount += _format(value)
     columns = option.get("_columns") or {}
     measure = sentence_label(str((option.get("yAxis") or {}).get("name") or derive_label(str(chart.get("yAxis") or "value"))))
     period = "week" if str(columns.get("x", "")).lower() == "week_start_date" else "date"
     aggregation = columns.get("aggregation") or chart.get("aggregation")
-    description = f"{'Total' if aggregation == 'sum' else 'Average'} {measure} for each {period}." if aggregation in {"sum", "average"} else str(chart.get("description") or "")
-    result["description"] = f"{description.rstrip('. ')}. First recorded point: {date_label}, {amount}.".lstrip('. ')
+    if aggregation == "sum":
+        description = f"Total for each {period}." if measure.lower() == "total" else f"Total {measure} for each {period}."
+    elif aggregation == "average":
+        description = f"Average {measure} for each {period}."
+    else:
+        description = str(chart.get("description") or "")
+    result["description"] = description
     axis.update({"boundaryGap": False, "nameLocation": "middle", "nameGap": 32,
                  "axisLabel": {**(axis.get("axisLabel") or {}), "fontSize": 10, "showMinLabel": True, "showMaxLabel": True}})
     month_labels = {}

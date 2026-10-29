@@ -34,8 +34,12 @@ Download `index_1.csv` from Kaggle's `ihelon/coffee-sales` (CC0) and
 python -m evals.reliability.run_kaggle_eval --coffee "../tmp/kaggle/coffee/index_1.csv" --supermarket "../tmp/kaggle/supermarket/Supermarket Sales Data.csv"
 ```
 
-This additional check derives row counts, measure totals, and category totals
-directly from each source CSV, then compares the default cleaned analysis,
-headline KPI, and category chart. It exits nonzero on disagreement. Source
-files are deliberately not committed. It cannot certify AI prose, forecast
-accuracy, web/mobile upload, export, authentication, or hosting behavior.
+This check derives row counts, measure totals, and category totals directly
+from each source CSV. It compares the default cleaned analysis, headline KPI,
+and category chart, then builds the same PDF and Excel reports used by the
+export routes. It checks PDF chart labels and drawing data, Excel chart counts,
+and the Excel category values against the source. Reports are written to the
+ignored `tmp/kaggle/eval_artifacts/` directory; render and inspect their PDF
+pages before a release. Use `--with-ai` for a local AI-backed wording pass.
+Source files are deliberately not committed. This does not exercise the HTTP
+upload route, database persistence, authentication, mobile UI, or hosting.
