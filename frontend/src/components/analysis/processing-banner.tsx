@@ -5,13 +5,13 @@ import { Progress } from "@/components/ui/progress"
 
 const STEPS = [
   "Reading file",
-  "Detecting columns",
+  "Checking the details",
   "Understanding data",
   "Finding patterns",
-  "Building KPIs",
-  "Generating charts",
-  "Writing insights",
-  "Finalising dashboard",
+  "Finding key figures",
+  "Making charts",
+  "Writing the summary",
+  "Finishing your report",
 ]
 
 interface ProcessingBannerProps {

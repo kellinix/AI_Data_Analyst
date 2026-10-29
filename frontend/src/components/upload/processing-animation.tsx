@@ -4,13 +4,13 @@ import { motion } from "framer-motion"
 import { CheckCircle2, Circle, Loader2 } from "lucide-react"
 
 const PROCESSING_STEPS = [
-  { label: "Reading file", sublabel: "Parsing structure and encoding" },
-  { label: "Detecting columns", sublabel: "Identifying data types and formats" },
-  { label: "Understanding data", sublabel: "Seeing how your figures spread and relate" },
+  { label: "Reading your file", sublabel: "Checking the information you uploaded" },
+  { label: "Checking the details", sublabel: "Finding dates, amounts and categories" },
+  { label: "Understanding your data", sublabel: "Seeing how your figures change and compare" },
   { label: "Finding patterns", sublabel: "Checking what stands out" },
-  { label: "Building KPIs", sublabel: "Detecting business metrics" },
-  { label: "Generating charts", sublabel: "Selecting optimal visualisations" },
-  { label: "Writing insights", sublabel: "GPT-4o is analysing your data" },
+  { label: "Finding key figures", sublabel: "Adding up the measures your file contains" },
+  { label: "Making charts", sublabel: "Showing the comparisons your data supports" },
+  { label: "Writing the summary", sublabel: "Explaining what the figures show" },
 ]
 
 interface ProcessingAnimationProps {

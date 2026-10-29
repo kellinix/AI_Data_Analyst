@@ -61,7 +61,42 @@ def test_sales_cash_type_summary_says_payment_method():
     facts = build_summary_facts(stats, [{"column": "money", "is_total": True, "value": 100}])
     summary, checks = render_summary(facts, ["category_0"])
     _, shown = present_metadata({**stats, "analysis_evidence": {"summary_checks": checks}}, summary)
-    assert "for payment method" in shown
+    assert "show 'card' as the payment method" in shown
+
+
+def test_summary_omits_column_jargon_and_unique_ids_without_a_counting_issue():
+    stats = _sales()
+    stats["entity_counts"] = [{
+        "column": "customer_id", "distinct_values": 936,
+        "populated_records": 936, "repeated_records": 0,
+    }]
+    facts = build_summary_facts(stats, [])
+    assert not any(fact["id"].startswith("identity_") for fact in facts)
+    summary, checks = render_summary(facts)
+    _, shown = present_metadata({**stats, "analysis_evidence": {"summary_checks": checks}}, summary)
+    assert "Your file has 936 entries." in shown
+    assert "fields" not in shown
+
+    stats["entity_counts"][0]["repeated_records"] = 23
+    repeated = build_summary_facts(stats, [])
+    assert any(fact["id"].startswith("identity_") for fact in repeated)
+
+
+def test_old_saved_summary_hides_unique_id_count_when_nothing_repeats():
+    stats = _sales()
+    stats["entity_counts"] = [{
+        "column": "customer_id", "distinct_values": 936,
+        "populated_records": 936, "repeated_records": 23,
+    }]
+    facts = build_summary_facts(stats, [])
+    summary, checks = render_summary(facts, ["identity_0"])
+    assert "identity_0" in [fact["id"] for fact in checks["facts"]]
+    for fact in checks["facts"]:
+        if fact["id"] == "identity_0":
+            fact["values"]["repeated_records"] = 0
+    _, shown = present_metadata({**stats, "analysis_evidence": {"summary_checks": checks}}, summary)
+    assert "customer" not in shown.lower()
+    assert "Your file has 936 entries." in shown
 
 
 def test_freeform_equal_representation_claim_is_never_used():

@@ -59,7 +59,7 @@ def build_summary_facts(
         facts.append({"id": id, "text": text, "source": source, "calculation": calculation,
                       "values": values, "scope": scope, "priority": priority, "required": required})
 
-    count_text = f"The analysis covers {rows:,} records across {fields:,} fields"
+    count_text = f"The analysis covers {rows:,} records"
     if sampled:
         count_text += ", using the first records imported from the file rather than its full contents"
     add("records", count_text + ".", "statistics.row_count; statistics.column_count",
@@ -137,8 +137,11 @@ def build_summary_facts(
             {"column": column, "value": value, "operation": operation, "weighted_by": weighted,
              "display_value": formatted, "display_label": label(column)}, 2 if index < 2 else 4)
 
+    # A distinct-ID count only helps the headline when some records repeat an
+    # ID. Otherwise it restates the record count and obscures measured results.
     entities = [entity for entity in statistics.get("entity_counts", [])
-                if not is_serial_identifier(str(entity["column"]))][:3]
+                if not is_serial_identifier(str(entity["column"]))
+                and int(entity.get("repeated_records") or 0) > 0][:3]
     for index, entity in enumerate(entities):
         column = str(entity["column"])
         count = int(entity["distinct_values"])

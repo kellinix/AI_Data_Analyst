@@ -56,6 +56,6 @@ def test_sales_donut_names_the_record_and_payment_method_without_changing_counts
              "echarts_option": {"series": [{"data": [{"name": "card", "value": 9},
                                                      {"name": "cash", "value": 1}]}]}}
     shown = present_histogram(chart, {"kind": "sales_transaction"})
-    assert shown["title"] == "Sales records by payment method"
+    assert shown["title"] == "Number of sales records by payment method"
     assert shown["description"] == "Number of sales records for each payment method."
     assert shown["echarts_option"] == chart["echarts_option"]

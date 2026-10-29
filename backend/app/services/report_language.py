@@ -340,11 +340,15 @@ def present_metadata(metadata: dict[str, Any] | None, summary: str | None) -> tu
             and all(isinstance(f, dict) and isinstance(f.get("text"), str) for f in facts)
             and "\n".join(f["text"] for f in facts) == summary):
         try:
-            sentences = [_friendly_fact(fact) for fact in facts]
+            visible_facts = [fact for fact in facts if not (
+                str(fact.get("id", "")).startswith("identity_")
+                and (fact.get("values") or {}).get("repeated_records") == 0
+            )]
+            sentences = [_friendly_fact(fact) for fact in visible_facts]
         except (KeyError, TypeError, ValueError):
             sentences = []
         if sentences:
-            for fact, sentence in zip(facts, sentences, strict=True):
+            for fact, sentence in zip(visible_facts, sentences, strict=True):
                 fact["text"] = sentence
             summary = "\n".join(sentences)
     evidence = result.get("analysis_evidence") or {}

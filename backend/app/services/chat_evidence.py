@@ -60,8 +60,8 @@ def _friendly_fact(fact: dict[str, Any]) -> str:
             return text
     if column and "category" in values:
         count, total = int(values["count"]), int(values["denominator"])
-        return (f"{count:,} of the {total:,} entries are listed as '{values['category']}' "
-                f"for {column} ({count / total:.1%}).")
+        return (f"Of the {total:,} entries, {count:,} show '{values['category']}' "
+                f"as the {column.lower()} ({count / total:.1%}).")
     if column and "distinct_values" in values:
         return (f"The file contains {int(values['distinct_values']):,} different values for {column}. "
                 "The names or IDs have not been independently checked.")
@@ -69,7 +69,7 @@ def _friendly_fact(fact: dict[str, Any]) -> str:
         if values.get("sampled"):
             return (f"This is based on the first {int(values['records']):,} entries imported from the file, "
                     "so it may not represent the whole file.")
-        return f"Your file has {int(values['records']):,} entries and {int(values['fields']):,} fields."
+        return f"Your file has {int(values['records']):,} entries."
     if fact["id"] == "cleaning":
         text = (f"These figures use the file after cleaning: {int(values['output_rows']):,} entries, "
                 f"down from {int(values['input_rows']):,}.")

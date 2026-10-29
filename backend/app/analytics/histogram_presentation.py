@@ -45,7 +45,7 @@ def present_histogram(chart: dict[str, Any], context: dict | None = None) -> dic
         result = deepcopy(chart)
         group = str((result.get("series") or [result.get("xAxis") or "group"])[0])
         group_label = "payment method" if group == "cash_type" else sentence_label(derive_label(group))
-        result["title"] = f"Sales records by {group_label}"
+        result["title"] = f"Number of sales records by {group_label}"
         result["description"] = f"Number of sales records for each {group_label}."
         return result
     if chart.get("type") != "histogram":

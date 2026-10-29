@@ -80,9 +80,8 @@ def build_pdf_report(
 
     story: list[Any] = []
     story.append(Paragraph(escape(name), styles["Title"]))
-    row_text = f"{row_count:,} rows" if row_count is not None else "Unknown rows"
-    col_text = f"{column_count} columns" if column_count is not None else "unknown columns"
-    story.append(Paragraph(f"{row_text} &middot; {col_text}", styles["Normal"]))
+    if row_count is not None:
+        story.append(Paragraph(f"{row_count:,} records analysed", styles["Normal"]))
     story.append(Spacer(1, 12))
 
     if summary:
@@ -180,9 +179,9 @@ def build_excel_report(
     overview.set_column(1, 1, 80)
     overview.write(0, 0, "Analysis name", header_fmt)
     overview.write(0, 1, name, header_fmt)
-    overview.write(1, 0, "Rows")
+    overview.write(1, 0, "Records analysed")
     overview.write(1, 1, row_count if row_count is not None else "Unknown")
-    overview.write(2, 0, "Columns")
+    overview.write(2, 0, "Information fields")
     overview.write(2, 1, column_count if column_count is not None else "Unknown")
     if summary:
         overview.write(4, 0, "Executive summary")

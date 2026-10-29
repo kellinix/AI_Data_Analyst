@@ -44,8 +44,8 @@ export default function AuthLayout({
             {[
               {
                 icon: "⚡",
-                title: "Instant KPI detection",
-                desc: "Revenue, profit, churn, and more — automatically.",
+                title: "Key figures, explained",
+                desc: "See the totals and comparisons your file supports.",
               },
               {
                 icon: "🤖",
@@ -54,8 +54,8 @@ export default function AuthLayout({
               },
               {
                 icon: "💬",
-                title: "Ask anything",
-                desc: "Chat with your data like a senior analyst.",
+                title: "Ask about your file",
+                desc: "Get answers tied to the figures in your data.",
               },
               {
                 icon: "📊",
@@ -64,8 +64,8 @@ export default function AuthLayout({
               },
               {
                 icon: "📋",
-                title: "Actionable recommendations",
-                desc: "Review recommendations alongside their supporting evidence.",
+                title: "Suggested next checks",
+                desc: "See what to check next and why it matters.",
               },
             ].map((feature) => (
               <li key={feature.title} className="flex items-start gap-3">
