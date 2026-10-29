@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime
-from typing import Any
 
 from pydantic import BaseModel, ConfigDict, EmailStr
 
@@ -62,6 +61,21 @@ class UserResponse(UserBase):
     updated_at: datetime
 
 
+class SubscriptionSummary(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    user_id: uuid.UUID
+    plan: str
+    status: str
+    stripe_customer_id: str | None
+    stripe_subscription_id: str | None
+    current_period_start: str | None
+    current_period_end: str | None
+    cancel_at_period_end: bool
+    created_at: datetime
+
+
 class UserProfileResponse(UserResponse):
-    subscription: Any | None = None
+    subscription: SubscriptionSummary | None = None
     usage: UsageStats

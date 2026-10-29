@@ -19,6 +19,7 @@ from app.schemas.user import (
     UserUpdate,
 )
 from app.services.account_service import delete_account_uploads, delete_auth_user
+from app.services.billing_service import stripe_request
 
 router = APIRouter()
 
@@ -132,7 +133,14 @@ async def delete_me(current_user: CurrentUser, db: DB):
     )
     billing = subscription.scalar_one_or_none()
     if billing and billing.stripe_subscription_id and billing.status not in ("canceled", "cancelled"):
-        raise HTTPException(409, "Cancel your paid subscription before deleting your account")
+        # Account removal must not leave a recurring charge behind. Stripe's
+        # cancellation response is required before deleting local or auth data.
+        path = f"/subscriptions/{billing.stripe_subscription_id}"
+        current = await stripe_request("GET", path)
+        if current.get("status") != "canceled":
+            canceled = await stripe_request("DELETE", path)
+            if canceled.get("status") != "canceled":
+                raise HTTPException(503, "Could not cancel billing; please retry account deletion.")
 
     # Bulk DELETE lets the database cascade all owned rows, rather than having
     # ORM relationships try to null out required foreign keys.

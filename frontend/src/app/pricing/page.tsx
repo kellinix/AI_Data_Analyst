@@ -2,10 +2,11 @@ import type { Metadata } from "next"
 import Link from "next/link"
 import { ArrowRight, Check, Sparkles } from "lucide-react"
 import { BrandLogo } from "@/components/layout/brand-logo"
+import { BillingAction } from "@/components/billing/billing-action"
 
 export const metadata: Metadata = {
   title: "Pricing",
-  description: "Try Zephyr free and see the planned Pro early-access price.",
+  description: "Compare Zephyr's Free and £19 per month Pro plans.",
 }
 
 const plans = [
@@ -27,7 +28,7 @@ const plans = [
     analyses: "20 analyses each month",
     questions: "100 follow-up questions each month",
     storage: "1 GB of saved files",
-    status: "Planned early access",
+    status: "£19 per month",
     accent: "from-violet-500 to-fuchsia-500",
     featured: true,
   },
@@ -52,7 +53,7 @@ export default function PricingPage() {
           </p>
           <h1 className="text-4xl font-bold tracking-tight sm:text-6xl">Start free. Make sense of your data.</h1>
           <p className="mx-auto mt-6 max-w-2xl text-base leading-7 text-violet-100/70 sm:text-lg">
-            Try Zephyr with your own spreadsheet during our free pilot. A Pro plan with more analyses and follow-up questions is planned for later.
+            Try Zephyr with your own spreadsheet during our free pilot. Pro gives you more analyses and follow-up questions when subscriptions open.
           </p>
         </div>
 
@@ -76,14 +77,14 @@ export default function PricingPage() {
                   Start free <ArrowRight className="h-4 w-4" />
                 </Link>
               ) : (
-                <p className="mt-9 flex h-12 items-center justify-center rounded-xl border border-white/15 bg-white/5 text-sm font-medium text-violet-100/70">Pro is not available to purchase yet</p>
+                <BillingAction location="pricing" />
               )}
             </section>
           ))}
         </div>
 
         <div className="mt-8 rounded-2xl border border-amber-300/25 bg-amber-300/10 p-5 text-sm leading-6 text-amber-100/90">
-          £19/month is the planned introductory Pro price. Signing up now starts a free account and will not charge you. Pro will open after pilot testing; you will choose whether to subscribe when it becomes available.
+          Pro is £19 per month when subscriptions are available. A free account requires no payment method. You will see Stripe’s payment page and confirm the price before any charge.
         </div>
       </main>
     </div>

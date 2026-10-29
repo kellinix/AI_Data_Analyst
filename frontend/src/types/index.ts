@@ -60,11 +60,12 @@ export interface Subscription {
   id: string
   user_id: string
   plan: SubscriptionPlan
-  status: "active" | "canceled" | "past_due" | "trialing"
-  current_period_start: string
-  current_period_end: string
+  status: "active" | "canceled" | "cancelled" | "past_due" | "trialing" | "incomplete" | "unpaid" | "paused"
+  current_period_start: string | null
+  current_period_end: string | null
   cancel_at_period_end: boolean
   stripe_subscription_id: string | null
+  stripe_customer_id: string | null
   created_at: string
 }
 

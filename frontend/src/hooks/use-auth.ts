@@ -30,6 +30,8 @@ export function useAuth() {
           .catch(() => {})
           .finally(() => setLoading(false))
       } else {
+        // The persisted user is only a display cache, not proof of a session.
+        reset()
         setLoading(false)
       }
     })

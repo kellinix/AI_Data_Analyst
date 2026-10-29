@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from typing import TYPE_CHECKING
 
-from sqlalchemy import Boolean, ForeignKey, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -27,7 +28,13 @@ class Subscription(UUIDMixin, TimestampMixin, Base):
     plan: Mapped[str] = mapped_column(String(32), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
     stripe_customer_id: Mapped[str | None] = mapped_column(String(128), unique=True, nullable=True)
-    stripe_subscription_id: Mapped[str | None] = mapped_column(String(128), unique=True, nullable=True)
+    stripe_subscription_id: Mapped[str | None] = mapped_column(
+        String(128), unique=True, nullable=True
+    )
+    pending_checkout_session_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    checkout_expires_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     current_period_start: Mapped[str | None] = mapped_column(String(32), nullable=True)
     current_period_end: Mapped[str | None] = mapped_column(String(32), nullable=True)
     cancel_at_period_end: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)

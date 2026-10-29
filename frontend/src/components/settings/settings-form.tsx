@@ -18,6 +18,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { del, get, patch } from "@/lib/api/client"
 import { createClient } from "@/lib/supabase/client"
 import { useAuthStore } from "@/stores/auth.store"
+import { BillingAction } from "@/components/billing/billing-action"
 import type { UsageLedgerSummary } from "@/types"
 
 const profileSchema = z.object({
@@ -43,7 +44,11 @@ export function SettingsForm() {
   }, [])
 
   const deleteAccount = async () => {
-    if (!confirm("Permanently delete your account and all uploaded files, analyses, and chats? This cannot be undone.")) return
+    const billingNotice = profile?.subscription?.stripe_subscription_id &&
+      profile.subscription.status !== "canceled" && profile.subscription.status !== "cancelled"
+      ? " Your paid subscription will be canceled immediately."
+      : ""
+    if (!confirm(`Permanently delete your account and all uploaded files, analyses, and chats?${billingNotice} This cannot be undone.`)) return
     setDeleting(true)
     try {
       await del<void>("/users/me")
@@ -129,8 +134,14 @@ export function SettingsForm() {
           {profile?.plan === "free" && " · No payment method needed"}
         </p>
         <Link href="/pricing" className="mt-3 inline-block text-sm font-semibold text-violet-700 hover:underline dark:text-violet-300">
-          See plan allowances and planned pricing
+          See plan allowances and pricing
         </Link>
+        {profile?.subscription?.cancel_at_period_end && profile.subscription.current_period_end && (
+          <p className="mt-2 text-sm text-amber-700 dark:text-amber-300">
+            Your Pro access ends on {new Date(profile.subscription.current_period_end).toLocaleDateString()}.
+          </p>
+        )}
+        <BillingAction location="settings" />
       </section>
 
       <Separator />

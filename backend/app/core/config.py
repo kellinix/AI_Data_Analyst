@@ -223,6 +223,7 @@ class Settings(BaseSettings):
     stripe_webhook_secret: str = ""
     stripe_pro_price_id: str = ""
     stripe_enterprise_price_id: str = ""
+    stripe_billing_enabled: bool = False
 
 
 @lru_cache

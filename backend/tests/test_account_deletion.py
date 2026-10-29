@@ -133,8 +133,29 @@ async def test_running_analysis_blocks_deletion(deletion):
     db.commit.assert_not_awaited()
 
 
-async def test_paid_subscription_blocks_deletion(deletion):
+async def test_deleting_paid_account_cancels_billing_first(deletion, monkeypatch):
     owner, db, remote_delete, _ = deletion
+    cancel = AsyncMock(side_effect=[{"status": "active"}, {"status": "canceled"}])
+    monkeypatch.setattr(users, "stripe_request", cancel)
+    db.execute.side_effect = [
+        Mock(first=Mock(return_value=None)),
+        Mock(scalar_one_or_none=Mock(return_value=SimpleNamespace(
+            stripe_subscription_id="sub-test", status="active",
+        ))),
+        Mock(),
+    ]
+    response = await users.delete_me(owner, db)
+    assert response.status_code == 204
+    assert [call.args for call in cancel.await_args_list] == [
+        ("GET", "/subscriptions/sub-test"), ("DELETE", "/subscriptions/sub-test")
+    ]
+    remote_delete.assert_awaited_once()
+
+
+async def test_failed_billing_cancellation_preserves_account(deletion, monkeypatch):
+    owner, db, remote_delete, _ = deletion
+    cancel = AsyncMock(side_effect=HTTPException(503, "Billing unavailable"))
+    monkeypatch.setattr(users, "stripe_request", cancel)
     db.execute.side_effect = [
         Mock(first=Mock(return_value=None)),
         Mock(scalar_one_or_none=Mock(return_value=SimpleNamespace(
@@ -143,8 +164,25 @@ async def test_paid_subscription_blocks_deletion(deletion):
     ]
     with pytest.raises(HTTPException) as error:
         await users.delete_me(owner, db)
-    assert error.value.status_code == 409
+    assert error.value.status_code == 503
     remote_delete.assert_not_awaited()
+    db.commit.assert_not_awaited()
+
+
+async def test_already_canceled_remote_subscription_allows_deletion(deletion, monkeypatch):
+    owner, db, remote_delete, _ = deletion
+    stripe = AsyncMock(return_value={"status": "canceled"})
+    monkeypatch.setattr(users, "stripe_request", stripe)
+    db.execute.side_effect = [
+        Mock(first=Mock(return_value=None)),
+        Mock(scalar_one_or_none=Mock(return_value=SimpleNamespace(
+            stripe_subscription_id="sub-test", status="active",
+        ))),
+        Mock(),
+    ]
+    assert (await users.delete_me(owner, db)).status_code == 204
+    stripe.assert_awaited_once_with("GET", "/subscriptions/sub-test")
+    remote_delete.assert_awaited_once()
 
 
 async def test_remote_failure_preserves_local_data(deletion):
