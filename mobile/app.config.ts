@@ -20,7 +20,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       adaptiveIcon: { foregroundImage: './assets/android-icon-foreground.png', monochromeImage: './assets/android-icon-monochrome.png', backgroundColor: '#F6F8FC' },
     },
     plugins: [
-      'expo-router', 'expo-secure-store', 'expo-dev-client', 'expo-font',
+      'expo-router', 'expo-secure-store', 'expo-dev-client', 'expo-font', 'expo-sharing',
       ['expo-build-properties', { android: { usesCleartextTraffic: development } }],
     ],
     web: { ...config.web, bundler: 'metro', output: 'single', name: 'Zephyr' },
