@@ -70,6 +70,10 @@ def select_charts(
             and numeric_stats[c["name"]].get("min") == numeric_stats[c["name"]].get("max")
         )
     ]
+    # Source column order often puts unit prices or tax before the amount
+    # actually earned. Lead with outcome measures so the first time and group
+    # charts answer the business question rather than describe input prices.
+    numeric_cols.sort(key=_metric_priority)
     categorical_cols = sorted(
         [
             c["name"]
@@ -93,7 +97,12 @@ def select_charts(
     if date_cols and numeric_cols:
         date_col = date_cols[0]
         dense_cols = [c for c in numeric_cols[:3] if not _is_sparse_numeric_column(c, numeric_stats)]
-        if len(dense_cols) >= 2 and _comparable_scales(dense_cols, numeric_stats):
+        if (
+            len(dense_cols) >= 2
+            and len({_aggregation(col) for col in dense_cols}) == 1
+            and len({_metric_priority(col) for col in dense_cols}) == 1
+            and _comparable_scales(dense_cols, numeric_stats)
+        ):
             charts.append(_multi_line_chart(date_col, dense_cols))
         primary_metric = numeric_cols[0]
         if _is_sparse_numeric_column(primary_metric, numeric_stats):
@@ -237,6 +246,24 @@ def _is_business_metric(column: str) -> bool:
         or normalized.startswith("is_")
         or normalized.startswith("has_")
     )
+
+
+def _metric_priority(column: str) -> int:
+    normalized = _normalize(column)
+    words = set(normalized.split("_"))
+    if words & {"revenue", "sales", "turnover", "gmv"}:
+        return 0
+    if words & {"amount", "money"} or normalized in {"total", "net_total", "grand_total"}:
+        return 1
+    if words & {"profit", "income", "earnings"}:
+        return 2
+    if words & {"quantity", "units", "orders", "transactions"}:
+        return 3
+    if words & {"cost", "cogs", "spend", "budget"}:
+        return 4
+    if words & {"price", "tax", "rating", "rate", "margin", "percentage"}:
+        return 6
+    return 5
 
 
 def _is_chart_dimension(

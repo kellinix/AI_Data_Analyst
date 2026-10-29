@@ -331,6 +331,7 @@ class FileProcessor:
         ]
         report["source_quality"] = {
             "score": _quality_score(df.height, source_issues), "issues": source_issues,
+            "input_rows": df.height,
             "scope": "Source completeness only; missing fields may be optional. Identity and external accuracy are not verified.",
         }
 

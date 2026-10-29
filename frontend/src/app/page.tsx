@@ -184,7 +184,7 @@ export default function LandingPage() {
         </AnimatePresence>
       </main>
 
-      {/* Social proof footer */}
+      {/* Product footer */}
       <AnimatePresence>
         {state === "idle" && (
           <motion.footer
@@ -195,10 +195,7 @@ export default function LandingPage() {
             className="relative z-10 pb-10 text-center"
           >
             <p className="text-xs text-zinc-400 dark:text-zinc-600">
-              Trusted by 10,000+ analysts at companies like{" "}
-              <span className="font-medium text-zinc-500">Acme Corp</span>,{" "}
-              <span className="font-medium text-zinc-500">Globex</span>, and{" "}
-              <span className="font-medium text-zinc-500">Initech</span>
+              Upload your data, explore the results, and take your charts with you.
             </p>
           </motion.footer>
         )}

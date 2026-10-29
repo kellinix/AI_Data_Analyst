@@ -10,7 +10,7 @@ from typing import Any
 from app.analytics.text_matching import contains_keyword
 
 # Keyword maps for KPI detection
-REVENUE_KEYWORDS = ["revenue", "sales", "income", "turnover", "gross", "net_revenue", "total_sales", "amount", "price", "value", "gmv"]
+REVENUE_KEYWORDS = ["revenue", "sales", "income", "turnover", "gross", "net_revenue", "total_sales", "amount", "money", "price", "value", "gmv"]
 PROFIT_KEYWORDS = ["profit", "margin", "earnings", "ebitda", "net_income", "operating_income", "gross_profit"]
 ORDER_KEYWORDS = ["orders", "transactions", "purchases", "bookings", "invoices", "deals", "quantity", "units_sold"]
 CUSTOMER_KEYWORDS = ["customers", "users", "clients", "accounts", "buyers", "visitors", "leads", "contacts"]
@@ -113,7 +113,12 @@ def detect_kpis(
         "duration": 12, "retention": 13, "churn": 14, "cost": 15,
         "return": 16, "inventory": 17, "other": 18,
     }
-    kpis.sort(key=lambda k: (-3 if k["column"] == "chance_of_admit" else -2 if k["column"] == "cgpa" else priority.get(k["kpi_type"], 9)))
+    kpis.sort(key=lambda k: (
+        -3 if k["column"] == "chance_of_admit"
+        else -2 if k["column"] == "cgpa"
+        else 0.5 if k["column"] in {"total", "net_total", "grand_total"}
+        else priority.get(k["kpi_type"], 9)
+    ))
     for kpi in kpis:
         if kpi["column"] == "chance_of_admit":
             kpi["value"] = round(kpi["value"], 12) * 100
@@ -148,13 +153,16 @@ _KPI_TYPE_KEYWORDS: tuple[tuple[str, list[str]], ...] = (
 
 CURRENCY_KEYWORDS = [
     "revenue", "sales", "profit", "cost", "price", "amount", "income",
-    "spend", "value", "valuation", "gmv", "mrr", "arr", "aov",
+    "spend", "value", "valuation", "gmv", "mrr", "arr", "aov", "money",
 ]
 
 _AVERAGE_NAME_KEYWORDS = ["pct", "percent", "percentage", "rate", "price", *AVERAGE_METRIC_KEYWORDS]
 
 
 def _classify_column(col: str) -> str | None:
+    # A row-level Total is additive, but its unit is unknown without context.
+    if col in {"total", "net_total", "grand_total"}:
+        return "other"
     if contains_keyword(col, ["price"]):
         return "average"
     for kpi_type, keywords in _KPI_TYPE_KEYWORDS:

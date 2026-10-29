@@ -21,16 +21,25 @@ def record_context(metadata: dict) -> dict | None:
         return metadata.get("record_context") or {"kind": "admission", "singular": "applicant record", "plural": "applicant records", "description": "Applicant scores, grades, research experience and recorded admission chances. Actual admission decisions and dates are not included.", "label_columns": ["serial_no"] if any(c["name"] == "serial_no" for c in schema) else ["gre_score", "cgpa"]}
     fields = {_key(c["name"]): c for c in schema}
     required = {"weekstartdate", "region", "category", "channel", "revenue", "unitssold"}
-    if not required.issubset(fields):
-        return None
-    if not fields["weekstartdate"].get("is_date") or any(
-        not fields[name].get("is_numeric") or fields[name].get("analysis_role") != "metric"
+    if required.issubset(fields) and fields["weekstartdate"].get("is_date") and all(
+        fields[name].get("is_numeric") and fields[name].get("analysis_role") == "metric"
         for name in ("revenue", "unitssold")
     ):
-        return None
-    return {"kind": "weekly_sales", "singular": "weekly sales record", "plural": "weekly sales records",
-            "description": "Weekly sales by region, product category and sales channel. Each record lists the week's revenue, units sold and other sales figures.",
-            "label_columns": [fields[name]["name"] for name in ("weekstartdate", "region", "category", "channel")]}
+        return {"kind": "weekly_sales", "singular": "weekly sales record", "plural": "weekly sales records",
+                "description": "Weekly sales by region, product category and sales channel. Each record lists the week's revenue, units sold and other sales figures.",
+                "label_columns": [fields[name]["name"] for name in ("weekstartdate", "region", "category", "channel")]}
+
+    date_fields = [field for field in schema if field.get("is_date") and _key(field["name"]) in {"date", "datetime", "transactiondate", "saledate"}]
+    amount_fields = [fields[key] for key in ("money", "amount", "total", "sales", "revenue")
+                     if key in fields and fields[key].get("is_numeric") and fields[key].get("analysis_role") == "metric"]
+    transaction_fields = ("invoiced", "invoiceid", "payment", "paymentmethod", "cashtype", "productline", "coffeename")
+    if date_fields and amount_fields and any(key in fields for key in transaction_fields):
+        labels = [date_fields[0]["name"]]
+        labels.extend(fields[key]["name"] for key in transaction_fields if key in fields)
+        return {"kind": "sales_transaction", "singular": "sales record", "plural": "sales records",
+                "description": "Each row lists a dated sale with an amount and payment, product or invoice details. Repeated invoice IDs may refer to more than one row.",
+                "label_columns": labels[:4]}
+    return None
 
 
 def identifying_columns(schema: dict[str, dict], context: dict | None) -> list[str]:

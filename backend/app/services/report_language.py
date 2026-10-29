@@ -9,6 +9,7 @@ from typing import Any
 
 from app.analytics.labels import sentence_label
 from app.analytics.plain_language import plain_english
+from app.analytics.record_context import record_context
 from app.analytics.summary_evidence import _finite, _format
 from app.services.chat_evidence import _friendly_fact
 
@@ -325,6 +326,9 @@ def present_metadata(metadata: dict[str, Any] | None, summary: str | None) -> tu
         return metadata, summary
     result = deepcopy(metadata)
     if result.get("presentation_version") == VERSION:
+        context = record_context(result)
+        if context and summary:
+            summary = re.sub(r"\bentries\b", context["plural"], summary, flags=re.I)
         return result, summary
     checks = (result.get("analysis_evidence") or {}).get("summary_checks") or {}
     facts = checks.get("facts") or []
@@ -363,5 +367,8 @@ def present_metadata(metadata: dict[str, Any] | None, summary: str | None) -> tu
         if isinstance(source, dict):
             source["issues"] = [_quality_issue(issue) for issue in source.get("issues", [])]
             source["scope"] = "This describes missing information in your original file, before cleaning. Blank fields may be optional."
+    context = record_context(result)
+    if context and summary:
+        summary = re.sub(r"\bentries\b", context["plural"], summary, flags=re.I)
     result["presentation_version"] = VERSION
     return result, summary

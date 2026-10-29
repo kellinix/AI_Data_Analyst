@@ -16,6 +16,8 @@ from app.analytics.kpi_detector import _classify_column, _is_currency, detect_kp
         ("departmental_commentary_on_actions_planned_or_taken", None),
         # Real vocabulary still matches, including plurals and phrases.
         ("total_revenue", "revenue"),
+        ("money", "revenue"),
+        ("total", "other"),
         ("whole_life_costs", "cost"),
         ("units_sold", "orders"),
         ("new_customers", "customers"),
@@ -70,6 +72,8 @@ def test_a_percentage_kpi_uses_the_cost_weighted_average_when_one_exists():
         ("arr", "sum"),
         ("gmv", "sum"),
         ("revenue", "sum"),
+        ("money", "sum"),
+        ("total", "sum"),
         ("units_sold", "sum"),
         ("avg_order_value", "average"),
         ("conversion_rate", "average"),
@@ -100,6 +104,20 @@ def test_detect_revenue_kpi():
     kpis = detect_kpis(schema, numeric_stats)
     assert len(kpis) >= 1
     assert any(k["kpi_type"] == "revenue" for k in kpis)
+
+
+def test_row_total_precedes_input_price_in_headline_metrics():
+    schema = [
+        {"name": "unit_price", "is_numeric": True, "is_date": False},
+        {"name": "total", "is_numeric": True, "is_date": False},
+    ]
+    numeric_stats = {
+        "unit_price": {"total": 100, "mean": 10, "count": 10},
+        "total": {"total": 250, "mean": 25, "count": 10},
+    }
+    kpis = detect_kpis(schema, numeric_stats)
+    assert kpis[0]["column"] == "total"
+    assert kpis[0]["value"] == 250
 
 
 def test_fallback_kpi_from_non_matching_columns():

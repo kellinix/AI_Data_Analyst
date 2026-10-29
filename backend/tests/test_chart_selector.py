@@ -36,6 +36,25 @@ def test_chart_selector_ignores_numeric_attributes():
     assert ("revenue", "department") in chart_axes
 
 
+def test_sales_outcome_leads_when_input_prices_appear_first():
+    schema = [
+        {"name": "date", "is_numeric": False, "is_date": True, "analysis_role": "temporal_dimension"},
+        {"name": "branch", "is_numeric": False, "is_date": False, "analysis_role": "dimension"},
+        {"name": "unit_price", "is_numeric": True, "is_date": False, "analysis_role": "metric"},
+        {"name": "tax_5_pct", "is_numeric": True, "is_date": False, "analysis_role": "metric"},
+        {"name": "total", "is_numeric": True, "is_date": False, "analysis_role": "metric"},
+    ]
+    stats = {name: {"count": 1400, "min": 1, "max": 100, "mean": 20} for name in ("unit_price", "tax_5_pct", "total")}
+    categories = {"branch": {"unique_count": 3, "top_values": [{"value": "A", "count": 500}, {"value": "B", "count": 400}]}}
+    dates = {"date": {"min": "2024-01-01", "max": "2024-12-31"}}
+
+    charts = select_charts(schema, stats, categories, dates, {})
+
+    assert charts[0]["yAxis"] == "total"
+    assert charts[0]["aggregation"] == "sum"
+    assert any(chart["xAxis"] == "total" and chart["yAxis"] == "branch" for chart in charts)
+
+
 TIME_SCHEMA = [
     {"name": "period_date", "is_numeric": False, "is_date": True, "analysis_role": "temporal_dimension"},
     {"name": "revenue", "is_numeric": True, "is_date": False, "analysis_role": "metric"},

@@ -33,8 +33,13 @@ def generate_recommendations(
 
     recommendations.extend(_quality_recommendations(data_quality))
     source = data_quality.get("source_quality", {})
-    if source.get("issues"):
-        issue = max(source["issues"], key=lambda item: item.get("affected_rows", 0))
+    source_rows = int(source.get("input_rows") or 0)
+    material_source_issues = [
+        issue for issue in source.get("issues", [])
+        if not source_rows or int(issue.get("affected_rows") or 0) / source_rows >= 0.1
+    ]
+    if material_source_issues:
+        issue = max(material_source_issues, key=lambda item: item.get("affected_rows", 0))
         evidence = f"{issue.get('column')}: {issue.get('description')}"
         recommendations.append({
             "title": f"Check source coverage for {_humanize(issue.get('column') or 'missing fields')}",

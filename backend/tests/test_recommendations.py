@@ -2,6 +2,22 @@ from __future__ import annotations
 
 from app.analytics.recommendations import generate_recommendations
 
+
+def test_minor_optional_source_gap_does_not_become_a_recommendation():
+    recs = generate_recommendations(
+        kpis=[],
+        data_quality={
+            "issues": [],
+            "source_quality": {
+                "input_rows": 3636,
+                "issues": [{"column": "card", "affected_rows": 89,
+                            "description": "89 source values are missing (2.4%)"}],
+            },
+        },
+        anomalies=[], forecasts=[],
+    )
+    assert not recs
+
 LONG_CONTEXT_KEY = (
     "ipa_delivery_confidence_assessment_a_delivery_confidence_assessment_of_the_"
     "project_at_a_fixed_point_in_time_using_a_three_point_scale_red_amber_green"

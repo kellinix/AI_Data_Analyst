@@ -8,6 +8,7 @@ import polars as pl
 from app.analytics.histogram_presentation import present_histogram
 from app.analytics.record_context import record_context, record_label
 from app.services.investigation import ComparisonPlan, EntryRequest, entries
+from app.services.report_language import present_metadata
 
 
 def weekly_metadata():
@@ -50,3 +51,20 @@ def test_weekly_chart_context_survives_already_presented_charts_and_keeps_counts
     assert shown['echarts_option']['series'][0]['data'] == [224, 261]
     assert shown['echarts_option']['series'][0]['name'] == 'Weekly sales records'
     assert present_histogram(shown, record_context(weekly_metadata())) == shown
+
+
+def test_dated_sales_files_name_their_rows_without_claiming_unique_invoices():
+    for amount, markers in (("money", ["cash_type", "coffee_name"]),
+                            ("total", ["invoice_id", "branch", "product_line"])):
+        schema = [
+            {"name": "date", "is_date": True, "is_numeric": False, "analysis_role": "temporal_dimension"},
+            {"name": amount, "is_date": False, "is_numeric": True, "analysis_role": "metric"},
+            *[{"name": name, "is_date": False, "is_numeric": False, "analysis_role": "dimension"}
+              for name in markers],
+        ]
+        metadata = {"schema": schema}
+        context = record_context(metadata)
+        assert context["plural"] == "sales records"
+        assert "invoice" in context["description"]
+        _, summary = present_metadata(metadata, "Your file has 100 entries and 5 fields.")
+        assert summary == "Your file has 100 sales records and 5 fields."
