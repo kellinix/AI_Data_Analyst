@@ -43,3 +43,22 @@ ignored `tmp/kaggle/eval_artifacts/` directory; render and inspect their PDF
 pages before a release. Use `--with-ai` for a local AI-backed wording pass.
 Source files are deliberately not committed. This does not exercise the HTTP
 upload route, database persistence, authentication, mobile UI, or hosting.
+
+## Local upload-to-export check
+
+With Docker Desktop running and the development backend container healthy, copy
+the two downloaded CSVs into that container and run the disposable-database
+smoke test from the repository root:
+
+```powershell
+docker cp "tmp/kaggle/coffee/index_1.csv" "ai_dashboard_backend:/tmp/zephyr_coffee_source.csv"
+docker cp "tmp/kaggle/supermarket/Supermarket Sales Data.csv" "ai_dashboard_backend:/tmp/zephyr_supermarket_source.csv"
+docker compose exec -T backend python scripts/test_local_upload_export.py /tmp/zephyr_coffee_source.csv /tmp/zephyr_supermarket_source.csv
+```
+
+The script creates a temporary PostgreSQL database, applies migrations, sends
+both files through the upload and analysis ASGI routes, runs the persisted
+analysis pipeline, requests both export routes, checks source totals and chart
+presence, then drops the database. It replaces authentication and the Celery
+queue in the test process and uses offline narrative generation, so it does
+not certify Supabase sign-in, queue delivery, AI wording, or the browser UI.
