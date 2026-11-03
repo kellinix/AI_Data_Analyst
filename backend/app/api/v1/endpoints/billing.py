@@ -104,6 +104,13 @@ async def checkout(current_user: CurrentUser, db: DB) -> dict[str, str]:
             "line_items[0][price]": settings.stripe_pro_price_id,
             "line_items[0][quantity]": "1",
             "payment_method_types[0]": "card",
+            "branding_settings[display_name]": settings.app_name,
+            "consent_collection[terms_of_service]": "required",
+            "custom_text[terms_of_service_acceptance][message]": (
+                f"I agree to the [{settings.app_name} Terms of Use]"
+                f"({settings.frontend_url.rstrip('/')}/terms) and have read the "
+                f"[Privacy Policy]({settings.frontend_url.rstrip('/')}/privacy)."
+            ),
             "subscription_data[metadata][zephyr_user_id]": str(current_user.id),
             "success_url": f"{settings.frontend_url.rstrip('/')}/settings?billing=returned",
             "cancel_url": f"{settings.frontend_url.rstrip('/')}/pricing?billing=cancelled",
@@ -129,13 +136,16 @@ async def portal(current_user: CurrentUser, db: DB) -> dict[str, str]:
     record = result.scalar_one_or_none()
     if not record or not record.stripe_customer_id:
         raise HTTPException(404, "You do not have a billing account yet.")
+    portal_data = {
+        "customer": record.stripe_customer_id,
+        "return_url": f"{settings.frontend_url.rstrip('/')}/settings",
+    }
+    if settings.stripe_portal_configuration_id:
+        portal_data["configuration"] = settings.stripe_portal_configuration_id
     session = await stripe_request(
         "POST",
         "/billing_portal/sessions",
-        data={
-            "customer": record.stripe_customer_id,
-            "return_url": f"{settings.frontend_url.rstrip('/')}/settings",
-        },
+        data=portal_data,
     )
     return {"url": require_stripe_url(session.get("url"), "billing.stripe.com")}
 

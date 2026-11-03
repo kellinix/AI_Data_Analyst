@@ -22,10 +22,12 @@ from app.services import billing_service
 
 @pytest.fixture
 def configured(monkeypatch):
+    monkeypatch.setattr(billing.settings, "app_name", "Vesquiri")
     monkeypatch.setattr(billing.settings, "stripe_billing_enabled", True)
     monkeypatch.setattr(billing.settings, "stripe_secret_key", "sk_test_only")
     monkeypatch.setattr(billing.settings, "stripe_webhook_secret", "whsec_test_only")
     monkeypatch.setattr(billing.settings, "stripe_pro_price_id", "price_pro_19")
+    monkeypatch.setattr(billing.settings, "stripe_portal_configuration_id", "")
     monkeypatch.setattr(billing.settings, "frontend_url", "https://zephyr.example")
 
 
@@ -147,6 +149,11 @@ async def test_checkout_creates_customer_and_session_without_upgrading(
     assert calls[3][2]["data"]["line_items[0][price]"] == "price_pro_19"
     assert calls[3][2]["data"]["subscription_data[metadata][zephyr_user_id]"] == str(owner.id)
     assert calls[3][2]["data"]["success_url"] == "https://zephyr.example/settings?billing=returned"
+    assert calls[3][2]["data"]["branding_settings[display_name]"] == "Vesquiri"
+    assert calls[3][2]["data"]["consent_collection[terms_of_service]"] == "required"
+    policy_text = calls[3][2]["data"]["custom_text[terms_of_service_acceptance][message]"]
+    assert "https://zephyr.example/terms" in policy_text
+    assert "https://zephyr.example/privacy" in policy_text
     assert owner.plan == "free"
     assert db.flush.await_count == 2
 
@@ -235,6 +242,24 @@ async def test_portal_uses_only_owned_customer(configured, owner, monkeypatch):
     assert (await billing.portal(owner, db))["url"].startswith("https://billing.stripe.com/")
     assert request.await_args.kwargs["data"]["customer"] == "cus_owned"
     assert request.await_args.kwargs["data"]["return_url"] == "https://zephyr.example/settings"
+
+
+async def test_portal_uses_app_specific_configuration(configured, owner, monkeypatch):
+    monkeypatch.setattr(billing.settings, "stripe_portal_configuration_id", "bpc_vesquiri")
+    db = AsyncMock()
+    db.execute.return_value = Mock(
+        scalar_one_or_none=Mock(return_value=SimpleNamespace(stripe_customer_id="cus_owned"))
+    )
+    request = AsyncMock(return_value={"url": "https://billing.stripe.com/p/session"})
+    monkeypatch.setattr(billing, "stripe_request", request)
+
+    await billing.portal(owner, db)
+
+    assert request.await_args.kwargs["data"] == {
+        "customer": "cus_owned",
+        "return_url": "https://zephyr.example/settings",
+        "configuration": "bpc_vesquiri",
+    }
 
 
 @pytest.mark.parametrize(
