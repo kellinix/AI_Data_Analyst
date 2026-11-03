@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     )
 
     # ── App ────────────────────────────────────────────────────────────────
-    app_name: str = "InsightFlow"
+    app_name: str = "Vesquiri"
     app_version: str = "1.0.0"
     environment: Literal["development", "staging", "production"] = Field(
         default="development",
@@ -222,8 +222,11 @@ class Settings(BaseSettings):
     stripe_secret_key: str = ""
     stripe_webhook_secret: str = ""
     stripe_pro_price_id: str = ""
+    stripe_weekly_price_id: str = ""
+    stripe_portal_configuration_id: str = ""
     stripe_enterprise_price_id: str = ""
     stripe_billing_enabled: bool = False
+    stripe_live_mode: bool = False
 
 
 @lru_cache

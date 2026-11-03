@@ -16,7 +16,7 @@ import uuid
 import httpx
 import pytest
 from fastapi import FastAPI
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.api.deps import get_db
@@ -32,7 +32,13 @@ from app.services import billing_service
 async def test_checkout_webhook_and_cancellation_persist(monkeypatch):
     engine = create_async_engine(os.environ["BILLING_TEST_DATABASE_URL"])
     sessions = async_sessionmaker(engine, expire_on_commit=False)
-    owner = User(supabase_id=str(uuid.uuid4()), email=f"billing-{uuid.uuid4()}@example.test")
+    test_id = uuid.uuid4()
+    owner = User(
+        id=test_id, supabase_id=str(test_id), email=f"billing-{test_id}@example.test"
+    )
+    customer_id = f"cus_local_{test_id.hex}"
+    subscription_id = f"sub_local_{test_id.hex}"
+    checkout_id = f"cs_local_{test_id.hex}"
     monkeypatch.setattr(billing.settings, "stripe_billing_enabled", True)
     monkeypatch.setattr(billing.settings, "stripe_secret_key", "sk_test_only")
     monkeypatch.setattr(billing.settings, "stripe_webhook_secret", "whsec_test_only")
@@ -49,19 +55,19 @@ async def test_checkout_webhook_and_cancellation_persist(monkeypatch):
                 "recurring": {"interval": "month", "interval_count": 1},
             }
         if path == "/customers":
-            return {"id": "cus_local_test"}
+            return {"id": customer_id}
         if path.startswith("/subscriptions?"):
             return {"data": []}
         if path == "/checkout/sessions":
             return {
-                "id": "cs_local_test",
+                "id": checkout_id,
                 "expires_at": int(time.time()) + 3600,
                 "url": "https://checkout.stripe.com/c/pay/localtest",
             }
-        if path == "/subscriptions/sub_local_test":
+        if path == f"/subscriptions/{subscription_id}":
             return {
-                "id": "sub_local_test",
-                "customer": "cus_local_test",
+                "id": subscription_id,
+                "customer": customer_id,
                 "status": remote_status["value"],
                 "metadata": {"zephyr_user_id": str(owner.id)},
                 "items": {
@@ -94,7 +100,7 @@ async def test_checkout_webhook_and_cancellation_persist(monkeypatch):
                 await db.execute(select(Subscription).where(Subscription.user_id == owner.id))
             ).scalar_one()
             assert before.plan == "free"
-            assert record.pending_checkout_session_id == "cs_local_test"
+            assert record.pending_checkout_session_id == checkout_id
 
         app = FastAPI()
         app.include_router(billing.router, prefix="/billing")
@@ -110,7 +116,7 @@ async def test_checkout_webhook_and_cancellation_persist(monkeypatch):
             payload = json.dumps(
                 {
                     "type": kind,
-                    "data": {"object": {"id": "sub_local_test"}},
+                    "data": {"object": {"id": subscription_id}},
                 }
             ).encode()
             timestamp = int(time.time())
@@ -135,7 +141,7 @@ async def test_checkout_webhook_and_cancellation_persist(monkeypatch):
             ).scalar_one()
             assert paid.plan == "starter"
             assert record.pending_checkout_session_id is None
-            assert record.stripe_subscription_id == "sub_local_test"
+            assert record.stripe_subscription_id == subscription_id
 
         remote_status["value"] = "past_due"
         assert (await deliver("customer.subscription.updated")).status_code == 200
@@ -151,4 +157,7 @@ async def test_checkout_webhook_and_cancellation_persist(monkeypatch):
             ).scalar_one()
             assert record.status == "canceled"
     finally:
+        async with sessions() as db:
+            await db.execute(delete(User).where(User.id == test_id))
+            await db.commit()
         await engine.dispose()

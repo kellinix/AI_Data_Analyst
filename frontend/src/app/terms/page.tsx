@@ -15,8 +15,11 @@ export default function TermsPage() {
       <p>When you create a public analysis link, anyone with the link can view the analysis. Review your content before sharing it.</p>
       <h2>Analyses and AI answers</h2>
       <p>Outputs depend on the quality and completeness of the data you provide. AI-generated explanations may be wrong or incomplete. Check results against your original records before acting. Vesquiri does not provide professional financial, legal or medical advice.</p>
-      <h2>Closed testing</h2>
-      <p>The current test build connects to staging. Features and availability may change, and test data may be reset. Use sample data and keep your own copies of important files. The mobile test build does not offer in-app purchases.</p>
+      <h2>Mobile closed testing</h2>
+      <p>Mobile test builds may change as testing progresses. Use sample data and keep your own copies of important files. The mobile test build does not offer in-app purchases.</p>
+      <h2>Web purchases</h2>
+      <p>Where checkout is enabled, Pro is available for £19 per month, renewing until you cancel, or £5.99 once for seven days from successful payment. The seven-day pass does not renew. Both options use the published Pro allowances; buying does not reset your existing monthly usage counts. After paid access ends, Free allowances apply. We do not delete saved files just because a pass expires, but you may need to remove files before uploading more.</p>
+      <p>Stripe processes web payments. Confirm the amount and whether it renews before paying. Manage recurring billing and cancel it through Settings. Period-end cancellation keeps access until the end of the paid period. Contact us about billing problems, refunds or your applicable cancellation rights. A full refund or disputed payment can end the access provided by a one-time pass. Your statutory consumer rights are unaffected.</p>
       <h2>Ending use</h2>
       <p>You can stop using Vesquiri at any time and <Link href="/delete-account">delete your account</Link>. We may restrict access where necessary to prevent abuse or meet legal obligations. Nothing in these terms excludes rights or remedies that cannot lawfully be excluded, including applicable consumer rights.</p>
       <h2>Changes</h2>

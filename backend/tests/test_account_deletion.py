@@ -185,6 +185,38 @@ async def test_already_canceled_remote_subscription_allows_deletion(deletion, mo
     remote_delete.assert_awaited_once()
 
 
+async def test_live_deletion_ignores_earlier_sandbox_subscription(deletion, monkeypatch):
+    owner, db, remote_delete, _ = deletion
+    monkeypatch.setattr(account_service.settings, "stripe_live_mode", True)
+    stripe = AsyncMock()
+    monkeypatch.setattr(users, "stripe_request", stripe)
+    db.execute.side_effect = [
+        Mock(first=Mock(return_value=None)),
+        Mock(scalar_one_or_none=Mock(return_value=SimpleNamespace(
+            stripe_subscription_id="sub_sandbox", status="active", stripe_livemode=False,
+        ))), Mock(),
+    ]
+    assert (await users.delete_me(owner, db)).status_code == 204
+    stripe.assert_not_awaited()
+    remote_delete.assert_awaited_once()
+
+
+async def test_sandbox_deletion_never_leaves_live_billing_running(deletion, monkeypatch):
+    owner, db, remote_delete, _ = deletion
+    monkeypatch.setattr(account_service.settings, "stripe_live_mode", False)
+    db.execute.side_effect = [
+        Mock(first=Mock(return_value=None)),
+        Mock(scalar_one_or_none=Mock(return_value=SimpleNamespace(
+            stripe_subscription_id="sub_live", status="active", stripe_livemode=True,
+        ))),
+    ]
+    with pytest.raises(HTTPException) as error:
+        await users.delete_me(owner, db)
+    assert error.value.status_code == 503
+    remote_delete.assert_not_awaited()
+    db.commit.assert_not_awaited()
+
+
 async def test_remote_failure_preserves_local_data(deletion):
     owner, db, remote_delete, cleanup = deletion
     remote_delete.side_effect = HTTPException(503, "retry")

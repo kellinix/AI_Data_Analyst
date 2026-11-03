@@ -11,19 +11,24 @@ import { useAuthStore } from "@/stores/auth.store"
 import type { UserProfile } from "@/types"
 
 type BillingLink = { url: string }
+type Offer = "monthly" | "weekly"
+type Availability = { enabled: boolean; weekly_enabled?: boolean }
 
 function billingError(error: unknown): string {
   const detail = isAxiosError(error) ? error.response?.data?.detail : undefined
   return typeof detail === "string" ? detail : "Billing is unavailable right now. Please try again."
 }
 
-export function BillingAction({ location }: { location: "pricing" | "settings" }) {
+export function BillingAction({ location, offer = "monthly" }: {
+  location: "pricing" | "settings"; offer?: Offer
+}) {
   const { user, profile, isLoading } = useAuth()
-  const [enabled, setEnabled] = useState(false)
+  const [availability, setAvailability] = useState<Availability>({ enabled: false })
   const [checked, setChecked] = useState(false)
   const [busy, setBusy] = useState(false)
   const [awaitingConfirmation, setAwaitingConfirmation] = useState(false)
   const hasBillingAccount = Boolean(profile?.subscription?.stripe_customer_id)
+  const hasPass = profile?.plan === "starter" && Boolean(profile.pro_pass_expires_at)
   const hasSubscription = Boolean(
     profile?.subscription?.stripe_subscription_id &&
     profile.subscription.status !== "canceled" &&
@@ -32,12 +37,25 @@ export function BillingAction({ location }: { location: "pricing" | "settings" }
 
   useEffect(() => {
     let live = true
-    get<{ enabled: boolean }>("/billing/availability")
-      .then((result) => { if (live) setEnabled(result.enabled) })
-      .catch(() => { if (live) setEnabled(false) })
+    get<Availability>("/billing/availability")
+      .then((result) => { if (live) setAvailability(result) })
+      .catch(() => { if (live) setAvailability({ enabled: false }) })
       .finally(() => { if (live) setChecked(true) })
     return () => { live = false }
   }, [])
+
+  useEffect(() => {
+    if (!profile?.pro_pass_expires_at) return
+    const deadline = Date.parse(profile.pro_pass_expires_at)
+    if (!Number.isFinite(deadline)) return
+    let live = true
+    const timer = window.setTimeout(() => {
+      get<UserProfile>("/users/me")
+        .then((updated) => { if (live) useAuthStore.getState().setProfile(updated) })
+        .catch(() => { /* The API still enforces expiry on every protected request. */ })
+    }, Math.max(0, deadline - Date.now()) + 250)
+    return () => { live = false; window.clearTimeout(timer) }
+  }, [profile?.pro_pass_expires_at])
 
   useEffect(() => {
     if (location !== "settings" || !window.location.search.includes("billing=returned")) return
@@ -67,10 +85,10 @@ export function BillingAction({ location }: { location: "pricing" | "settings" }
     return () => { live = false; window.clearInterval(timer) }
   }, [location])
 
-  const openBilling = async (kind: "checkout" | "portal") => {
+  const openBilling = async (kind: "checkout" | "portal", selectedOffer: Offer = offer) => {
     setBusy(true)
     try {
-      const result = await post<BillingLink>(`/billing/${kind}`)
+      const result = await post<BillingLink>(`/billing/${kind}`, kind === "checkout" ? { offer: selectedOffer } : undefined)
       window.location.assign(result.url)
     } catch (error) {
       toast.error(billingError(error))
@@ -86,17 +104,31 @@ export function BillingAction({ location }: { location: "pricing" | "settings" }
     return <p role="status" className="mt-5 text-sm text-amber-700 dark:text-amber-300">Stripe is confirming your payment. Your plan will update here shortly.</p>
   }
 
-  if (hasSubscription || (location === "settings" && hasBillingAccount)) {
+  const manageBilling = (
+    <button type="button" disabled={busy} onClick={() => openBilling("portal")}
+      className="mt-5 inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-violet-600 px-5 font-semibold text-white disabled:opacity-60">
+      {busy && <Loader2 className="h-4 w-4 animate-spin" />} Manage billing
+    </button>
+  )
+
+  if (hasSubscription) return manageBilling
+
+  if (hasPass) {
     return (
-      <button type="button" disabled={busy} onClick={() => openBilling("portal")}
-        className="mt-5 inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-violet-600 px-5 font-semibold text-white disabled:opacity-60">
-        {busy && <Loader2 className="h-4 w-4 animate-spin" />} Manage billing
-      </button>
+      <div className="mt-5 text-sm">
+        <p>Your seven-day Pro pass ends on {new Date(profile!.pro_pass_expires_at!).toLocaleString()}. It does not renew.</p>
+        {location === "settings" && hasBillingAccount && manageBilling}
+      </div>
     )
   }
 
-  if (!enabled) {
-    return <p className="mt-5 rounded-xl border border-white/15 bg-white/5 px-4 py-3 text-sm text-violet-100/80 dark:border-zinc-700 dark:text-zinc-300">Pro subscriptions are not open yet. Your free account will not be charged.</p>
+  const enabled = offer === "weekly" ? availability.weekly_enabled : availability.enabled
+  const offers: Offer[] = location === "settings"
+    ? (["monthly", "weekly"] as Offer[]).filter((item) => item === "weekly" ? availability.weekly_enabled : availability.enabled)
+    : enabled ? [offer] : []
+
+  if (offers.length === 0) {
+    return <p className="mt-5 text-sm text-zinc-500">This Pro option is not available yet. Your free account will not be charged.</p>
   }
 
   if (!user) {
@@ -104,9 +136,15 @@ export function BillingAction({ location }: { location: "pricing" | "settings" }
   }
 
   return (
-    <button type="button" disabled={busy || !profile} onClick={() => openBilling("checkout")}
-      className="mt-5 inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-violet-600 px-5 font-semibold text-white disabled:opacity-60">
-      {busy && <Loader2 className="h-4 w-4 animate-spin" />} Continue to secure checkout
-    </button>
+    <div className="mt-5 flex flex-wrap gap-3">
+      {offers.map((item) => (
+        <button key={item} type="button" disabled={busy || !profile} onClick={() => openBilling("checkout", item)}
+          className="inline-flex min-h-12 items-center justify-center gap-2 rounded-xl bg-violet-600 px-5 font-semibold text-white disabled:opacity-60">
+          {busy && <Loader2 className="h-4 w-4 animate-spin" />}
+          {item === "weekly" ? "Get 7 days · £5.99 once" : "Subscribe · £19/month"}
+        </button>
+      ))}
+      {location === "settings" && hasBillingAccount && manageBilling}
+    </div>
   )
 }

@@ -104,6 +104,9 @@ async def get_current_user(
             detail="Account is disabled",
         )
 
+    from app.services.pro_pass_service import refresh_expired_pro_pass
+
+    await refresh_expired_pro_pass(db, user)
     return user
 
 

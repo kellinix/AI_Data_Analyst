@@ -28,10 +28,12 @@ class Subscription(UUIDMixin, TimestampMixin, Base):
     plan: Mapped[str] = mapped_column(String(32), nullable=False)
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="active")
     stripe_customer_id: Mapped[str | None] = mapped_column(String(128), unique=True, nullable=True)
+    stripe_livemode: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false", nullable=False)
     stripe_subscription_id: Mapped[str | None] = mapped_column(
         String(128), unique=True, nullable=True
     )
     pending_checkout_session_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    pending_checkout_offer: Mapped[str | None] = mapped_column(String(16), nullable=True)
     checkout_expires_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

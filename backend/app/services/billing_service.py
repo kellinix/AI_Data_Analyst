@@ -23,19 +23,30 @@ from app.core.config import settings
 from app.core.logging import get_logger
 from app.models.subscription import Subscription
 from app.models.user import User
+from app.services.pro_pass_service import (
+    billing_mode_matches,
+    fulfill_weekly_pass,
+    has_current_pro_pass,
+    reconcile_pass_payment_event,
+)
 
 logger = get_logger(__name__)
 STRIPE_API = "https://api.stripe.com/v1"
 PAID_STATUSES = {"active", "trialing"}
 
 
-def billing_available() -> bool:
+def billing_available(offer: str = "monthly") -> bool:
     return bool(
         settings.stripe_billing_enabled
-        and settings.stripe_secret_key
+        and stripe_key_matches_mode()
         and settings.stripe_webhook_secret
-        and settings.stripe_pro_price_id
+        and (settings.stripe_weekly_price_id if offer == "weekly" else settings.stripe_pro_price_id)
     )
+
+
+def stripe_key_matches_mode() -> bool:
+    prefixes = ("sk_live_", "rk_live_") if settings.stripe_live_mode else ("sk_test_", "rk_test_")
+    return settings.stripe_secret_key.startswith(prefixes)
 
 
 async def stripe_request(
@@ -117,6 +128,8 @@ async def reconcile_subscription(
     db: AsyncSession, stripe_subscription: dict, *, checkout_user_id: str | None = None
 ) -> None:
     """Idempotently mirror Stripe's current state; ignore unrelated subscriptions."""
+    if stripe_subscription.get("livemode", settings.stripe_live_mode) is not settings.stripe_live_mode:
+        return
     sub_id = stripe_subscription.get("id")
     customer_id = stripe_subscription.get("customer")
     if not isinstance(sub_id, str) or not isinstance(customer_id, str):
@@ -129,6 +142,8 @@ async def reconcile_subscription(
     metadata = stripe_subscription.get("metadata") or {}
     claimed_user_id = metadata.get("zephyr_user_id") or checkout_user_id
     if record:
+        if not billing_mode_matches(record):
+            return
         if claimed_user_id and claimed_user_id != str(record.user_id):
             logger.warning("Stripe subscription owner mismatch", subscription_id=sub_id)
             return
@@ -138,14 +153,14 @@ async def reconcile_subscription(
         ):
             logger.warning("Different Stripe subscription already linked", customer_id=customer_id)
             return
-        user_result = await db.execute(select(User).where(User.id == record.user_id))
+        user_result = await db.execute(select(User).where(User.id == record.user_id).with_for_update())
         user = user_result.scalar_one_or_none()
     else:
         try:
             owner_id = uuid.UUID(claimed_user_id)
         except (TypeError, ValueError):
             return
-        user_result = await db.execute(select(User).where(User.id == owner_id))
+        user_result = await db.execute(select(User).where(User.id == owner_id).with_for_update())
         user = user_result.scalar_one_or_none()
         if user is None:
             return
@@ -156,8 +171,10 @@ async def reconcile_subscription(
         if record and record.stripe_customer_id not in (None, customer_id):
             logger.warning("Stripe customer does not match account", subscription_id=sub_id)
             return
+        if record and not billing_mode_matches(record):
+            return
         if record is None:
-            record = Subscription(user_id=user.id, plan="free", status="incomplete")
+            record = Subscription(user_id=user.id, plan="free", status="incomplete", stripe_livemode=settings.stripe_live_mode)
             db.add(record)
     if user is None:
         return
@@ -171,8 +188,10 @@ async def reconcile_subscription(
 
     record.stripe_customer_id = customer_id
     record.stripe_subscription_id = sub_id
-    record.pending_checkout_session_id = None
-    record.checkout_expires_at = None
+    if getattr(record, "pending_checkout_offer", None) != "weekly":
+        record.pending_checkout_session_id = None
+        record.pending_checkout_offer = None
+        record.checkout_expires_at = None
     record.plan = "starter" if entitled else "free"
     record.status = str(status)
     record.current_period_start = _period(
@@ -182,14 +201,25 @@ async def reconcile_subscription(
         stripe_subscription.get("current_period_end") or first_item.get("current_period_end")
     )
     record.cancel_at_period_end = bool(stripe_subscription.get("cancel_at_period_end"))
-    user.plan = record.plan
+    user.plan = "starter" if entitled or has_current_pro_pass(user) else "free"
+    user.billing_livemode = settings.stripe_live_mode if user.plan == "starter" else None
     await db.flush()
 
 
 async def process_billing_event(db: AsyncSession, event: dict) -> None:
+    if event.get("livemode", settings.stripe_live_mode) is not settings.stripe_live_mode:
+        return
     kind = event["type"]
     obj = (event.get("data") or {}).get("object") or {}
     if not isinstance(obj, dict):
+        return
+    if kind in {"checkout.session.completed", "checkout.session.async_payment_succeeded"} and obj.get("mode") == "payment":
+        session_id = obj.get("id")
+        if isinstance(session_id, str) and (obj.get("metadata") or {}).get("vesquiri_offer") == "weekly":
+            await fulfill_weekly_pass(db, session_id)
+        return
+    if kind in {"charge.refunded", "charge.dispute.created"}:
+        await reconcile_pass_payment_event(db, obj, dispute=kind == "charge.dispute.created")
         return
     sub_id: str | None = None
     checkout_user_id = None

@@ -16,6 +16,7 @@ from app.models.dashboard_revision import DashboardRevision  # noqa: F401
 from app.models.export_event import ExportEvent  # noqa: F401
 from app.models.insight import Insight  # noqa: F401
 from app.models.metric_definition import MetricDefinition  # noqa: F401
+from app.models.pro_pass import ProPass  # noqa: F401
 from app.models.recommendation_feedback import RecommendationFeedback  # noqa: F401
 from app.models.subscription import Subscription  # noqa: F401
 from app.models.usage_event import UsageEvent  # noqa: F401

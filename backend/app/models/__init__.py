@@ -4,10 +4,11 @@ from app.models.dashboard_revision import DashboardRevision
 from app.models.export_event import ExportEvent
 from app.models.insight import Insight
 from app.models.metric_definition import MetricDefinition
+from app.models.pro_pass import ProPass
 from app.models.recommendation_feedback import RecommendationFeedback
 from app.models.subscription import Subscription
-from app.models.user import SubscriptionPlan, User
 from app.models.usage_event import UsageEvent
+from app.models.user import SubscriptionPlan, User
 
 __all__ = [
     "Analysis",
@@ -18,6 +19,7 @@ __all__ = [
     "ExportEvent",
     "Insight",
     "MetricDefinition",
+    "ProPass",
     "RecommendationFeedback",
     "Subscription",
     "SubscriptionPlan",

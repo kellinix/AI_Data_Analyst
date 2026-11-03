@@ -20,6 +20,7 @@ from app.schemas.user import (
 )
 from app.services.account_service import delete_account_uploads, delete_auth_user
 from app.services.billing_service import stripe_request
+from app.services.pro_pass_service import billing_mode_matches
 
 router = APIRouter()
 
@@ -76,6 +77,8 @@ async def get_me(current_user: CurrentUser, db: DB):
         select(Subscription).where(Subscription.user_id == current_user.id)
     )
     subscription = result.scalar_one_or_none()
+    if subscription and not billing_mode_matches(subscription):
+        subscription = None
 
     limits = plan_limits_for(current_user.plan)
     usage = UsageStats(
@@ -93,6 +96,7 @@ async def get_me(current_user: CurrentUser, db: DB):
         full_name=current_user.full_name,
         avatar_url=current_user.avatar_url,
         plan=current_user.plan,
+        pro_pass_expires_at=getattr(current_user, "pro_pass_expires_at", None),
         is_active=current_user.is_active,
         created_at=current_user.created_at,
         updated_at=current_user.updated_at,
@@ -132,6 +136,10 @@ async def delete_me(current_user: CurrentUser, db: DB):
         select(Subscription).where(Subscription.user_id == current_user.id)
     )
     billing = subscription.scalar_one_or_none()
+    if billing and not billing_mode_matches(billing):
+        if billing.stripe_livemode:
+            raise HTTPException(503, "Use live billing before deleting this account.")
+        billing = None  # Earlier sandbox subscriptions never create a live charge.
     if billing and billing.stripe_subscription_id and billing.status not in ("canceled", "cancelled"):
         # Account removal must not leave a recurring charge behind. Stripe's
         # cancellation response is required before deleting local or auth data.

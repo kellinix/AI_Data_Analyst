@@ -26,6 +26,7 @@ export type SubscriptionPlan = "free" | "starter" | "professional" | "enterprise
 
 export interface UserProfile extends User {
   subscription: Subscription | null
+  pro_pass_expires_at?: string | null
   usage: UsageStats
 }
 
