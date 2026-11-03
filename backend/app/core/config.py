@@ -224,6 +224,7 @@ class Settings(BaseSettings):
     stripe_pro_price_id: str = ""
     stripe_weekly_price_id: str = ""
     stripe_portal_configuration_id: str = ""
+    stripe_payment_method_configuration_id: str = ""
     stripe_enterprise_price_id: str = ""
     stripe_billing_enabled: bool = False
     stripe_live_mode: bool = False

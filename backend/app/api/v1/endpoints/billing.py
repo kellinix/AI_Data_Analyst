@@ -5,6 +5,7 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 from typing import Literal
+from urllib.parse import quote
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
@@ -41,6 +42,7 @@ async def checkout(
     current_user: CurrentUser, db: DB, body: CheckoutRequest | None = None
 ) -> dict[str, str]:
     offer = body.offer if body else "monthly"
+    payment_configuration = settings.stripe_payment_method_configuration_id
     if not billing_available(offer):
         raise HTTPException(503, "This Pro option is not available yet.")
 
@@ -80,15 +82,22 @@ async def checkout(
             "GET", f"/checkout/sessions/{record.pending_checkout_session_id}"
         )
         if pending.get("status") == "complete":
-            raise HTTPException(409, "Your payment is being confirmed. Refresh Settings shortly.")
+            intent_id = pending.get("payment_intent")
+            failed = False
+            if pending.get("payment_status") == "unpaid" and isinstance(intent_id, str) and intent_id.startswith("pi_"):
+                intent = await stripe_request("GET", f"/payment_intents/{quote(intent_id, safe='')}")
+                failed = intent.get("status") in {"requires_payment_method", "canceled"}
+            if not failed:
+                raise HTTPException(409, "Your payment is being confirmed. Refresh Settings shortly.")
         if pending.get("status") == "open":
             pending_offer = (pending.get("metadata") or {}).get("vesquiri_offer") or getattr(
                 record, "pending_checkout_offer", None
             ) or "monthly"
-            if pending_offer == offer:
+            pending_configuration = (pending.get("payment_method_configuration_details") or {}).get("id")
+            if pending_offer == offer and pending_configuration == (payment_configuration or None):
                 return {"url": require_stripe_url(pending.get("url"), "checkout.stripe.com")}
-            # Switching offers must not reuse a link with the wrong amount or
-            # leave a second payable session open for the same account.
+            # Switching offers or method configurations must not reuse an old
+            # card-only link or leave a second payable session open.
             await stripe_request("POST", f"/checkout/sessions/{record.pending_checkout_session_id}/expire")
         record.pending_checkout_session_id = None
         record.pending_checkout_offer = None
@@ -147,7 +156,6 @@ async def checkout(
             "client_reference_id": str(current_user.id),
             "line_items[0][price]": price_id,
             "line_items[0][quantity]": "1",
-            "payment_method_types[0]": "card",
             "branding_settings[display_name]": settings.app_name,
             "consent_collection[terms_of_service]": "required",
             "custom_text[terms_of_service_acceptance][message]": (
@@ -160,6 +168,14 @@ async def checkout(
             "success_url": f"{settings.frontend_url.rstrip('/')}/settings?billing=returned",
             "cancel_url": f"{settings.frontend_url.rstrip('/')}/pricing?billing=cancelled",
     }
+    if payment_configuration:
+        # Stripe filters this app-specific allowlist by currency, customer
+        # location and whether this is a recurring purchase.
+        session_data["payment_method_configuration"] = payment_configuration
+    else:
+        # Existing deployments stay card-only until a reviewed configuration
+        # is installed. Never inherit another app's default payment methods.
+        session_data["payment_method_types[0]"] = "card"
     if offer == "weekly":
         session_data.update({
             "invoice_creation[enabled]": "true",

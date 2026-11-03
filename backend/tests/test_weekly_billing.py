@@ -26,6 +26,7 @@ def configured(monkeypatch):
         "stripe_webhook_secret": "whsec_test_only",
         "stripe_pro_price_id": "price_monthly",
         "stripe_weekly_price_id": "price_weekly",
+        "stripe_payment_method_configuration_id": "",
         "frontend_url": "https://vesquiri.example",
         "app_name": "Vesquiri",
     }.items():
@@ -82,12 +83,94 @@ async def test_weekly_checkout_is_one_payment_without_granting_access(configured
     assert data["metadata[vesquiri_offer]"] == "weekly"
     assert data["metadata[zephyr_user_id]"] == str(owner.id)
     assert data["invoice_creation[enabled]"] == "true"
+    assert data["payment_method_types[0]"] == "card"
+    assert "payment_method_configuration" not in data
     assert not any(key.startswith("subscription_data") for key in data)
     assert "Does not renew" in data["custom_text[submit][message]"]
     assert owner.plan == "free"
     assert owner.pro_pass_expires_at is None
     assert owner.analyses_this_month == 5
     assert db.add.call_args.args[0].pending_checkout_offer == "weekly"
+
+
+@pytest.mark.parametrize("offer", ["weekly", "monthly"])
+async def test_app_specific_methods_are_selected_without_forcing_card(configured, owner, monkeypatch, offer):
+    monkeypatch.setattr(billing.settings, "stripe_payment_method_configuration_id", "pmc_vesquiri")
+    record = pending_record(offer)
+    record.pending_checkout_session_id = None
+    price = weekly_price() if offer == "weekly" else {
+        "active": True, "currency": "gbp", "unit_amount": 1900,
+        "type": "recurring", "recurring": {"interval": "month", "interval_count": 1},
+    }
+    remote = AsyncMock(side_effect=[price, {"data": []}, {
+        "id": "cs_methods", "url": "https://checkout.stripe.com/c/pay/methods",
+        "expires_at": int(time.time()) + 3600,
+    }])
+    monkeypatch.setattr(billing, "stripe_request", remote)
+    await billing.checkout(owner, checkout_db(record), billing.CheckoutRequest(offer=offer))
+    data = remote.await_args_list[-1].kwargs["data"]
+    assert data["payment_method_configuration"] == "pmc_vesquiri"
+    assert not any(key.startswith("payment_method_types") for key in data)
+    assert data["mode"] == ("payment" if offer == "weekly" else "subscription")
+    assert owner.plan == "free"
+
+
+async def test_enabling_methods_replaces_an_old_card_only_checkout(configured, owner, monkeypatch):
+    monkeypatch.setattr(billing.settings, "stripe_payment_method_configuration_id", "pmc_vesquiri")
+    record = pending_record()
+    remote = AsyncMock(side_effect=[
+        {"status": "open", "metadata": {"vesquiri_offer": "weekly"}, "payment_method_types": ["card"]},
+        {"status": "expired"}, weekly_price(), {"data": []},
+        {"id": "cs_methods", "url": "https://checkout.stripe.com/c/pay/methods",
+         "expires_at": int(time.time()) + 3600},
+    ])
+    monkeypatch.setattr(billing, "stripe_request", remote)
+    await billing.checkout(owner, checkout_db(record), billing.CheckoutRequest(offer="weekly"))
+    assert remote.await_args_list[1].args == ("POST", "/checkout/sessions/cs_open/expire")
+    assert record.pending_checkout_session_id == "cs_methods"
+
+
+async def test_same_offer_and_method_configuration_reuses_the_open_checkout(configured, owner, monkeypatch):
+    monkeypatch.setattr(billing.settings, "stripe_payment_method_configuration_id", "pmc_vesquiri")
+    remote = AsyncMock(return_value={
+        "status": "open", "metadata": {"vesquiri_offer": "weekly"},
+        "payment_method_configuration_details": {"id": "pmc_vesquiri"},
+        "url": "https://checkout.stripe.com/c/pay/reused-methods",
+    })
+    monkeypatch.setattr(billing, "stripe_request", remote)
+    result = await billing.checkout(owner, checkout_db(pending_record()), billing.CheckoutRequest(offer="weekly"))
+    assert result["url"].endswith("/reused-methods")
+    assert remote.await_count == 1
+
+
+@pytest.mark.parametrize("status", ["requires_payment_method", "canceled"])
+async def test_failed_bank_payment_allows_a_fresh_checkout(configured, owner, monkeypatch, status):
+    record = pending_record()
+    remote = AsyncMock(side_effect=[
+        {"status": "complete", "payment_status": "unpaid", "payment_intent": "pi_failed"},
+        {"status": status}, weekly_price(), {"data": []},
+        {"id": "cs_retry", "url": "https://checkout.stripe.com/c/pay/retry",
+         "expires_at": int(time.time()) + 3600},
+    ])
+    monkeypatch.setattr(billing, "stripe_request", remote)
+    await billing.checkout(owner, checkout_db(record), billing.CheckoutRequest(offer="weekly"))
+    assert record.pending_checkout_session_id == "cs_retry"
+    assert owner.plan == "free"
+    assert not any(call.args[1].endswith("/expire") for call in remote.await_args_list)
+
+
+@pytest.mark.parametrize("status", ["processing", "requires_action", "succeeded"])
+async def test_bank_payment_awaiting_confirmation_blocks_another_purchase(configured, owner, monkeypatch, status):
+    remote = AsyncMock(side_effect=[
+        {"status": "complete", "payment_status": "unpaid", "payment_intent": "pi_pending"},
+        {"status": status},
+    ])
+    monkeypatch.setattr(billing, "stripe_request", remote)
+    with pytest.raises(HTTPException) as error:
+        await billing.checkout(owner, checkout_db(pending_record()), billing.CheckoutRequest(offer="weekly"))
+    assert error.value.status_code == 409
+    assert remote.await_count == 2
+    assert owner.plan == "free"
 
 
 @pytest.mark.parametrize("change", [

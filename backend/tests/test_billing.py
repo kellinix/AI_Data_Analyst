@@ -30,6 +30,7 @@ def configured(monkeypatch):
     monkeypatch.setattr(billing.settings, "stripe_pro_price_id", "price_pro_19")
     monkeypatch.setattr(billing.settings, "stripe_weekly_price_id", "")
     monkeypatch.setattr(billing.settings, "stripe_portal_configuration_id", "")
+    monkeypatch.setattr(billing.settings, "stripe_payment_method_configuration_id", "")
     monkeypatch.setattr(billing.settings, "frontend_url", "https://zephyr.example")
 
 
