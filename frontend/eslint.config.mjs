@@ -1,16 +1,10 @@
-import { dirname } from "node:path";
-import { fileURLToPath } from "node:url";
-import { FlatCompat } from "@eslint/eslintrc";
+import nextVitals from "eslint-config-next/core-web-vitals"
+import nextTypescript from "eslint-config-next/typescript"
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-const compat = new FlatCompat({
-  baseDirectory: __dirname,
-});
-
-const eslintConfig = [
-  ...compat.extends("next/core-web-vitals", "next/typescript"),
-];
-
-export default eslintConfig;
+export default [
+  ...nextVitals,
+  ...nextTypescript,
+  // Next 16 adds these React compiler checks. Keep existing findings visible
+  // while the affected dashboard effects are refactored separately.
+  { rules: { "react-hooks/set-state-in-effect": "warn", "react-hooks/static-components": "warn" } },
+]

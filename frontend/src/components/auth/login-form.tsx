@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
 import { createClient } from "@/lib/supabase/client"
+import { safeRedirect } from "@/lib/safe-redirect"
 
 const schema = z.object({
   email: z.string().email("Enter a valid email address"),
@@ -26,7 +27,7 @@ const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"
 export function LoginForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const redirectTo = searchParams.get("redirectTo") ?? "/dashboard"
+  const redirectTo = safeRedirect(searchParams.get("redirectTo"))
   const [showPassword, setShowPassword] = useState(false)
   const [isGoogleLoading, setIsGoogleLoading] = useState(false)
   const supabase = createClient()
@@ -57,7 +58,7 @@ export function LoginForm() {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${APP_URL}/auth/callback?redirectTo=${redirectTo}`,
+        redirectTo: `${APP_URL}/auth/callback?redirectTo=${encodeURIComponent(redirectTo)}`,
       },
     })
     if (error) {

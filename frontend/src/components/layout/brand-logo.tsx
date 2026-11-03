@@ -33,7 +33,7 @@ export function BrandLogo({
             wordmarkClassName
           )}
         >
-          Zephyr<span className="text-violet-600 dark:text-violet-400">.</span>
+          Vesquiri<span className="text-violet-600 dark:text-violet-400">.</span>
         </motion.span>
       )}
     </span>

@@ -1,6 +1,7 @@
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
+import { safeRedirect } from "@/lib/safe-redirect";
 
 type CookieToSet = {
   name: string;
@@ -11,7 +12,7 @@ type CookieToSet = {
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const code = searchParams.get("code");
-  const next = searchParams.get("redirectTo") ?? searchParams.get("next") ?? "/dashboard";
+  const next = safeRedirect(searchParams.get("redirectTo") ?? searchParams.get("next"));
   const appOrigin = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
 
   if (code) {

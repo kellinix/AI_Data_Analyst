@@ -6,8 +6,8 @@ import "./globals.css"
 
 export const metadata: Metadata = {
   title: {
-    template: "%s | Zephyr",
-    default: "Zephyr - Clear insights from your data",
+    template: "%s | Vesquiri",
+    default: "Vesquiri - Clear insights from your data",
   },
   description:
     "Upload a spreadsheet to see clear charts, useful findings, and answers about your data.",
@@ -19,8 +19,8 @@ export const metadata: Metadata = {
     "CSV analysis",
     "data visualisation",
   ],
-  authors: [{ name: "Zephyr" }],
-  creator: "Zephyr",
+  authors: [{ name: "Vesquiri" }],
+  creator: "Vesquiri",
   icons: {
     icon: "/logo/06-favicon-32x32-production.svg",
   },
@@ -31,13 +31,13 @@ export const metadata: Metadata = {
     type: "website",
     locale: "en_US",
     url: "/",
-    title: "Zephyr",
+    title: "Vesquiri",
     description: "Clear charts, useful findings, and answers from your spreadsheet",
-    siteName: "Zephyr",
+    siteName: "Vesquiri",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Zephyr",
+    title: "Vesquiri",
     description: "Clear charts, useful findings, and answers from your spreadsheet",
   },
   robots: {
