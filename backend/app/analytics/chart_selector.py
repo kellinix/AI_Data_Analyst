@@ -11,9 +11,10 @@ from app.analytics.admission_context import is_admission
 from app.analytics.football_context import is_football
 from app.analytics.kpi_detector import is_outcome_column, uses_average_aggregation
 from app.analytics.labels import derive_label, sentence_label
+from app.analytics.measure_semantics import VOLUME_KEYWORDS, is_observation_date
 from app.analytics.report_relevance import useful_charts
 from app.analytics.survey_context import survey_fields
-from app.analytics.text_matching import is_unreported_category
+from app.analytics.text_matching import contains_keyword, is_unreported_category
 
 # A numeric column null on more than this fraction of rows is sparse/
 # optional data (e.g. a field only some records ever populate), not a
@@ -194,6 +195,12 @@ def select_charts(
     if numeric_cols:
         charts.append(_histogram_chart(numeric_cols[0], numeric_stats.get(numeric_cols[0], {})))
 
+    for chart in charts:
+        if chart.get("type") == "line" and not is_observation_date(str(chart.get("xAxis") or "")):
+            columns = chart["echarts_option"].get("_columns", {})
+            columns["cohort_date"] = True
+            operation = "Average" if chart.get("aggregation") == "average" else "Total"
+            chart["title"] = f"{operation} {_humanize(str(chart.get('yAxis') or 'value'))} by {_humanize(str(chart['xAxis']))}"
     return useful_charts(charts)[:max_charts]
 
 
@@ -291,6 +298,8 @@ def _metric_priority(column: str) -> int:
         return 2
     if words & {"quantity", "units", "orders", "transactions"}:
         return 3
+    if contains_keyword(normalized, VOLUME_KEYWORDS) and not uses_average_aggregation(normalized):
+        return 3
     if words & {"cost", "cogs", "spend", "budget"}:
         return 4
     if words & {"price", "tax", "rating", "rate", "margin", "percentage"}:
@@ -323,7 +332,10 @@ def _is_chart_dimension(
 
     stats = categorical_stats.get(column["name"], {})
     unique_count = stats.get("unique_count", 0)
-    if unique_count < 2 or unique_count > (8 if role == "flag" else 500):
+    # A named entity can be ranked with a bounded top-N query even in a large
+    # catalogue. Free text and identifiers remain excluded above.
+    named_entity = normalized.endswith("_name") or normalized == "name"
+    if unique_count < 2 or (unique_count > (8 if role == "flag" else 500) and not named_entity):
         return False
     return True
 
@@ -331,6 +343,10 @@ def _is_chart_dimension(
 def _dimension_score(column: str, categorical_stats: dict[str, Any]) -> float:
     normalized = _normalize(column)
     score = 0.0
+    if normalized.endswith("_name") or normalized == "name":
+        score += 8
+    if normalized.endswith(("_day", "_month", "_quarter")) or normalized in {"day", "month", "quarter"}:
+        score -= 8
     # A real business dimension outranks the file a row came from. Charting
     # "cost by source file" when the data has departments buries the answer —
     # a six-department portfolio produced a single-bar "by Source File" chart.
@@ -400,7 +416,8 @@ def _time_series_chart(date_col: str, value_col: str) -> dict[str, Any]:
                 "symbol": "none",
                 "lineStyle": {"width": 2},
             }],
-            "_columns": {"x": date_col, "y": value_col, "aggregation": aggregation},
+            "_columns": {"x": date_col, "y": value_col, "aggregation": aggregation,
+                         **({"time_grain": "year"} if _normalize(date_col).split("_")[-1] == "year" else {})},
         },
     }
 

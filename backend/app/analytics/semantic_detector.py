@@ -11,6 +11,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from app.analytics.measure_semantics import VOLUME_KEYWORDS, calendar_component, is_additive_flow
 from app.analytics.text_matching import contains_keyword
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -117,11 +118,19 @@ def detect_column_semantics(
     if _looks_like_year(normalized, column, numeric_stats):
         return _profile("year", 0.94, "Column name and values look like calendar years", "temporal_dimension")
 
+    if column.get("is_numeric"):
+        component = calendar_component(normalized, numeric_stats.get(name, {}))
+        if component:
+            return _profile(component, 0.94, "Calendar component, not a measurable quantity", "dimension")
+
     if _looks_like_identifier(normalized):
         return _profile("identifier", 0.9, "Column name looks like a record identifier", "identifier")
 
     if normalized in SPORT_COUNT_COLUMNS:
         return _profile("count", 0.9, "Named count of football events or appearances", "metric")
+
+    if column.get("is_numeric") and contains_keyword(normalized, VOLUME_KEYWORDS) and is_additive_flow(normalized):
+        return _profile("count", 0.88, "Named count of activity", "metric")
 
     if normalized.startswith("is_") or normalized.startswith("has_") or normalized.endswith("_flag"):
         return _profile("boolean", 0.82, "Column name looks like a boolean flag", "flag")

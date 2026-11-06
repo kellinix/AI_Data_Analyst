@@ -14,6 +14,7 @@ from typing import Any
 import duckdb
 import numpy as np
 
+from app.analytics.measure_semantics import is_additive_flow, is_observation_date
 from app.analytics.sql_utils import quote_identifier as _quote_identifier
 from app.analytics.time_series import is_dense_monthly_series
 
@@ -28,19 +29,21 @@ def generate_forecasts(
     max_forecasts: int = 3,
     reference_date: date | None = None,
 ) -> list[dict[str, Any]]:
-    date_columns = [column["name"] for column in schema if column.get("is_date")]
+    date_columns = [column["name"] for column in schema
+                    if column.get("is_date") and is_observation_date(column["name"])]
     if not date_columns:
         return []
 
-    metric_columns = [kpi["column"] for kpi in kpis if kpi.get("kpi_type") in {"revenue", "profit", "orders", "customers"}]
-    if not metric_columns:
-        metric_columns = [
-            column["name"]
-            for column in schema
-            if column.get("is_numeric")
-            and column.get("analysis_role") in {None, "metric"}
-            and _is_business_metric(column["name"])
-        ][:max_forecasts]
+    eligible = {
+        column["name"] for column in schema
+        if column.get("is_numeric")
+        and column.get("analysis_role") in {None, "metric"}
+        and is_additive_flow(column["name"])
+    }
+    metric_columns = list(dict.fromkeys(
+        [kpi["column"] for kpi in kpis if kpi["column"] in eligible]
+        + [column["name"] for column in schema if column["name"] in eligible]
+    ))
 
     forecasts: list[dict[str, Any]] = []
     for metric_column in metric_columns[:max_forecasts]:
@@ -145,24 +148,3 @@ def _confidence(observations: int, residual_std: float, mean_value: float) -> fl
     noise_ratio = residual_std / abs(mean_value) if mean_value else 1.0
     noise_score = max(0.2, 1.0 - min(noise_ratio, 0.8))
     return round(0.45 + 0.45 * history_score * noise_score, 2)
-
-
-def _is_business_metric(column: str) -> bool:
-    normalized = column.lower().replace(" ", "_")
-    parts = set(normalized.split("_"))
-    return not (
-        normalized == "year"
-        or normalized.endswith("_year")
-        or "date" in parts
-        or "time" in parts
-        or "timestamp" in parts
-        or "age" in parts
-        or "latitude" in parts
-        or "longitude" in parts
-        or "coord" in parts
-        or normalized == "id"
-        or normalized.endswith("_id")
-        or normalized.startswith("id_")
-        or normalized.startswith("is_")
-        or normalized.startswith("has_")
-    )

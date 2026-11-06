@@ -13,7 +13,7 @@ from app.analytics.record_context import record_context
 from app.analytics.summary_evidence import _finite, _format
 from app.services.chat_evidence import _friendly_fact
 
-VERSION = "plain_business_v5"
+VERSION = "plain_business_v6"
 
 
 def business_text(text: Any) -> str:
@@ -192,10 +192,14 @@ def present_insight(insight: dict[str, Any], metadata: dict[str, Any] | None = N
             result["description"] = f"Entries with higher {_label(data['weighted_by'])} count more toward this average."
         elif data.get("column") == "chance_of_admit":
             result["description"] = "Average recorded admission chance, not the percentage actually admitted."
-        elif data.get("is_percent"):
+        elif data.get("is_percent") and data.get("kpi_type") in {None, "outcome_rate"}:
             result["description"] = "The share of entries where this field is marked 1."
+        elif data.get("is_percent"):
+            result["description"] = "Average of the percentages supplied in this file."
         else:
             result["description"] = "Total across the entries in this file." if data.get("is_total", True) else "Average across the entries in this file."
+        if set(str(data["column"]).lower().split("_")) & {"confidence", "similarity"}:
+            result["description"] += " This is a field supplied in the uploaded file, not confidence in this analysis."
     if kind == "recommendation":
         source = data.get("confidence_source")
         if str(source or "").startswith("rule:"):
@@ -342,6 +346,8 @@ def _quality_issue(issue: dict[str, Any]) -> dict[str, Any]:
         text = f"{count_text} entries have this information left blank. Check whether it is needed for your decision."
         if issue.get("unpublished"):
             text = f"{count_text} survey results have no published percentage. These values were left empty and are excluded from the chart."
+    elif kind == "invalid_numeric_values":
+        text = f"{count_text} nonblank entries could not be read as numbers and were left empty. These were not blank in the original file; review the source values."
     elif kind == "empty_field":
         text = "This field is completely blank. Check whether you need it; it may not apply to this file."
     elif kind == "duplicates":
@@ -431,7 +437,7 @@ def present_metadata(metadata: dict[str, Any] | None, summary: str | None) -> tu
         source = quality.get("source_quality")
         if isinstance(source, dict):
             source["issues"] = [_quality_issue(issue) for issue in source.get("issues", [])]
-            source["scope"] = "This describes missing information in your original file, before cleaning. Blank fields may be optional."
+            source["scope"] = "This describes original blanks and invalid numeric entries found during cleaning. Blank fields may be optional. Failed numeric conversions are listed separately."
     if context and summary:
         summary = _name_records(summary, context)
     result["presentation_version"] = VERSION

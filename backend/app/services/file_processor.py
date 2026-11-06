@@ -114,7 +114,9 @@ class FileProcessor:
                 sheet_id=0,
                 has_header=False,
                 read_options={"n_rows": self.SAMPLE_ROWS + 1},
-                infer_schema_length=1000,
+                # A late text/error cell must remain visible to the cleaning
+                # audit, rather than being lost to a numeric sample inference.
+                infer_schema_length=None,
             )
             parser_report = {}
             df = self._normalize_excel_sheets(sheets, parser_report)
@@ -382,6 +384,18 @@ class FileProcessor:
             report["withheld_value_columns"] = sorted(withheld_columns)
             if converted_numeric:
                 report["steps"].append("parsed_currency_percentage_numbers")
+            invalid_issues = [
+                {"type": "invalid_numeric_values", "column": item["column"],
+                 "severity": _ratio_severity(item["invalid_values"] / max(df.height, 1)),
+                 "affected_rows": item["invalid_values"],
+                 "examples": item["invalid_examples"],
+                 "description": f"{item['invalid_values']:,} nonblank values could not be parsed as numbers; left empty, not original blanks."}
+                for item in converted_numeric if item.get("invalid_values")
+            ]
+            if invalid_issues:
+                report["steps"].append("recorded_invalid_numeric_values")
+                source_issues.extend(invalid_issues)
+                report["source_quality"]["score"] = _quality_score(df.height, source_issues)
 
         if options["missing_data_strategy"] == "smart":
             before_rows = cleaned.height
@@ -499,6 +513,7 @@ class FileProcessor:
                         "detected_currency": _looks_like_currency_column(column, series),
                         "detected_percent": _looks_like_percentage_column(column, series),
                         "withheld_values": withheld_count,
+                        **_numeric_parse_audit(values, parsed_values),
                     }
                 )
                 continue
@@ -527,6 +542,7 @@ class FileProcessor:
                         "detected_currency": _looks_like_currency_column(column, series),
                         "detected_percent": _looks_like_percentage_column(column, series),
                         "withheld_values": withheld_count,
+                        **_numeric_parse_audit(values, numeric.to_list()),
                     }
                 )
         if expressions:
@@ -1062,7 +1078,10 @@ class FileProcessor:
             # gaps: imputed, or enough to drop the row entirely.
             if _has_withheld_values(series):
                 continue
-            if non_null and numeric_count / non_null >= 0.85:
+            # Only lossless inference is allowed before the cleaning audit.
+            # Mixed numeric/text fields stay intact until clean_dataframe has
+            # captured original blanks and can record each failed conversion.
+            if non_null and numeric_count == non_null:
                 # Whole-number columns become integers so codes and counts
                 # don't render as "2.0" in labels, charts, and stats.
                 values = numeric.drop_nulls()
@@ -1279,6 +1298,19 @@ def _is_numeric_text(value: str) -> bool:
     except ValueError:
         return False
     return True
+
+
+def _numeric_parse_audit(values: list[Any], parsed: list[Any]) -> dict[str, Any]:
+    invalid = [
+        (index + 1, str(value))
+        for index, (value, number) in enumerate(zip(values, parsed, strict=True))
+        if value is not None and str(value).strip().lower() not in _MISSING_TEXT_VALUES
+        and number is None and not _looks_like_withheld_value(str(value))
+    ]
+    return {
+        "invalid_values": len(invalid),
+        "invalid_examples": [{"table_row": row, "value": value[:200]} for row, value in invalid[:5]],
+    }
 
 
 def _parse_numeric_text_value(value: Any) -> float | None:

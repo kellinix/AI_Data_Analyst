@@ -26,7 +26,8 @@ def present_time_line(chart: dict[str, Any]) -> dict[str, Any]:
         return result
     columns = option.get("_columns") or {}
     measure = sentence_label(str((option.get("yAxis") or {}).get("name") or derive_label(str(chart.get("yAxis") or "value"))))
-    period = ("month" if columns.get("time_grain") == "month" else
+    period = ("year" if columns.get("time_grain") == "year" else
+              "month" if columns.get("time_grain") == "month" else
               "week" if str(columns.get("x", "")).lower() == "week_start_date" else "date")
     aggregation = columns.get("aggregation") or chart.get("aggregation")
     if aggregation == "sum":
@@ -37,7 +38,11 @@ def present_time_line(chart: dict[str, Any]) -> dict[str, Any]:
         description = str(chart.get("description") or "")
     if period == "month" and columns.get("partial_last_month"):
         description += " The final month has fewer recorded dates than earlier months and may be incomplete."
+    if columns.get("cohort_date"):
+        description += " Entries are grouped by their recorded lifecycle date; these are cohort comparisons, not activity measured during each period."
     result["description"] = description
+    if period == "year":
+        axis["name"] = derive_label(str(columns.get("x") or chart.get("xAxis") or "year"))
     axis.update({"boundaryGap": False, "nameLocation": "middle", "nameGap": 32,
                  "axisLabel": {**(axis.get("axisLabel") or {}), "fontSize": 10, "showMinLabel": True, "showMaxLabel": True}})
     month_labels = {}

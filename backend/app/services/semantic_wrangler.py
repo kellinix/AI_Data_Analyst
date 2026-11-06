@@ -410,6 +410,8 @@ def apply_display_metadata_to_charts(
         opt = dict(chart_copy.get("echarts_option") or {})
         if isinstance(opt.get("xAxis"), dict) and chart.get("xAxis"):
             opt["xAxis"] = {**opt["xAxis"], "name": labels.get(chart["xAxis"], chart["xAxis"])}
+            if (opt.get("_columns") or {}).get("time_grain") == "year":
+                opt["xAxis"]["name"] = derive_label(str(chart["xAxis"]))
         if isinstance(opt.get("yAxis"), dict) and chart.get("yAxis"):
             opt["yAxis"] = {**opt["yAxis"], "name": labels.get(chart["yAxis"], chart["yAxis"])}
         if isinstance(opt.get("series"), list):
@@ -423,6 +425,9 @@ def apply_display_metadata_to_charts(
                 for series in opt["series"]
             ]
         chart_copy["echarts_option"] = opt
+        if (opt.get("_columns") or {}).get("cohort_date"):
+            operation = "Average" if chart.get("aggregation") == "average" else "Total"
+            chart_copy["title"] = f"{operation} {labels.get(chart.get('yAxis'), derive_label(str(chart.get('yAxis') or 'value')))} by {derive_label(str(chart.get('xAxis') or 'date'))}"
         updated.append(chart_copy)
     return updated
 

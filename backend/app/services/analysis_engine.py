@@ -202,9 +202,13 @@ class AnalysisEngine:
             if is_percent and kpi["column"] == "chance_of_admit":
                 title = "Average recorded admission chance"
                 description = "Average recorded chance, not the percentage actually admitted."
-            elif is_percent:
+            elif is_percent and kpi.get("kpi_type") == "outcome_rate":
                 title = f"{kpi_label} Rate"
                 description = f"{kpi['value']:,.1f}% of records have {kpi_label.lower()} = 1"
+            elif is_percent:
+                title = f"Average {kpi_label}"
+                weighting = f", weighted by {display_labels.get(kpi['weighted_by'], kpi['weighted_by'])}" if kpi.get("weighted_by") else ""
+                description = f"Average {kpi_label}{weighting}: {kpi['value']:,.2f}%"
             elif is_total:
                 title = kpi_label
                 description = f"{kpi_label}: {kpi['value']:,}"
@@ -720,34 +724,11 @@ def _merge_recommendations(
 
 
 def disclose_excluded_points(charts: list[dict[str, Any]]) -> None:
-    """Say on the chart when a log scale could not plot every record.
+    """Apply coverage notes after display metadata has rewritten descriptions."""
+    from app.analytics.chart_coverage import disclose_chart_coverage
 
-    A log axis has no place for a zero, so the scatter populator leaves those
-    records out. Six of 118 projects have no baseline cost recorded — showing
-    112 points without a word is the quiet kind of wrong this dashboard is
-    supposed to avoid.
-    """
-    marker = "are left out, so the chart can show"
     for chart in charts:
-        excluded = (chart.get("echarts_option") or {}).get("_excluded_points") or 0
-        if not excluded:
-            continue
-        existing = str(chart.get("description") or "").strip()
-        # Idempotent: a re-run analyses the same chart objects, and the note
-        # was appended a second time.
-        if marker in existing:
-            continue
-        noun = "entry" if excluded == 1 else "entries"
-        # Chart descriptions are written as fragments with no full stop, so the
-        # note ran straight on: "...tends to rise together 6 records with...".
-        if existing and existing[-1] not in ".!?":
-            existing = f"{existing}."
-        # "...because the scale is logarithmic" put a maths term on a chart
-        # meant for someone who does not have one.
-        chart["description"] = (
-            f"{existing} {excluded} {noun} with nothing recorded are left out, "
-            "so the chart can show the very small and the very large together."
-        ).strip()
+        disclose_chart_coverage(chart)
 
 
 def consolidated_anomaly_card(anomalies: list[dict[str, Any]]) -> tuple[str, str]:

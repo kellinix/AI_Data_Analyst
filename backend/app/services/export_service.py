@@ -27,6 +27,28 @@ _IMPORTANCE_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3}
 _KNOWN_CURRENCY_SYMBOLS = {"USD": "$", "GBP": "£", "EUR": "€", "JPY": "¥"}
 
 
+def _format_metric_value(data: dict[str, Any]) -> str:
+    value = data.get("value")
+    if not isinstance(value, int | float):
+        return str(value) if value is not None else "N/A"
+    if data.get("is_currency"):
+        formatted = f"{_currency_prefix(data)}{value:,.2f}"
+    elif float(value).is_integer():
+        formatted = f"{value:,.0f}"
+    else:
+        # Keep small fractional measures visible instead of rounding them to
+        # zero or one. Numeric values in Excel retain their full precision.
+        decimals = 2 if abs(value) >= 0.01 else 6
+        formatted = f"{value:,.{decimals}f}".rstrip("0").rstrip(".")
+        if float(formatted.replace(",", "")) == 0 and value != 0:
+            formatted = f"{value:.3g}"
+    if data.get("is_percent"):
+        formatted += "%"
+    if data.get("unit") == "million":
+        formatted += " million"
+    return formatted
+
+
 def _currency_prefix(data: dict[str, Any]) -> str:
     code = str(data.get("currency") or "").upper()
     symbol = data.get("currency_symbol") or _KNOWN_CURRENCY_SYMBOLS.get(code)
@@ -113,17 +135,7 @@ def build_pdf_report(
         rows = [["Metric", "Value"]]
         for kpi in kpis:
             data = kpi.get("data") or {}
-            value = data.get("value")
-            is_currency = data.get("is_currency")
-            formatted = (
-                f"{_currency_prefix(data)}{value:,.2f}" if is_currency and isinstance(value, int | float)
-                else f"{value:,.2f}".rstrip("0").rstrip(".")
-                if data.get("unit") == "million" and isinstance(value, int | float)
-                else f"{value:,.0f}" if isinstance(value, int | float)
-                else str(value) if value is not None else "N/A"
-            )
-            if data.get("unit") == "million" and isinstance(value, int | float):
-                formatted += " million"
+            formatted = _format_metric_value(data)
             rows.append([kpi.get("title", ""), formatted])
         table = Table(rows, colWidths=[9 * cm, 6 * cm])
         table.setStyle(_table_style())

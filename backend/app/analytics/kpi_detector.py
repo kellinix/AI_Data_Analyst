@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.analytics.measure_semantics import VOLUME_KEYWORDS, calendar_component, is_additive_flow
 from app.analytics.text_matching import contains_keyword
 
 # Keyword maps for KPI detection
@@ -69,6 +70,8 @@ def detect_kpis(
         if _is_non_kpi_numeric(col_lower):
             continue
         stats = numeric_stats.get(col, {})
+        if calendar_component(col, stats):
+            continue
         total = stats.get("total")
         mean = stats.get("mean")
         count = stats.get("count", 0)
@@ -96,25 +99,29 @@ def detect_kpis(
                 "value": value,
                 "is_total": not use_mean and total is not None,
                 "is_currency": _is_currency(col_lower),
+                "is_percent": "%" in col or contains_keyword(col_lower, ["pct", "percent", "percentage"]),
+                "display_multiplier": 1,
                 "mean": mean,
                 "count": count,
                 "weighted_by": stats.get("weight_column") if weighted is not None else None,
             })
 
-    if not [kpi for kpi in kpis if kpi["kpi_type"] != "outcome_rate"]:
-        kpis.extend(_fallback_kpis(schema, numeric_stats))
+    # A recognised score must not suppress every other numeric measure.
+    # Fill available slots with safely averaged, non-calendar metrics.
+    kpis.extend(_fallback_kpis([col for col in schema if col["name"] not in matched_cols], numeric_stats))
 
     # Sort by importance
     priority = {
         "outcome_rate": -1,
         "revenue": 0, "arr": 1, "mrr": 2, "profit": 3, "orders": 4,
-        "customers": 5, "margin": 6, "conversion": 7, "growth": 8,
+        "volume": 4.5, "customers": 5, "margin": 6, "conversion": 7, "growth": 8,
         "aov": 9, "asset_value": 10, "average": 11,
         "duration": 12, "retention": 13, "churn": 14, "cost": 15,
         "return": 16, "inventory": 17, "other": 18,
     }
     kpis.sort(key=lambda k: (
-        -3 if k["column"] == "chance_of_admit"
+        19 if contains_keyword(k["column"], ["confidence", "similarity", "match_score"])
+        else -3 if k["column"] == "chance_of_admit"
         else -2 if k["column"] == "cgpa"
         else 0.5 if k["column"] in {"total", "net_total", "grand_total"}
         else priority.get(k["kpi_type"], 9)
@@ -123,6 +130,7 @@ def detect_kpis(
         if kpi["column"] == "chance_of_admit":
             kpi["value"] = round(kpi["value"], 12) * 100
             kpi["is_percent"] = True
+            kpi["display_multiplier"] = 100
     return kpis[:10]
 
 
@@ -132,6 +140,7 @@ def detect_kpis(
 # count, and only business metrics should be forecastable.
 _KPI_TYPE_KEYWORDS: tuple[tuple[str, list[str]], ...] = (
     ("average", AVERAGE_METRIC_KEYWORDS),
+    ("volume", list(VOLUME_KEYWORDS)),
     ("asset_value", ASSET_VALUE_KEYWORDS),
     ("arr", ARR_KEYWORDS),
     ("mrr", MRR_KEYWORDS),
@@ -172,6 +181,8 @@ def _classify_column(col: str) -> str | None:
     if contains_keyword(col, ["price"]):
         return "average"
     for kpi_type, keywords in _KPI_TYPE_KEYWORDS:
+        if kpi_type == "volume" and not is_additive_flow(col):
+            continue
         if contains_keyword(col, keywords):
             return kpi_type
     return None
@@ -271,6 +282,8 @@ def _fallback_kpis(
         if _is_non_kpi_numeric(col_lower):
             continue
         stats = numeric_stats.get(col, {})
+        if calendar_component(col, stats):
+            continue
         # No keyword matched, so we don't know the column is additive —
         # a raw SUM of e.g. blood pressures or 0/1 codes is meaningless.
         # The average is the only safe headline value for an unknown metric.

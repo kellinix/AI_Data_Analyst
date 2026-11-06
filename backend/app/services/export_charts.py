@@ -33,6 +33,8 @@ class ExportChart:
     y_label: str
     palette: list[str]
     connect_line: bool
+    x_log: bool = False
+    y_log: bool = False
 
 
 def _number(value: Any) -> float | None:
@@ -112,6 +114,8 @@ def normalise_charts(charts: list[dict[str, Any]] | None) -> list[ExportChart]:
             palette=palette,
             connect_line=not (kind == "line" and option_series and
                               (option_series[0].get("lineStyle") or {}).get("opacity") == 0),
+            x_log=bool((option.get("_scale") or {}).get("x")),
+            y_log=bool((option.get("_scale") or {}).get("y")),
         ))
     return result
 
@@ -163,7 +167,7 @@ class PdfChart(Flowable):
         else:
             self._axes()
 
-    def _grid(self, x: float, y: float, width: float, height: float, low: float, high: float) -> None:
+    def _grid(self, x: float, y: float, width: float, height: float, low: float, high: float, logarithmic: bool = False) -> None:
         c = self.canv
         c.setFont("Helvetica", 7)
         for tick in range(5):
@@ -172,6 +176,8 @@ class PdfChart(Flowable):
             c.line(x, line_y, x + width, line_y)
             c.setFillColor(colors.HexColor("#716B86"))
             value = low + (high - low) * tick / 4
+            if logarithmic:
+                value = 10 ** value
             label = f"{value:,.0f}" if abs(high - low) < 1_000 and abs(value) >= 10 else _tick(value)
             c.drawRightString(x - 5, line_y - 2, label)
 
@@ -288,18 +294,26 @@ class PdfChart(Flowable):
     def _scatter(self) -> None:
         chart, c = self.chart, self.canv
         x0, y0, w, h = 58, 30, 384, 190
-        xs, ys = [point[0] for point in chart.points], [point[1] for point in chart.points]
+        points = [(math.log10(x) if chart.x_log else x, math.log10(y) if chart.y_log else y)
+                  for x, y in chart.points
+                  if (not chart.x_log or x > 0) and (not chart.y_log or y > 0)]
+        if not points:
+            return
+        xs, ys = [point[0] for point in points], [point[1] for point in points]
         x_low, x_high = _range(xs, include_zero=False)
         y_low, y_high = _range(ys, include_zero=False)
-        self._grid(x0, y0, w, h, y_low, y_high)
+        self._grid(x0, y0, w, h, y_low, y_high, logarithmic=chart.y_log)
         c.setFillColor(colors.HexColor(chart.palette[0]))
-        for x, y in chart.points:
+        for x, y in points:
             c.circle(x0 + w * (x - x_low) / (x_high - x_low),
                      y0 + h * (y - y_low) / (y_high - y_low), 1.8, fill=1, stroke=0)
         c.setFont("Helvetica", 7)
         c.setFillColor(colors.HexColor("#716B86"))
-        c.drawString(x0, y0 - 14, _tick(x_low))
-        c.drawRightString(x0 + w, y0 - 14, _tick(x_high))
+        c.drawString(x0, y0 - 14, _tick(10 ** x_low if chart.x_log else x_low))
+        c.drawRightString(x0 + w, y0 - 14, _tick(10 ** x_high if chart.x_log else x_high))
+        if chart.x_log or chart.y_log:
+            axes = " and ".join(axis for axis, enabled in (("x", chart.x_log), ("y", chart.y_log)) if enabled)
+            c.drawCentredString(x0 + w / 2, y0 - 27, f"Logarithmic {axes} axis")
 
 
 def add_excel_charts(workbook: Workbook, charts: list[ExportChart]) -> None:
@@ -380,8 +394,8 @@ def add_excel_charts(workbook: Workbook, charts: list[ExportChart]) -> None:
         excel_chart.set_title({"name": chart.title})
         excel_chart.set_legend({"position": "bottom"} if len(chart.series) > 1 or chart.kind == "donut" else {"none": True})
         if chart.kind != "donut":
-            excel_chart.set_x_axis({"name": chart.x_label})
-            excel_chart.set_y_axis({"name": chart.y_label})
+            excel_chart.set_x_axis({"name": chart.x_label, **({"log_base": 10} if chart.x_log else {})})
+            excel_chart.set_y_axis({"name": chart.y_label, **({"log_base": 10} if chart.y_log else {})})
         excel_chart.set_size({"width": 680, "height": 340})
         display.insert_chart(chart_row + 2, 0, excel_chart)
         chart_row += 23

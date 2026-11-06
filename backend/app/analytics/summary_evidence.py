@@ -138,7 +138,7 @@ def build_summary_facts(
         if measured is None:
             continue
         if kpi.get("is_percent"):
-            measured *= 100
+            measured *= kpi.get("display_multiplier", 100)
         if not math.isclose(value, measured, rel_tol=1e-9, abs_tol=.051 if kpi.get("is_percent") else 1e-9):
             continue
         formatted = _format(value)
@@ -155,7 +155,7 @@ def build_summary_facts(
             verb = "sums to" if operation == "total" else "averages"
             count = int(stats.get("count") or 0)
             text = f"{label(column)} {verb} {formatted} across {count:,} supplied values."
-            calculation = f"{'SUM' if operation == 'total' else 'AVG'}({column})" + (" * 100" if kpi.get("is_percent") else "")
+            calculation = f"{'SUM' if operation == 'total' else 'AVG'}({column})" + (" * 100" if kpi.get("is_percent") and kpi.get("display_multiplier", 100) == 100 else "")
         add(f"metric_{index}", text, f"numeric_stats.{column}.{operation}", calculation,
             {"column": column, "value": value, "operation": operation, "weighted_by": weighted,
              "display_value": formatted, "display_label": label(column),

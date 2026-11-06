@@ -8,6 +8,7 @@ from typing import Any
 
 import duckdb
 
+from app.analytics.measure_semantics import is_additive_flow, is_observation_date
 from app.analytics.sql_utils import quote_identifier as _quote_identifier
 from app.analytics.text_matching import shorten_label
 from app.analytics.time_series import is_dense_monthly_series
@@ -21,7 +22,8 @@ def detect_anomalies(
     max_anomalies: int = 8,
 ) -> list[dict[str, Any]]:
     anomalies: list[dict[str, Any]] = []
-    date_columns = [column["name"] for column in schema if column.get("is_date")]
+    date_columns = [column["name"] for column in schema
+                    if column.get("is_date") and is_observation_date(column["name"])]
     candidate_columns = {
         column["name"]
         for column in schema
@@ -34,7 +36,7 @@ def detect_anomalies(
         if column not in candidate_columns:
             continue
         anomalies.extend(_distribution_anomalies(conn, table, column, stats, schema))
-        if date_columns:
+        if date_columns and is_additive_flow(column):
             anomalies.extend(_time_series_anomalies(conn, table, date_columns[0], column))
         if len(anomalies) >= max_anomalies:
             break

@@ -195,12 +195,17 @@ class StatisticsEngine:
     def _numeric_stats(self, columns: list[str]) -> dict[str, Any]:
         if not columns:
             return {}
-        limited = columns[:20]  # Limit to 20 columns
-        try:
-            return self._numeric_stats_batched(limited)
-        except Exception as exc:
-            logger.debug("Batched numeric stats failed, falling back per-column", exc=str(exc))
-            return self._numeric_stats_sequential(limited)
+        result: dict[str, Any] = {}
+        # Bound each query rather than silently omitting measures after column
+        # 20. Wide datasets need the same semantics and evidence guarantees.
+        for offset in range(0, len(columns), 20):
+            batch = columns[offset:offset + 20]
+            try:
+                result.update(self._numeric_stats_batched(batch))
+            except Exception as exc:
+                logger.debug("Batched numeric stats failed, falling back per-column", exc=str(exc))
+                result.update(self._numeric_stats_sequential(batch))
+        return result
 
     def _numeric_stats_batched(self, columns: list[str]) -> dict[str, Any]:
         """One round trip for all columns instead of one query per column."""

@@ -17,6 +17,7 @@ from typing import Any, Literal
 import duckdb
 
 from app.analytics.category_values import category_expression, category_filter_value, category_label
+from app.analytics.chart_coverage import disclose_chart_coverage
 from app.analytics.chart_specs import build_visual_spec
 from app.analytics.sql_utils import quote_identifier as _quote_identifier
 from app.analytics.text_matching import is_unreported_category
@@ -364,6 +365,17 @@ def _populate_donut(
         filter_params,
     ).fetchall()
     opt["series"][0]["data"] = [{"name": category_label(cat_col, r[0]), "value": int(r[1])} for r in rows]
+    total, missing = conn.execute(
+        f"SELECT COUNT(*), COUNT(*) FILTER (WHERE {cat_identifier} IS NULL) FROM data"
+        + (f" WHERE {filter_sql}" if filter_sql else ""), filter_params,
+    ).fetchone()
+    remaining = total - missing - sum(int(row[1]) for row in rows)
+    if remaining:
+        opt["series"][0]["data"].append({"name": "Other categories", "value": remaining})
+    if missing:
+        opt["series"][0]["data"].append({"name": "Not recorded", "value": missing})
+    opt["_category_total"] = total
+    opt["_missing_category_count"] = missing
     return True
 
 
@@ -423,6 +435,12 @@ def _populate_scatter(
     points = [
         [float(r[0]), float(r[1])] for r in rows if r[0] is not None and r[1] is not None
     ]
+    total, eligible = conn.execute(
+        f"SELECT COUNT(*), COUNT(*) FILTER (WHERE {x_identifier} IS NOT NULL AND {y_identifier} IS NOT NULL) FROM data"
+        + (f" WHERE {filter_sql}" if filter_sql else ""), filter_params,
+    ).fetchone()
+    opt["_scatter_coverage"] = {"missing": total - eligible, "eligible": eligible, "sampled": len(points)}
+    opt.pop("_excluded_points", None)
     scale = {
         axis: _is_log_worthy([point[index] for point in points])
         for index, axis in enumerate(("x", "y"))
@@ -563,6 +581,7 @@ def populate_chart_option(
         matched = _populate_histogram(conn, opt, cols, filter_sql, filter_params)
 
     chart["echarts_option"] = opt
+    disclose_chart_coverage(chart)
     return matched
 
 
