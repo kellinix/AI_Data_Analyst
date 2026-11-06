@@ -26,6 +26,9 @@ def analyze_data_quality(
 
     for column in schema:
         name = column["name"]
+        warning = numeric_stats.get(name, {}).get("aggregation_warning")
+        if warning:
+            issues.append(dict(warning))
         quoted = _quote_identifier(name)
         null_count = _single_int(
             conn,
@@ -188,7 +191,7 @@ def _quality_score(row_count: int, issues: list[dict[str, Any]]) -> int:
         if affected_ratio > 0.5:
             weight *= 2
         impact = weight * max(affected_ratio, 0.05)
-        if issue.get("type") == "missing_values":
+        if issue.get("type") in {"missing_values", "missing_value_markers"}:
             missing_penalties.append(impact)
         else:
             penalty += impact

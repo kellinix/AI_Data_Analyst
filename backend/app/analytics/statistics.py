@@ -54,6 +54,7 @@ class StatisticsEngine:
         date_cols = [c["name"] for c in schema if c["is_date"]]
         categorical_cols = [c["name"] for c in schema if not c["is_numeric"] and not c["is_date"]]
         numeric_stats = self._numeric_stats(numeric_cols)
+        self._flag_unresolved_duration_codes(numeric_stats)
         categorical_stats = self._categorical_stats(categorical_cols)
         schema = enrich_schema_with_semantics(schema, numeric_stats, categorical_stats)
         # Numeric columns recognized as categorical codes act as dimensions
@@ -77,6 +78,38 @@ class StatisticsEngine:
         }
         result["entity_counts"] = self._entity_counts(schema)
         return result
+
+    def _flag_unresolved_duration_codes(self, numeric_stats: dict[str, Any]) -> None:
+        """Keep raw statistics but stop presenting negative elapsed-time codes as KPIs.
+
+        Values alone cannot establish that -1 means 'never contacted'. Without
+        a dictionary, do not silently discard it or invent a positive cohort.
+        Signed time offsets, balances and physical readings remain untouched.
+        """
+        for name, stats in numeric_stats.items():
+            words = set(_name_tokens(name))
+            elapsed = ("duration" in words or "elapsed" in words or "wait" in words
+                       or "since" in words and bool(words & {"days", "hours", "minutes", "seconds"})
+                       or name.lower() in {"pdays"})
+            if not elapsed or words & {"offset", "difference", "delta", "change", "until"}:
+                continue
+            if stats.get("min") is None or stats["min"] >= 0:
+                continue
+            col = _quote_identifier(name)
+            observed = self.conn.execute(
+                f"SELECT {col}, COUNT(*) FROM {_quote_identifier(self.table)} WHERE {col} < 0 "
+                f"GROUP BY {col} ORDER BY COUNT(*) DESC LIMIT 4"
+            ).fetchall()
+            if not observed or len(observed) > 3 or any(not float(v).is_integer() for v, _ in observed):
+                continue
+            affected = sum(int(count) for _, count in observed)
+            description = (f"{affected:,} negative elapsed-time values may be special codes. "
+                           "Confirm their meaning in the data dictionary; this field is excluded from headline metrics, comparisons and forecasts. Raw values are retained.")
+            stats["aggregation_warning"] = {
+                "type": "unresolved_duration_codes", "column": name, "severity": "high",
+                "affected_rows": affected, "values": [{"value": float(v), "count": n} for v, n in observed],
+                "description": description,
+            }
 
     def _entity_counts(self, schema: list[dict[str, Any]]) -> list[dict[str, Any]]:
         counts = []
@@ -190,7 +223,7 @@ class StatisticsEngine:
             })
         return schema
 
-    _NUMERIC_AGGS_PER_COLUMN = 11
+    _NUMERIC_AGGS_PER_COLUMN = 12
 
     def _numeric_stats(self, columns: list[str]) -> dict[str, Any]:
         if not columns:
@@ -224,6 +257,7 @@ class StatisticsEngine:
                 f"PERCENTILE_CONT(0.75) WITHIN GROUP (ORDER BY {safe_col})",
                 f"SUM({safe_col})",
                 f"COUNT(DISTINCT {safe_col})",
+                f"COUNT(*) FILTER (WHERE {safe_col} = FLOOR({safe_col}))",
             ])
         row = self.conn.execute(
             f"SELECT {', '.join(select_parts)} FROM {_quote_identifier(self.table)}"
@@ -247,6 +281,7 @@ class StatisticsEngine:
                 "p75": float(chunk[8]) if chunk[8] is not None else None,
                 "total": float(chunk[9]) if chunk[9] is not None else None,
                 "unique_count": int(chunk[10]) if chunk[10] is not None else None,
+                "integer_count": int(chunk[11]) if chunk[11] is not None else None,
             }
         return stats
 

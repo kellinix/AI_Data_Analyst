@@ -114,6 +114,7 @@ def _column_profile(
             "total": stats.get("total"),
             "weighted_mean": stats.get("weighted_mean"),
             "weight_column": stats.get("weight_column"),
+            **({"aggregation_warning": stats["aggregation_warning"]} if stats.get("aggregation_warning") else {}),
         }
 
     if name in categorical_stats:
@@ -138,6 +139,7 @@ def _compact_numeric_stats(numeric_stats: dict[str, Any]) -> dict[str, Any]:
             "total": stats.get("total"),
             "weighted_mean": stats.get("weighted_mean"),
             "weight_column": stats.get("weight_column"),
+            **({"aggregation_warning": stats["aggregation_warning"]} if stats.get("aggregation_warning") else {}),
         }
         for column, stats in list(numeric_stats.items())[:30]
     }

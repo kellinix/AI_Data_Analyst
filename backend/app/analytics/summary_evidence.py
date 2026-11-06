@@ -112,7 +112,7 @@ def build_summary_facts(
     source_quality = quality.get("source_quality") or {}
     source_issues = source_quality.get("issues") or quality.get("issues") or []
     renamed = report.get("renamed_columns") or {}
-    gaps = [issue for issue in source_issues if issue.get("type") == "missing_values"
+    gaps = [issue for issue in source_issues if issue.get("type") in {"missing_values", "missing_value_markers"}
             and schema.get(renamed.get(issue.get("column"), issue.get("column")), {}).get("analysis_role") != "identifier"
             and max(1, rows * .1) <= int(issue.get("affected_rows") or 0) < min(
                 int(report.get("input_rows") or rows), rows * .8)]
@@ -120,10 +120,20 @@ def build_summary_facts(
         issue = max(gaps, key=lambda item: int(item.get("affected_rows") or 0))
         column, missing_count = str(issue.get("column")), int(issue["affected_rows"])
         location = "source file" if source_quality else "analysed file"
-        add("missing", f"{label(renamed.get(column, column))} has {missing_count:,} missing values in the {location}; confirm whether that field is required.",
+        marker = issue.get("type") == "missing_value_markers"
+        qualifier = "supplied missing-value markers, not blank cells" if marker else "missing values"
+        add("missing", f"{label(renamed.get(column, column))} has {missing_count:,} {qualifier} in the {location}; confirm whether that field is required.",
             "data_quality.source_quality.issues" if source_quality else "data_quality.issues",
             "Missing-value count for this field", {"column": column, "missing_values": missing_count,
-                                                   "display_label": label(renamed.get(column, column))}, 1, True)
+                                                   "display_label": label(renamed.get(column, column)),
+                                                   "missing_kind": issue.get("provenance"), "markers": issue.get("markers", [])}, 1, True)
+
+    unresolved = [(name, stats["aggregation_warning"]) for name, stats in statistics.get("numeric_stats", {}).items()
+                  if stats.get("aggregation_warning")]
+    for index, (column, warning) in enumerate(unresolved[:3]):
+        add(f"unresolved_measure_{index}", f"{label(column)}: {warning['description']}",
+            f"numeric_stats.{column}.aggregation_warning", "Count of negative values; meaning requires a data dictionary",
+            {"column": column, "affected_rows": warning["affected_rows"], "codes": warning["values"]}, 1, True)
 
     for index, kpi in enumerate(kpis[:8]):
         column = str(kpi.get("column") or "")

@@ -80,14 +80,18 @@ def _friendly_fact(fact: dict[str, Any]) -> str:
             text += " The cleaning report does not explain every removed entry."
         return text
     if fact["id"] == "imputation":
-        return (f"{int(values['filled_cells']):,} blank cells were filled during cleaning. "
+        return (f"{int(values['filled_cells']):,} missing cells were filled during cleaning. "
                 "These added values were not in your original file.")
     if fact["id"] == "capping":
         return (f"Cleaning adjusted {int(values['capped_values']):,} unusually high or low values, "
                 "so totals and averages may differ from your original file.")
     if fact["id"] == "missing":
         location = "original file" if "source_quality" in fact.get("source", "") else "file"
-        return (f"{column[:1].upper() + column[1:]} is blank in {int(values['missing_values']):,} entries in the {location}. "
+        if values.get("missing_kind") == "supplied_marker":
+            return (f"{column[:1].upper() + column[1:]} contains {int(values['missing_values']):,} supplied missing-value markers "
+                    f"in the {location}; these were not blank cells. Check the source definitions before comparing groups.")
+        status = "is blank" if values.get("missing_kind") == "literal_blank" else "has missing information"
+        return (f"{column[:1].upper() + column[1:]} {status} in {int(values['missing_values']):,} entries in the {location}. "
                 "Check whether this information is needed before using it to make decisions.")
     if fact["id"] == "snapshot":
         return "This file does not have usable dates, so it cannot show how things changed over time."

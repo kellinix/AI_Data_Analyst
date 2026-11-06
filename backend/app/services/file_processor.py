@@ -326,12 +326,34 @@ class FileProcessor:
         # Retain source gaps before placeholder labels or estimates hide them.
         from app.analytics.data_quality import _quality_score, _ratio_severity
 
-        source = self._trim_text_values(df)
-        source_issues = [
-            {"type": "missing_values", "column": column, "severity": _ratio_severity(count / max(df.height, 1)),
-             "affected_rows": count, "description": f"{count:,} source values are missing ({count / max(df.height, 1):.1%})"}
-            for column in source.columns if _standardize_column_name(column) not in {"notes", "note", "comments", "comment", "remarks"} and (count := source[column].null_count())
-        ]
+        source_issues = []
+        for column in df.columns:
+            if _standardize_column_name(column) in {"notes", "note", "comments", "comment", "remarks"}:
+                continue
+            series = df[column]
+            blanks = series.null_count()
+            markers: dict[str, int] = {}
+            if series.dtype == pl.String:
+                for value in series.drop_nulls().to_list():
+                    text = value.strip()
+                    if not text:
+                        blanks += 1
+                    elif text.lower() in _MISSING_TEXT_VALUES:
+                        markers[text] = markers.get(text, 0) + 1
+            if blanks:
+                source_issues.append({
+                    "type": "missing_values", "column": column, "provenance": "literal_blank",
+                    "severity": _ratio_severity(blanks / max(df.height, 1)), "affected_rows": blanks,
+                    "description": f"{blanks:,} cells are blank in the source file.",
+                })
+            if markers:
+                count = sum(markers.values())
+                source_issues.append({
+                    "type": "missing_value_markers", "column": column, "provenance": "supplied_marker",
+                    "severity": _ratio_severity(count / max(df.height, 1)), "affected_rows": count,
+                    "markers": [{"value": value, "count": n} for value, n in sorted(markers.items())],
+                    "description": f"{count:,} source cells contain missing-value markers; these were not blank cells.",
+                })
         report["source_quality"] = {
             "score": _quality_score(df.height, source_issues), "issues": source_issues,
             "input_rows": df.height,
@@ -370,6 +392,17 @@ class FileProcessor:
             report["date_normalization"] = date_report
             if converted_dates:
                 report["steps"].append("normalized_dates")
+            invalid_dates = [
+                {"type": "invalid_date_values", "column": item["column"],
+                 "severity": _ratio_severity(item["failed_values"] / max(df.height, 1)),
+                 "affected_rows": item["failed_values"], "examples": item["failed_examples"],
+                 "description": f"{item['failed_values']:,} nonblank values could not be parsed as dates; left empty, not original blanks."}
+                for item in date_report["columns"] if item.get("failed_values")
+            ]
+            if invalid_dates:
+                source_issues.extend(invalid_dates)
+                report["steps"].append("recorded_invalid_date_values")
+                report["source_quality"]["score"] = _quality_score(df.height, source_issues)
 
         withheld_columns: set[str] = set()
         if options["parse_currency_percent"]:
@@ -711,6 +744,7 @@ class FileProcessor:
     def _normalize_date_columns(
         self,
         df: pl.DataFrame,
+        *, lossless_only: bool = False,
     ) -> tuple[pl.DataFrame, list[str], dict[str, Any]]:
         expressions = []
         converted: list[str] = []
@@ -728,7 +762,7 @@ class FileProcessor:
 
             parsed_series, parsed_report = _parse_mixed_datetime_series(df[column], column)
             parsed_count = parsed_series.drop_nulls().len() if parsed_series is not None else 0
-            if parsed_count / non_null >= 0.7:
+            if parsed_count / non_null >= 0.7 and (not lossless_only or parsed_count == non_null):
                 expressions.append(parsed_series.alias(column))
                 converted.append(column)
                 report["columns"].append(parsed_report)
@@ -840,7 +874,7 @@ class FileProcessor:
         header_index = self._detect_header_row(df)
         if header_index is None:
             normalized = self._cast_numeric_like_columns(df)
-            return self._normalize_date_columns(normalized)[0]
+            return self._normalize_date_columns(normalized, lossless_only=True)[0]
 
         header_values = df.row(header_index)
         names = self._make_column_names(header_values)
@@ -850,7 +884,7 @@ class FileProcessor:
             pl.any_horizontal([pl.col(col).is_not_null() for col in normalized.columns])
         )
         normalized = self._cast_numeric_like_columns(normalized)
-        return self._normalize_date_columns(normalized)[0]
+        return self._normalize_date_columns(normalized, lossless_only=True)[0]
 
     def _normalize_excel_sheets(
         self, sheets: pl.DataFrame | dict[str, pl.DataFrame], parser_report: dict[str, Any] | None = None
@@ -1067,6 +1101,8 @@ class FileProcessor:
             if _looks_like_identifier_column(column):
                 continue
 
+            if _looks_like_date_column(_standardize_column_name(column), series):
+                continue
             cleaned = series.str.replace_all(",", "").str.strip_chars()
             numeric = cleaned.cast(pl.Float64, strict=False)
             non_null = series.drop_nulls().len()
@@ -1532,17 +1568,21 @@ def _looks_like_date_column(normalized_name: str, series: pl.Series) -> bool:
     sample = [str(value).strip() for value in series.drop_nulls().head(20).to_list()]
     if not sample:
         return False
-    date_like = sum(_looks_like_date_value(value) for value in sample)
+    # Bare eight-digit values require a date name; account/product IDs often
+    # have the same shape. The T separator is stronger timestamp evidence.
+    date_like = sum(_looks_like_date_value(value, allow_compact_date=name_hint) for value in sample)
     return date_like / len(sample) >= (0.5 if name_hint else 0.7)
 
 
-def _looks_like_date_value(value: str) -> bool:
+def _looks_like_date_value(value: str, *, allow_compact_date: bool = False) -> bool:
     if len(value) < 6 or len(value) > 64:
         return False
     return bool(
         re.search(r"\d{1,4}[-/]\d{1,2}[-/]\d{1,4}", value)
         or re.search(r"\d{1,2}\s+[A-Za-z]{3,9}\s+\d{2,4}", value)
         or re.search(r"\d{4}-\d{2}-\d{2}T", value)
+        or re.fullmatch(r"\d{8}T\d{6}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:?\d{2})?", value, re.IGNORECASE)
+        or allow_compact_date and re.fullmatch(r"\d{8}", value)
     )
 
 
@@ -1589,6 +1629,9 @@ def _parse_mixed_datetime_series(
         "strategy": strategy,
         "parsed_values": parsed_count,
         "failed_values": int(len([value for value in normalized_values if value]) - parsed_count),
+        "failed_examples": [{"table_row": index, "value": value[:160]}
+                            for index, (value, converted) in enumerate(zip(normalized_values, parsed, strict=True), 1)
+                            if value and pd.isna(converted)][:5],
         "standard": "UTC datetime" if has_time_or_timezone else "YYYY-MM-DD",
     }
     if parsed_count == 0:
@@ -1628,7 +1671,7 @@ def _to_datetime_mixed(values: pd.Series, *, dayfirst: bool) -> pd.Series:
 
 def _has_time_or_timezone(value: str) -> bool:
     stripped = value.strip()
-    has_time = bool(re.search(r"\d{1,2}:\d{2}", stripped))
+    has_time = bool(re.search(r"\d{1,2}:\d{2}", stripped) or re.match(r"^\d{8}T\d{6}", stripped, re.IGNORECASE))
     has_timezone = bool(re.search(r"(Z|[+-]\d{2}:?\d{2})$", stripped, re.IGNORECASE))
     has_timezone_word = "utc" in stripped.lower() or "gmt" in stripped.lower()
     return has_time or ((has_timezone or has_timezone_word) and ("T" in stripped or has_time))

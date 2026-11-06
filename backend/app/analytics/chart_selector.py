@@ -285,7 +285,7 @@ def _is_business_metric(column: str) -> bool:
     )
 
 
-def _metric_priority(column: str) -> int:
+def _metric_priority(column: str) -> float:
     normalized = _normalize(column)
     words = set(normalized.split("_"))
     if words & {"revenue", "sales", "turnover", "gmv"}:
@@ -302,7 +302,11 @@ def _metric_priority(column: str) -> int:
         return 3
     if words & {"cost", "cogs", "spend", "budget"}:
         return 4
-    if words & {"price", "tax", "rating", "rate", "margin", "percentage"}:
+    # A price is central in asset/catalogue datasets without revenue totals.
+    # Keep flow outcomes ahead of it, but prefer it to unknown attributes.
+    if "price" in words:
+        return 4.5
+    if words & {"tax", "rating", "rate", "margin", "percentage"}:
         return 6
     return 5
 

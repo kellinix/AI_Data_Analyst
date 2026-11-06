@@ -11,7 +11,13 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from app.analytics.measure_semantics import VOLUME_KEYWORDS, calendar_component, is_additive_flow
+from app.analytics.measure_semantics import (
+    FLOW_KEYWORDS,
+    NON_ADDITIVE_KEYWORDS,
+    VOLUME_KEYWORDS,
+    calendar_component,
+    is_additive_flow,
+)
 from app.analytics.text_matching import contains_keyword
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -122,6 +128,20 @@ def detect_column_semantics(
         component = calendar_component(normalized, numeric_stats.get(name, {}))
         if component:
             return _profile(component, 0.94, "Calendar component, not a measurable quantity", "dimension")
+        stats = numeric_stats.get(name, {})
+        if stats.get("aggregation_warning"):
+            return _profile("unresolved_duration", 0.9, stats["aggregation_warning"]["description"], "unresolved")
+        # Explicit code vocabulary wins over activity words (e.g. click_code).
+        # Bare singular activity words with a tiny bounded integer domain can
+        # also be ratings. Plurals and explicit count/total names remain counts.
+        words = set(normalized.split("_"))
+        singular_activity = {word[:-1] for word in VOLUME_KEYWORDS if word.endswith("s")}
+        if _looks_like_categorical_code(column, stats) and (
+            words & {"code", "grade", "level", "condition"}
+            or normalized in singular_activity and 3 <= stats.get("unique_count", 0) <= 5
+            and 0 <= stats.get("min", -1) <= stats.get("max", 6) <= 5
+        ):
+            return _profile("categorical_code", 0.85, "Bounded repeated codes; additive meaning is not established", "dimension")
 
     if _looks_like_identifier(normalized):
         return _profile("identifier", 0.9, "Column name looks like a record identifier", "identifier")
@@ -161,6 +181,8 @@ def detect_column_semantics(
             return _profile("categorical_code", 0.78, "Small set of repeated integer codes, not a measurable quantity", "dimension")
         if minimum is not None and maximum is not None and 0 <= minimum <= maximum <= 1:
             return _profile("percentage", 0.72, "Numeric values fall between 0 and 1", "metric")
+        if _looks_like_row_sequence(normalized, stats):
+            return _profile("row_sequence", 0.85, "Unique consecutive integers starting at zero or one; likely row numbering, not a measure", "identifier")
         return _profile("numeric_metric", 0.7, "Numeric dtype", "metric")
 
     cat_stats = categorical_stats.get(name, {})
@@ -274,12 +296,32 @@ def _looks_like_categorical_code(column: dict[str, Any], stats: dict[str, Any]) 
         return False
     if unique_count > 12 or maximum - minimum > 20:
         return False
+    if stats.get("integer_count") is not None and stats["integer_count"] != count:
+        return False
     if "int" not in str(column.get("dtype", "")).lower() and not (
         float(minimum).is_integer() and float(maximum).is_integer()
     ):
         return False
     # Require enough repetition that the small domain isn't just a tiny sample.
     return count >= unique_count * 5
+
+
+def _looks_like_row_sequence(name: str, stats: dict[str, Any]) -> bool:
+    # A measurement can happen to run 1..N. A recognised quantity, unit or
+    # duration name provides stronger evidence than the sequence pattern.
+    if contains_keyword(name, (*FLOW_KEYWORDS, *NON_ADDITIVE_KEYWORDS,
+                              "total", "count", "quantity", "units", "measurement", "reading",
+                              "temperature", "pressure", "weight", "rainfall", "humidity",
+                              "distance", "energy", "power", "elapsed", "days", "hours",
+                              "minutes", "seconds", "kg", "mm", "cm", "rpm", "mw", "kwh")):
+        return False
+    count = stats.get("count") or 0
+    return (
+        count >= 20 and stats.get("unique_count") == count
+        and stats.get("integer_count") == count
+        and stats.get("min") in {0, 1}
+        and stats.get("max") == stats["min"] + count - 1
+    )
 
 
 def _looks_like_year(

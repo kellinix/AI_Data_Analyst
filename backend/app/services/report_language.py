@@ -13,7 +13,7 @@ from app.analytics.record_context import record_context
 from app.analytics.summary_evidence import _finite, _format
 from app.services.chat_evidence import _friendly_fact
 
-VERSION = "plain_business_v6"
+VERSION = "plain_business_v7"
 
 
 def business_text(text: Any) -> str:
@@ -346,6 +346,10 @@ def _quality_issue(issue: dict[str, Any]) -> dict[str, Any]:
         text = f"{count_text} entries have this information left blank. Check whether it is needed for your decision."
         if issue.get("unpublished"):
             text = f"{count_text} survey results have no published percentage. These values were left empty and are excluded from the chart."
+    elif kind == "missing_value_markers":
+        text = f"{count_text} source entries contain supplied missing-value markers. These were not blank cells. Review the source definitions before comparing groups."
+    elif kind == "invalid_date_values":
+        text = f"{count_text} nonblank entries could not be read as dates and were left empty. These were not blank in the original file; review the source values."
     elif kind == "invalid_numeric_values":
         text = f"{count_text} nonblank entries could not be read as numbers and were left empty. These were not blank in the original file; review the source values."
     elif kind == "empty_field":
@@ -437,7 +441,7 @@ def present_metadata(metadata: dict[str, Any] | None, summary: str | None) -> tu
         source = quality.get("source_quality")
         if isinstance(source, dict):
             source["issues"] = [_quality_issue(issue) for issue in source.get("issues", [])]
-            source["scope"] = "This describes original blanks and invalid numeric entries found during cleaning. Blank fields may be optional. Failed numeric conversions are listed separately."
+            source["scope"] = "Original blanks, supplied missing-value markers and failed conversions are counted separately. Missing fields may be optional."
     if context and summary:
         summary = _name_records(summary, context)
     result["presentation_version"] = VERSION
