@@ -57,6 +57,7 @@ class UserResponse(UserBase):
     id: uuid.UUID
     plan: str
     pro_pass_expires_at: datetime | None = None
+    store_access_expires_at: datetime | None = None
     is_active: bool
     created_at: datetime
     updated_at: datetime

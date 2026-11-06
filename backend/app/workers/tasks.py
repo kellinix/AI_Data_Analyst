@@ -112,3 +112,18 @@ def reset_monthly_usage_counters_task(self: AsyncTask) -> dict:
     updated = self.run_async(_reset_monthly_usage_counters())
     logger.info("Monthly usage counters reset", users_updated=updated)
     return {"status": "completed", "users_updated": updated}
+
+
+async def _reconcile_native_store_purchases() -> int:
+    from app.db.session import AsyncSessionLocal
+    from app.services.store_billing_service import reconcile_due_purchases
+
+    async with AsyncSessionLocal() as db:
+        updated = await reconcile_due_purchases(db)
+        await db.commit()
+        return updated
+
+
+@celery_app.task(bind=True, base=AsyncTask, name="reconcile_native_store_purchases", queue="default")
+def reconcile_native_store_purchases_task(self: AsyncTask) -> dict:
+    return {"status": "completed", "purchases_checked": self.run_async(_reconcile_native_store_purchases())}

@@ -4,6 +4,19 @@
     "development": { "developmentClient": true, "distribution": "internal" },
     "simulator": { "developmentClient": true, "distribution": "internal", "ios": { "simulator": true } },
     "preview": { "distribution": "internal", "android": { "buildType": "apk" } },
-    "production": { "autoIncrement": true }
+    "production": { "autoIncrement": true },
+    "store-test": {
+      "extends": "production",
+      "environment": "preview",
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://zephyr-backend-staging.up.railway.app",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://fpeeofqwylhxyglttlrg.supabase.co"
+      }
+    }
+  },
+  "submit": {
+    "store-test": {
+      "ios": { "ascAppId": "6829941087" }
+    }
   }
 }

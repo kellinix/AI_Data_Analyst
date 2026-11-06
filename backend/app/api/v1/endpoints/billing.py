@@ -72,6 +72,12 @@ async def checkout(
         record.plan = "free"
     if current_user.plan in {"professional", "enterprise"}:
         raise HTTPException(409, "Your current plan already includes Pro access.")
+    from app.services.store_billing_service import pending_store_purchase
+
+    if getattr(current_user, "store_access_expires_at", None) and current_user.store_access_expires_at > datetime.now(UTC):
+        raise HTTPException(409, "Your account already has paid store access. Manage it with the store where you subscribed.")
+    if (settings.app_store_billing_enabled or settings.play_store_billing_enabled) and await pending_store_purchase(db, current_user):
+        raise HTTPException(409, "A store purchase is awaiting confirmation. Restore purchases in the app first.")
     if has_current_pro_pass(current_user):
         raise HTTPException(409, "Your seven-day Pro pass is still active. Buy again after it expires.")
     if record and record.stripe_subscription_id and record.status not in ("canceled", "cancelled"):

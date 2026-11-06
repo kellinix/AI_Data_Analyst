@@ -18,6 +18,7 @@ from app.models.insight import Insight  # noqa: F401
 from app.models.metric_definition import MetricDefinition  # noqa: F401
 from app.models.pro_pass import ProPass  # noqa: F401
 from app.models.recommendation_feedback import RecommendationFeedback  # noqa: F401
+from app.models.store_purchase import StorePurchase  # noqa: F401
 from app.models.subscription import Subscription  # noqa: F401
 from app.models.usage_event import UsageEvent  # noqa: F401
 from app.models.user import User  # noqa: F401

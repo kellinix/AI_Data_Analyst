@@ -44,7 +44,7 @@ try {
    series.labelLine={show:true,length:10,length2:6,lineStyle:{color:'#A39BB7'}};
    series.labelLayout={hideOverlap:true};
  });
- if(groupCounts){option.grid={...(option.grid||{}),left:40,right:110,containLabel:true};(option.series||[]).forEach(series=>{if(series.type==='bar')series.label={show:true,position:'right',fontSize:10,color:'#5F5874',formatter:params=>new Intl.NumberFormat(undefined,{maximumFractionDigits:2}).format(params.value)+(percentageValues?'%':'')+' ('+groupCounts[params.name]+(groupCounts[params.name]===1?' applicant)':' applicants)')}});}
+ if(groupCounts){option.grid={...(option.grid||{}),left:40,right:110,containLabel:true};(option.series||[]).forEach(series=>{if(series.type==='bar')series.label={show:true,position:'right',fontSize:10,color:'#5F5874',formatter:params=>new Intl.NumberFormat(undefined,{maximumFractionDigits:2}).format(params.value)+(percentageValues?'%':'')+' ('+groupCounts[params.name]+(groupCounts[params.name]===1?' record)':' records)')}});}
  if(option.yAxis&&option.yAxis._percentage)option.tooltip.formatter=params=>'Grade average: '+params.value[0]+'\\nRecorded admission chance: '+new Intl.NumberFormat(undefined,{maximumFractionDigits:2}).format(params.value[1]*100)+'%';
  const chart=echarts.init(document.getElementById('chart'));
  chart.setOption(option);

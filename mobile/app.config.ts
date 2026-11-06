@@ -1,10 +1,10 @@
 import type { ConfigContext, ExpoConfig } from 'expo/config';
 
 export default ({ config }: ConfigContext): ExpoConfig => {
-  const development = process.env.EAS_BUILD_PROFILE !== 'production';
+  const development = !['production', 'store-test'].includes(process.env.EAS_BUILD_PROFILE ?? '');
   return {
     ...config,
-    name: 'Zephyr', slug: 'zephyr-mobile', scheme: 'zephyr', version: '1.0.0',
+    name: 'Vesquiri', slug: 'zephyr-mobile', scheme: 'zephyr', version: '1.0.0',
     orientation: 'default', userInterfaceStyle: 'light',
     ios: {
       ...config.ios,
@@ -20,9 +20,9 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       adaptiveIcon: { foregroundImage: './assets/android-icon-foreground.png', monochromeImage: './assets/android-icon-monochrome.png', backgroundColor: '#F6F8FC' },
     },
     plugins: [
-      'expo-router', 'expo-secure-store', 'expo-dev-client', 'expo-font', 'expo-sharing',
+      'expo-router', 'expo-secure-store', 'expo-dev-client', 'expo-font', 'expo-sharing', 'expo-iap',
       ['expo-build-properties', { android: { usesCleartextTraffic: development } }],
     ],
-    web: { ...config.web, bundler: 'metro', output: 'single', name: 'Zephyr' },
+    web: { ...config.web, bundler: 'metro', output: 'single', name: 'Vesquiri' },
   };
 };

@@ -107,6 +107,9 @@ async def get_current_user(
     from app.services.pro_pass_service import refresh_expired_pro_pass
 
     await refresh_expired_pro_pass(db, user)
+    from app.services.store_billing_service import refresh_store_access
+
+    await refresh_store_access(db, user)
     return user
 
 

@@ -1,9 +1,19 @@
 import 'react-native-url-polyfill/auto';
+import 'fast-text-encoding';
 import { Platform } from 'react-native';
 import * as SecureStore from 'expo-secure-store';
+import * as Crypto from 'expo-crypto';
 import { createClient } from '@supabase/supabase-js';
 import { config } from './config';
 import { chunkedStorage, type KeyValueStore } from './secure-storage';
+import { installPkceCrypto } from './pkce-crypto';
+
+if (Platform.OS !== 'web') {
+  installPkceCrypto(globalThis, {
+    getRandomValues: (array) => Crypto.getRandomValues(array),
+    sha256: (data) => Crypto.digest(Crypto.CryptoDigestAlgorithm.SHA256, data),
+  });
+}
 
 const browserStorage: KeyValueStore = {
   async getItem(key) { return typeof localStorage === 'undefined' ? null : localStorage.getItem(key); },

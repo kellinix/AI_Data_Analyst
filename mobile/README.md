@@ -123,7 +123,21 @@ local `.env` files, backend code, datasets and generated output. Only the mobile
 app and canonical frontend type source are uploaded. Production builds are not
 automatically submitted to either store.
 
+The `store-test` profile reads Expo's `preview` environment. Its Supabase public
+key must belong to the project URL in `eas.json` and be accepted by that project's
+Auth endpoint. Updating a local `.env` file does not replace the key compiled
+into a TestFlight or Play build. Use only a publishable or legacy `anon` key;
+never use a service-role or secret key in the app.
+
+Store builds run `eas-build-pre-install` to verify the configured public key
+against `/auth/v1/settings` before compilation. A missing, mismatched, privileged,
+expired or rejected key stops the build. Run `npm run check:release-auth` with
+the intended release environment before approving a new signed build. The check
+does not log keys, sign in a user or modify the Supabase project.
+
 ## Verification
+
+Native purchases use `expo-iap` and a backend purchase ledger. The paywall offers monthly Pro and a non-renewing seven-day pass, displays store prices, and supports restore and management. Both remain disabled until server credentials, catalogue configuration and signed store tests are complete. See [store setup and release gates](../docs/STORE_PURCHASES.md). A new native build is required; this module is unavailable in Expo Go. Web checkout continues to use Stripe.
 
 ```powershell
 npm run type-check

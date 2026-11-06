@@ -113,6 +113,10 @@ export function BillingAction({ location, offer = "monthly" }: {
 
   if (hasSubscription) return manageBilling
 
+  if (profile?.plan === "starter" && profile.store_access_expires_at) {
+    return <p className="mt-5 text-sm">Your app-store Pro access is confirmed through {new Date(profile.store_access_expires_at).toLocaleString()}. Manage subscriptions in the Apple or Google account used to purchase.</p>
+  }
+
   if (hasPass) {
     return (
       <div className="mt-5 text-sm">

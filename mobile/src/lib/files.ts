@@ -42,7 +42,7 @@ export async function exportReport(id: string, format: 'pdf' | 'excel') {
   const token = await accessToken();
   if (!token) throw new ApiError('Sign in to export', 401);
   const url = `${config.apiUrl}/api/v1/analyses/${encodeURIComponent(id)}/export/${format}`;
-  const filename = `zephyr-${id}${format === 'pdf' ? '-visual-report' : ''}-${Date.now()}.${format === 'pdf' ? 'pdf' : 'xlsx'}`;
+  const filename = `vesquiri-${id}${format === 'pdf' ? '-visual-report' : ''}-${Date.now()}.${format === 'pdf' ? 'pdf' : 'xlsx'}`;
   if (Platform.OS === 'web') {
     const response = await fetch(url, { headers: { Authorization: `Bearer ${token}` } });
     if (!response.ok) throw new ApiError(errorDetail(await response.json().catch(() => null), 'Export failed'), response.status);

@@ -227,6 +227,19 @@ class Settings(BaseSettings):
     stripe_payment_method_configuration_id: str = ""
     stripe_enterprise_price_id: str = ""
     stripe_billing_enabled: bool = False
+    # Native billing stays closed until verified store configuration is deployed.
+    app_store_billing_enabled: bool = False
+    play_store_billing_enabled: bool = False
+    store_bundle_id: str = "com.zephyr.analytics"
+    app_store_app_id: int = 6829941087
+    app_store_key_id: str = ""
+    app_store_issuer_id: str = ""
+    app_store_private_key: str = ""
+    google_play_service_account_json: str = ""
+    store_token_encryption_key: str = ""
+    store_sandbox_user_ids: list[str] = []
+    google_play_notification_audience: str = ""
+    google_play_notification_email: str = ""
     stripe_live_mode: bool = False
 
 

@@ -9,6 +9,7 @@ import { messageOf } from '../lib/api';
 import { completeAuthCallback } from '../lib/auth-callback';
 import { useAuth } from '../providers/auth';
 import { Body, Button, Card, ErrorNotice, Field, Heading, Screen, colors } from '../components/ui';
+import { LegalLinks } from '../components/legal-links';
 
 // Keep native Auth redirects stable in development builds as well as releases.
 const authCallbackUrl = Platform.OS === 'web' ? Linking.createURL('auth/callback') : 'zephyr://auth/callback';
@@ -78,7 +79,7 @@ export default function SignIn() {
   return <SafeAreaView style={{ flex: 1, backgroundColor: colors.canvas }} edges={['top']}><Screen keyboardAvoidingBehavior={Platform.OS === 'android' ? 'height' : undefined}>
     {!keyboardVisible && <View style={{ padding: 24, borderRadius: 28, backgroundColor: '#302056', gap: 14, overflow: 'hidden' }}>
       <View style={{ position: 'absolute', width: 160, height: 160, borderRadius: 80, right: -55, top: -75, backgroundColor: '#6445A6' }} />
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}><Ionicons name="analytics" color="#B5F3D8" size={28} /><Text style={{ fontSize: 23, fontWeight: '800', color: '#fff' }}>Zephyr.</Text></View>
+      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}><Ionicons name="analytics" color="#B5F3D8" size={28} /><Text style={{ fontSize: 23, fontWeight: '800', color: '#fff' }}>Vesquiri.</Text></View>
       <Text style={{ fontSize: 29, lineHeight: 35, fontWeight: '800', letterSpacing: -1, color: '#fff' }}>Your data. Clear decisions.</Text>
       <Text style={{ fontSize: 14, lineHeight: 22, color: '#DDD1F2' }}>Upload a spreadsheet and carry your insights with you.</Text>
     </View>}
@@ -94,5 +95,6 @@ export default function SignIn() {
       {mode === 'login' && <Button title="Forgot password?" variant="secondary" disabled={busy} onPress={() => switchMode('reset')} />}
     </Card>
     <Body>Your existing website account works here too.</Body>
+    <LegalLinks />
   </Screen></SafeAreaView>;
 }

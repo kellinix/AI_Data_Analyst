@@ -41,6 +41,9 @@ class User(UUIDMixin, TimestampMixin, Base):
         DateTime(timezone=True), nullable=True
     )
     billing_livemode: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    store_access_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    store_purchase_pending_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    store_purchase_intent: Mapped[str | None] = mapped_column(String(36))
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     is_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 

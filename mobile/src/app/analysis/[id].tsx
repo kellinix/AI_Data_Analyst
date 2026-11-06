@@ -33,7 +33,7 @@ export default function AnalysisScreen() {
   const share = useMutation({ mutationFn: async () => {
     const link = await api<ShareLinkResponse>(`/analyses/${id}/share`, { method: 'POST' });
     if (!/^https?:\/\//i.test(link.share_url)) throw new Error('The server returned an invalid share link');
-    await Share.share({ message: `${result.data?.name ?? 'Zephyr analysis'}\n${link.share_url}` });
+    await Share.share({ message: `${result.data?.name ?? 'Vesquiri analysis'}\n${link.share_url}` });
   }, onError: (error) => setActionError(messageOf(error)) });
   const remove = useMutation({ mutationFn: () => api<void>(`/analyses/${id}`, { method: 'DELETE' }), onSuccess: () => {
     queryClient.removeQueries({ queryKey: ['analysis', session?.user.id, id] });

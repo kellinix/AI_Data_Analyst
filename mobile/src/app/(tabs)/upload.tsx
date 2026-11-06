@@ -59,7 +59,7 @@ export default function Upload() {
   const quotaFull = profile.data && profile.data.usage.analyses_this_month >= profile.data.usage.analyses_limit;
   return <Screen><View style={{ borderRadius: 28, padding: 24, backgroundColor: '#302056', gap: 10 }}><Text style={{ color: '#B5F3D8', fontSize: 12, fontWeight: '800', letterSpacing: 2 }}>NEW ANALYSIS</Text><Text style={{ color: '#fff', fontSize: 29, fontWeight: '800', letterSpacing: -1 }}>Make sense of your data.</Text><Text style={{ color: '#DDD1F2', fontSize: 14, lineHeight: 22 }}>Choose a spreadsheet from your phone or cloud files.</Text></View>
     <Card><View style={{ width: 54, height: 54, borderRadius: 18, backgroundColor: colors.pale, alignItems: 'center', justifyContent: 'center' }}><Ionicons name="document-text-outline" size={29} color={colors.blue} /></View><Label>{asset?.name ?? 'Choose your file'}</Label><Body>{asset?.size ? `${(asset.size / 1024 / 1024).toFixed(1)} MB` : 'CSV, Excel, JSON, Parquet, or TSV'}</Body><Button title={asset ? 'Choose another file' : 'Browse files'} disabled={busy} variant="secondary" icon="folder-open-outline" onPress={() => void choose()} /></Card>
-    {asset && <Card><Field label="Analysis name" value={name} onChangeText={setName} editable={!busy} maxLength={512} /><Field label="What should Zephyr know? (optional)" placeholder="For example: monthly sales by region. Revenue is recorded in GBP." value={context} onChangeText={setContext} multiline maxLength={2000} editable={!busy} />
+    {asset && <Card><Field label="Analysis name" value={name} onChangeText={setName} editable={!busy} maxLength={512} /><Field label="What should Vesquiri know? (optional)" placeholder="For example: monthly sales by region. Revenue is recorded in GBP." value={context} onChangeText={setContext} multiline maxLength={2000} editable={!busy} />
       <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}><View style={{ flex: 1 }}><Label>Clean data before analysis</Label><Body>Normalize dates, text, and numeric formats.</Body></View><Switch accessibilityLabel="Clean data before analysis" value={clean} onValueChange={setClean} disabled={busy} trackColor={{ true: colors.blue }} /></View>
       {!clean && <Body>Raw mode preserves the original values; text-formatted dates may prevent forecasting.</Body>}
     </Card>}
@@ -68,6 +68,6 @@ export default function Upload() {
     {busy && <Body>{stage} {progress > 0 && progress < 100 ? `${progress}%` : ''}</Body>}
     <Button title="Create analysis" icon="sparkles-outline" loading={busy} disabled={!asset || !!quotaFull} onPress={() => void create()} />
     {profile.data && <Body>{profile.data.usage.analyses_this_month} of {profile.data.usage.analyses_limit} monthly analyses used.</Body>}
-    <Body>Your file is sent to your Zephyr server for processing. Keep this screen open until the analysis starts.</Body>
+    <Body>Your file is sent to your Vesquiri server for processing. Keep this screen open until the analysis starts.</Body>
   </Screen>;
 }

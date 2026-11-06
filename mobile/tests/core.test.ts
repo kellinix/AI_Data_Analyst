@@ -1,10 +1,51 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
+import { randomFillSync, webcrypto } from 'node:crypto';
+import { createClient } from '@supabase/supabase-js';
 import { ApiError, createApi, errorDetail } from '../src/lib/api-core';
 import { chunkedStorage, type KeyValueStore } from '../src/lib/secure-storage';
 import { chartDocument } from '../src/lib/chart-document';
 import { formatMetric } from '../src/lib/format';
+import { installPkceCrypto } from '../src/lib/pkce-crypto';
 import type { Insight } from '../src/generated/contracts';
+
+test('native PKCE uses secure randomness and an S256 challenge', async () => {
+  const previous = Object.getOwnPropertyDescriptor(globalThis, 'crypto');
+  Object.defineProperty(globalThis, 'crypto', { configurable: true, writable: true, value: undefined });
+  let randomCalls = 0;
+  let digestCalls = 0;
+  try {
+    installPkceCrypto(globalThis, {
+      getRandomValues: (array) => { randomCalls++; return randomFillSync(array); },
+      sha256: async (data) => { digestCalls++; return webcrypto.subtle.digest('SHA-256', data as never); },
+    });
+    const { store } = memoryStore();
+    const client = createClient('https://example.supabase.co', 'test-public-key', {
+      auth: { storage: store, flowType: 'pkce', autoRefreshToken: false, persistSession: true },
+    });
+    const result = await client.auth.signInWithOAuth({ provider: 'google', options: { skipBrowserRedirect: true } });
+    assert.equal(result.error, null);
+    assert.ok(result.data.url);
+    const url = new URL(result.data.url);
+    assert.equal(url.searchParams.get('code_challenge_method'), 's256');
+    assert.match(url.searchParams.get('code_challenge') ?? '', /^[A-Za-z0-9_-]{43}$/);
+    assert.ok(randomCalls > 0);
+    assert.ok(digestCalls > 0);
+  } finally {
+    if (previous) Object.defineProperty(globalThis, 'crypto', previous);
+    else Reflect.deleteProperty(globalThis, 'crypto');
+  }
+});
+
+test('PKCE crypto does not replace native random failures with a weak fallback', () => {
+  const target: { crypto?: unknown } = {};
+  installPkceCrypto(target, {
+    getRandomValues: () => { throw new Error('Native secure random unavailable'); },
+    sha256: async () => new ArrayBuffer(32),
+  });
+  const crypto = target.crypto as { getRandomValues: (input: Uint32Array) => Uint32Array };
+  assert.throws(() => crypto.getRandomValues(new Uint32Array(56)), /Native secure random unavailable/);
+});
 
 function memoryStore() {
   const values = new Map<string, string>();

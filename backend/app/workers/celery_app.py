@@ -31,6 +31,10 @@ celery_app.conf.update(
     broker_connection_retry_on_startup=True,
     result_expires=3600,
     beat_schedule={
+        "reconcile-native-store-purchases": {
+            "task": "reconcile_native_store_purchases",
+            "schedule": crontab(minute="*/15"),
+        },
         "reset-monthly-usage-counters": {
             "task": "reset_monthly_usage_counters",
             "schedule": crontab(minute=0, hour=0, day_of_month=1),

@@ -97,6 +97,7 @@ async def get_me(current_user: CurrentUser, db: DB):
         avatar_url=current_user.avatar_url,
         plan=current_user.plan,
         pro_pass_expires_at=getattr(current_user, "pro_pass_expires_at", None),
+        store_access_expires_at=getattr(current_user, "store_access_expires_at", None),
         is_active=current_user.is_active,
         created_at=current_user.created_at,
         updated_at=current_user.updated_at,

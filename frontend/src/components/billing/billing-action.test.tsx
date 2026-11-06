@@ -39,6 +39,14 @@ beforeEach(() => {
 afterEach(cleanup)
 
 describe("billing choices", () => {
+  it("shows app-store access without offering a duplicate web purchase", async () => {
+    mocks.auth.profile!.plan = "starter"
+    mocks.auth.profile!.store_access_expires_at = new Date(Date.now() + 86400000).toISOString()
+    render(<BillingAction location="settings" />)
+    expect(await screen.findByText(/Manage subscriptions in the Apple or Google account/)).toBeTruthy()
+    expect(screen.queryByRole("button", { name: /Subscribe|Get 7 days/ })).toBeNull()
+    expect(mocks.post).not.toHaveBeenCalled()
+  })
   it.each([
     ["weekly", "Get 7 days · £5.99 once"],
     ["monthly", "Subscribe · £19/month"],

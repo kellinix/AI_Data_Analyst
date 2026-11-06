@@ -6,6 +6,7 @@ from app.models.insight import Insight
 from app.models.metric_definition import MetricDefinition
 from app.models.pro_pass import ProPass
 from app.models.recommendation_feedback import RecommendationFeedback
+from app.models.store_purchase import StorePurchase
 from app.models.subscription import Subscription
 from app.models.usage_event import UsageEvent
 from app.models.user import SubscriptionPlan, User
@@ -22,6 +23,7 @@ __all__ = [
     "ProPass",
     "RecommendationFeedback",
     "Subscription",
+    "StorePurchase",
     "SubscriptionPlan",
     "UploadedFile",
     "User",

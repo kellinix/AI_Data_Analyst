@@ -1,5 +1,7 @@
 # Web billing
 
+Native Apple/Google purchases are implemented separately; see [store purchase setup and release gates](STORE_PURCHASES.md). They remain disabled until credentials, store setup and signed sandbox tests are complete.
+
 Vesquiri offers **£19 GBP per month**, renewing until canceled, and **£5.99 once for seven days of Pro**. The seven-day pass never creates a subscription or renews. Both use Pro's existing calendar-month allowances: 20 analyses, 100 follow-up questions and 1 GB of saved files. Buying either option does not reset usage counts. `starter` is the internal plan key for Pro.
 
 Checkout remains closed until `STRIPE_BILLING_ENABLED=true` and the corresponding price, secret key and webhook secret are configured. A browser redirect never grants access. Monthly access follows verified Stripe subscription state; a pass follows a verified, captured payment for the configured one-time price.
@@ -16,7 +18,7 @@ Checkout remains closed until `STRIPE_BILLING_ENABLED=true` and the correspondin
 
 Set backend-only `STRIPE_PAYMENT_METHOD_CONFIGURATION_ID` to a dedicated, nondefault Stripe payment-method configuration for Vesquiri. The backend passes this configuration to Checkout instead of forcing `payment_method_types=card`. If the setting is empty, Checkout remains card-only; it never inherits a shared account's default configuration.
 
-The prepared live configuration is `pmc_1UXnCzEt6mZEzRhBpzhlM1ln` (Vesquiri web checkout). Chrome's live Stripe dashboard confirmed Cards, PayPal, Klarna, Pay by Bank and Stripe's default Link wallet enabled, with zero methods requiring action. Existing shared configurations were not changed. The configuration is prepared in Stripe; the website does not use it until a separately approved backend deployment installs the setting.
+The live configuration is `pmc_1UXnCzEt6mZEzRhBpzhlM1ln` (Vesquiri web checkout). Chrome's live Stripe dashboard confirmed Cards, PayPal, Klarna, Pay by Bank and Stripe's default Link wallet enabled, with zero methods requiring action. Existing shared configurations were not changed. After explicit approval, backend deployment `9fa9e624-7751-44a0-b73c-6430f7efc3d8` activated this setting with release `edd2c8a668ae7a176a613c790f35a9300a7be041`.
 
 Stripe selects eligible methods based on the purchase mode, currency, amount and customer location. PayPal and Klarna are configured for both offers, subject to provider eligibility. UK Pay by Bank is for the one-time seven-day pass: Stripe Checkout does not support it in subscription mode. Bacs Direct Debit is not enabled. See [payment-method configurations](https://docs.stripe.com/payments/payment-method-configurations) and [Pay by Bank support](https://docs.stripe.com/payments/pay-by-bank).
 
@@ -86,6 +88,8 @@ On the deployed website, the signed-in Google test account opened a live £5.99 
 The new backend changes pass **72 targeted billing and account-deletion tests** plus Ruff. These cover selecting the scoped method configuration, retaining the card fallback, replacing older card-only sessions, safe checkout reuse, retry after a failed bank payment and preventing another purchase while payment confirmation is pending.
 
 Actual unpaid Stripe sandbox sessions using the scoped test configuration `pmc_1UXn2VEt6mZEzRhB8nFDLF6f` returned `card`, `paypal`, `klarna` and `pay_by_bank` for GBP 599 one-time checkout, and `card`, `paypal` and `klarna` for GBP 1900 monthly checkout. Both sessions were expired and their temporary customer deleted. These checks verify provider eligibility and session creation; they do not establish successful PayPal, Klarna or bank-payment settlement. The live configuration's enabled methods were verified separately in Chrome. A later CLI recheck returned an invalid CLI API key; the deployed dedicated application key was not changed.
+
+Following the approved backend deployment, Railway reported deployment successful and production application startup complete. Public health returned `healthy` with database `ok`; both billing offers remained enabled. The existing signed-in Google test account opened the actual website's live £5.99 checkout, which displayed Card, Pay by Bank, PayPal and Klarna. Switching to the £19 monthly offer opened live checkout displaying Card, PayPal and Klarna, with monthly renewal wording and no Pay by Bank option. Both checkout pages were left through their return links without entering payment details or attempting a charge. The weekly session was replaced when switching offers; the final monthly session was left unpaid. Successful live settlement was not tested.
 
 ## Mobile stores
 
