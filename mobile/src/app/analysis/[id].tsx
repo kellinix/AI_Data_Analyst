@@ -57,7 +57,7 @@ export default function AnalysisScreen() {
   if (!result.data) return <Screen><ErrorNotice message={messageOf(result.error)} retry={() => void result.refetch()} /></Screen>;
   const analysis = result.data;
   const summaryChecks = (analysis.metadata?.analysis_evidence as {
-    summary_checks?: { method?: string; facts?: { id: string; text: string; calculation: string; scope: string }[] };
+    summary_checks?: { method?: string; facts?: { id: string; text: string; calculation: string; scope: string; explanation?: string; scope_explanation?: string }[] };
   } | undefined)?.summary_checks;
   const summaryFacts = summaryChecks?.method === 'measured_facts_v1' &&
     summaryChecks.facts?.map((fact) => fact.text).join('\n') === analysis.summary
@@ -83,9 +83,9 @@ export default function AnalysisScreen() {
       {recordContext?.description && <Card><Label>What this data is about</Label><Body>{recordContext.description}</Body></Card>}
       <Button title="Ask a question about this data" icon="chatbubble-ellipses-outline" onPress={() => router.push({ pathname: '/chat/[id]', params: { id } })} />
       <Button title="Compare groups" variant="secondary" icon="stats-chart-outline" onPress={() => router.push({ pathname: '/compare/[id]', params: { id } })} />
-      {analysis.summary && <View style={{ borderRadius: 24, borderWidth: 1, borderColor: '#DCD0F5', backgroundColor: '#F1EAFE', padding: 21, gap: 11 }}><View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}><View style={{ width: 34, height: 34, borderRadius: 11, backgroundColor: colors.blue, alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: '#fff', fontSize: 20 }}>✦</Text></View><Label>The story at a glance</Label></View><Body>{analysis.summary}</Body></View>}
+      {analysis.summary && <View style={{ borderRadius: 24, borderWidth: 1, borderColor: '#DCD0F5', backgroundColor: '#F1EAFE', padding: 21, gap: 11 }}><View style={{ flexDirection: 'row', alignItems: 'center', gap: 9 }}><View style={{ width: 34, height: 34, borderRadius: 11, backgroundColor: colors.blue, alignItems: 'center', justifyContent: 'center' }}><Text style={{ color: '#fff', fontSize: 20 }}>✦</Text></View><Label>What your data shows</Label></View><Body>{analysis.summary}</Body></View>}
       {!!summaryFacts?.length && <Card><Button title={showSummaryEvidence ? 'Hide explanation' : 'See how we worked this out'} variant="secondary" onPress={() => setShowSummaryEvidence((shown) => !shown)} />
-        {showSummaryEvidence && summaryFacts.map((fact, index) => <Body key={fact.id}>{index + 1}. {fact.calculation}. Scope: {fact.scope}.</Body>)}
+        {showSummaryEvidence && summaryFacts.map((fact, index) => <Body key={fact.id}>{index + 1}. {fact.explanation ?? 'This figure comes from the saved results for your file.'} {fact.scope_explanation ?? fact.scope}</Body>)}
       </Card>}
       {!summaryFacts?.length && <Card><Body>Update this summary using its saved calculations. This does not run a new analysis.</Body><Button title="Update summary from saved results" variant="secondary" loading={refreshSummary.isPending} onPress={() => refreshSummary.mutate()} /></Card>}
       {evidence && <Card><Label>What these results cover</Label>

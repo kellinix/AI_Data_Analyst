@@ -416,7 +416,7 @@ Measured fact catalogue:
                     content = str(exc)
                     checks = {"status": "unsupported", "method": "measured_chat_queries_v1", "free_form_used": False}
                 except (ValueError, OSError):
-                    content = "I couldn't make that comparison from this report. Try choosing a measure and a group shown in your analysis."
+                    content = "I couldn't work out that answer from this report. Try asking for a total, an average, or how many entries are in a group."
                     checks = {"status": "unsupported", "method": "measured_chat_queries_v1", "free_form_used": False}
             else:
                 content, checks = render_chat_answer(payload, facts)

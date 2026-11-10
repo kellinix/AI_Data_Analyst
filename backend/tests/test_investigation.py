@@ -107,7 +107,7 @@ async def test_weights_dates_missing_groups_and_sampling_are_explicit(analysis):
     weighted = await compare(analysis, ComparisonPlan(aggregation="weighted_average", column="revenue", weight_column="weight"))
     assert weighted["groups"][0]["value"] == 17.5
     assert weighted["groups"][0]["supplied_values"] == 2
-    assert "positive weights" in weighted["scope"] and "not the whole file" in weighted["scope"]
+    assert "weights above zero" in weighted["scope"] and "not the whole file" in weighted["scope"]
     monthly = await compare(analysis, ComparisonPlan(aggregation="sum", column="revenue", group_by="date", date_bucket="month"))
     assert sorted(group["value"] for group in monthly["groups"]) == [30, 100]
     missing = await entries(analysis, EntryRequest(kind="comparison", comparison=ComparisonPlan(aggregation="count", group_by="region"), group_value=None))

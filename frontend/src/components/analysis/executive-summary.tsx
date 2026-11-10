@@ -13,6 +13,8 @@ interface SummaryFact {
   text: string
   calculation: string
   scope: string
+  explanation?: string
+  scope_explanation?: string
 }
 
 function matchingFacts(summary: string, evidence: unknown): SummaryFact[] {
@@ -46,7 +48,7 @@ export function ExecutiveSummary({ summary, analysisEvidence }: ExecutiveSummary
             <Sparkles className="h-4 w-4 text-white" />
           </div>
           <h2 className="text-base font-semibold text-zinc-900 dark:text-white">
-            The story at a glance
+            What your data shows
           </h2>
         </div>
         <ul className="space-y-2">
@@ -63,8 +65,13 @@ export function ExecutiveSummary({ summary, analysisEvidence }: ExecutiveSummary
                 {sentence}
                 {facts[i] && (
                   <details className="mt-1 text-xs text-zinc-600 dark:text-zinc-300">
-                    <summary className="cursor-pointer text-violet-700 dark:text-violet-300">How calculated</summary>
-                    <p className="mt-1">{facts[i].calculation}. Scope: {facts[i].scope}.</p>
+                    <summary className="cursor-pointer text-violet-700 dark:text-violet-300">How we worked this out</summary>
+                    <p className="mt-1">{facts[i].explanation ?? "This figure comes from the saved results for your file."}</p>
+                    <p className="mt-1">{facts[i].scope_explanation ?? facts[i].scope}</p>
+                    <details className="mt-2">
+                      <summary className="cursor-pointer">See the formula</summary>
+                      <p className="mt-1">{facts[i].calculation}</p>
+                    </details>
                   </details>
                 )}
               </div>

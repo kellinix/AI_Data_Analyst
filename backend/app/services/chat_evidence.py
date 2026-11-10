@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from app.analytics.labels import sentence_label
+from app.analytics.labels import reader_label
 from app.analytics.summary_evidence import _finite, _format, build_summary_facts
 from app.services.summary_refresh import saved_measurements
 
@@ -16,7 +16,7 @@ UNAVAILABLE = (
 
 
 def _label(column: Any) -> str:
-    return sentence_label(str(column).replace("_", " ").strip())
+    return reader_label(str(column))
 
 
 def _fact_key(fact: dict[str, Any]) -> tuple[Any, ...]:
@@ -66,6 +66,9 @@ def _friendly_fact(fact: dict[str, Any]) -> str:
         return (f"Of the {total:,} entries, {count:,} show '{values['category']}' "
                 f"as the {column.lower()} ({count / total:.1%}).")
     if column and "distinct_values" in values:
+        if column.endswith(" ID"):
+            return (f"The file lists {int(values['distinct_values']):,} different {column}s. "
+                    "An ID is a code used in your file. We have not checked who or what each code belongs to.")
         return (f"The file contains {int(values['distinct_values']):,} different values for {column}. "
                 "The names or IDs have not been independently checked.")
     if fact["id"] == "records":
@@ -100,6 +103,38 @@ def _friendly_fact(fact: dict[str, Any]) -> str:
                 f"to {_format(float(values['upper']))}. This includes the latest month's "
                 f"{_format(float(values['latest']))}, so we cannot tell whether it will rise or fall.")
     return fact["text"]
+
+
+def explain_fact(fact: dict[str, Any]) -> str:
+    """Explain a saved calculation without asking a model to rewrite its facts."""
+    values = fact.get("values") or {}
+    column = _label(values.get("display_label") or values.get("column", "this field"))
+    operation = values.get("operation")
+    if operation == "total":
+        return f"We added the filled-in numbers for {column}."
+    if operation == "mean":
+        return (f"We added the filled-in numbers for {column}. "
+                "Then we divided the total by how many numbers there were.")
+    if operation == "weighted_mean":
+        weight = _label(values.get("weighted_by") or "weight")
+        return f"Numbers with a larger {weight} have more say in this average. Only weights above zero are used."
+    if operation in {"min", "max"}:
+        size = "smallest" if operation == "min" else "largest"
+        return f"We found the {size} filled-in number for {column}."
+    if "category" in values:
+        return (f"We counted entries marked {values['category']!r} in {column}. "
+                "The percentage shows how much of the whole group this is. Percent means out of 100.")
+    if "distinct_values" in values:
+        return f"We counted each different {column} once. We counted repeated values only once."
+    if fact.get("id") == "records":
+        return "We counted the rows used in this report. Each row is one entry in the file."
+    if fact.get("id") == "cleaning":
+        return "We compared the number of entries before and after cleaning."
+    if fact.get("id") == "imputation":
+        return "We counted empty cells that were filled during cleaning. These added numbers were missing from the original file."
+    if fact.get("id") == "snapshot":
+        return "We looked for dates that could show change over time. The file does not have usable dates for this."
+    return "This statement uses the saved figures for this report. Check the source details before using it to make a decision."
 
 
 def friendly_chat_content(facts: list[dict[str, Any]]) -> str:

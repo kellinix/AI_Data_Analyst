@@ -11,9 +11,9 @@ from app.analytics.labels import derive_label, sentence_label
 from app.analytics.plain_language import plain_english
 from app.analytics.record_context import record_context
 from app.analytics.summary_evidence import _finite, _format
-from app.services.chat_evidence import _friendly_fact
+from app.services.chat_evidence import _friendly_fact, explain_fact
 
-VERSION = "plain_business_v7"
+VERSION = "plain_reader_v8"
 
 
 def business_text(text: Any) -> str:
@@ -200,6 +200,17 @@ def present_insight(insight: dict[str, Any], metadata: dict[str, Any] | None = N
             result["description"] = "Total across the entries in this file." if data.get("is_total", True) else "Average across the entries in this file."
         if set(str(data["column"]).lower().split("_")) & {"confidence", "similarity"}:
             result["description"] += " This is a field supplied in the uploaded file, not confidence in this analysis."
+        operation = "total" if data.get("is_total", True) and not data.get("is_percent") else "mean"
+        if data.get("weighted_by"):
+            operation = "weighted_mean"
+        data["calculation_explanation"] = explain_fact({"values": {
+            "column": data["column"], "operation": operation, "weighted_by": data.get("weighted_by"),
+        }})
+        if data.get("is_percent") and data.get("kpi_type") in {None, "outcome_rate"} and data["column"] != "chance_of_admit":
+            data["calculation_explanation"] = (
+                "We counted entries marked 1 in this field. We divided by the number of entries with a value. "
+                "Then we multiplied by 100 to get the percentage."
+            )
     if kind == "recommendation":
         source = data.get("confidence_source")
         if str(source or "").startswith("rule:"):
@@ -394,6 +405,7 @@ def present_metadata(metadata: dict[str, Any] | None, summary: str | None) -> tu
     if not metadata:
         return metadata, summary
     result = deepcopy(metadata)
+    context = record_context(result)
     if result.get("presentation_version") == VERSION:
         context = record_context(result)
         if context and summary:
@@ -409,12 +421,21 @@ def present_metadata(metadata: dict[str, Any] | None, summary: str | None) -> tu
                 str(fact.get("id", "")).startswith("identity_")
                 and (fact.get("values") or {}).get("repeated_records") == 0
             )]
-            sentences = [_friendly_fact(fact) for fact in visible_facts]
+            sentences = [_name_records(_friendly_fact(fact), context) for fact in visible_facts]
         except (KeyError, TypeError, ValueError):
             sentences = []
         if sentences:
             for fact, sentence in zip(visible_facts, sentences, strict=True):
                 fact["text"] = sentence
+                fact["explanation"] = _name_records(explain_fact(fact), context)
+                fact["scope_explanation"] = (
+                    "We used only the part of the file read for this report."
+                    if fact.get("scope") == "analysed sample"
+                    else "We used the entries included in this report."
+                    if fact.get("scope") == "analysed file"
+                    else business_text(fact.get("scope"))
+                )
+            checks["facts"] = visible_facts
             summary = "\n".join(sentences)
     evidence = result.get("analysis_evidence") or {}
     context = record_context(result)

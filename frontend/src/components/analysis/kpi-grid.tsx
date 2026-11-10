@@ -131,18 +131,14 @@ function KpiCard({
       </div>
       {Boolean(insight.data?.column) && (
         <details className="border-t border-zinc-100 pt-3 text-xs text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
-          <summary className="cursor-pointer font-medium text-blue-600 dark:text-blue-400">How calculated</summary>
+          <summary className="cursor-pointer font-medium text-blue-600 dark:text-blue-400">How we worked this out</summary>
           {sourceName && <p className="mt-2">Source: {sourceName}</p>}
           <p className="mt-1">
-            {percent ? "Percentage of records with a positive value in " :
-              insight.data.weighted_by ? "Weighted average of " :
-              insight.data.is_total ? "Sum of " : "Average of "}
-            {String(insight.data.column)}
-            {insight.data.weighted_by ? `, weighted by ${String(insight.data.weighted_by)}` : ""}.
+            {typeof insight.data.calculation_explanation === "string" ? insight.data.calculation_explanation : insight.description}
           </p>
           <p className="mt-1">{activeFilters.length > 0
             ? `Applied filters: ${activeFilters.map((filter) => `${filter.display_label} ${filter.op === "date_between" ? `${filter.values[0]} to ${filter.values[1]}` : filter.values.join(", ")}`).join("; ")}.`
-            : "All analysed records; no dashboard filters applied."}</p>
+            : "We used all entries in this report."}</p>
         </details>
       )}
     </motion.div>
@@ -165,7 +161,7 @@ export function KpiGrid({ insights, sourceName }: KpiGridProps) {
     <section>
       <p className="zephyr-kicker mb-1">At a glance</p>
       <h2 className="mb-4 text-xl font-bold text-[#28203f] dark:text-white">
-        Key Metrics
+        Important numbers
       </h2>
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         {kpiInsights.map((insight, i) => (

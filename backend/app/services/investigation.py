@@ -14,6 +14,7 @@ import duckdb
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.analytics.category_values import category_expression, category_filter_value, category_label
+from app.analytics.labels import reader_label
 from app.analytics.live_filter import build_where_clause, validate_filters
 from app.analytics.plain_language import plain_english
 from app.analytics.record_context import identifying_columns, record_context, record_label
@@ -56,8 +57,7 @@ class EntryRequest(BaseModel):
 
 
 def label(column: Any) -> str:
-    text = str(column or "entries").replace("_", " ")
-    return re.sub(r"\bpct\b", "percentage", re.sub(r"\bavg\b", "average", text, flags=re.I), flags=re.I)
+    return reader_label(str(column or "entries"))
 
 
 def _schema(metadata: dict) -> dict[str, dict]:
@@ -179,12 +179,23 @@ def _cell(value: Any) -> Any:
 
 
 def _scope(analysis: Any, rows: int, truncated: bool) -> str:
-    text = (f"Based on the first {rows:,} imported entries, not the whole file."
-            if truncated else f"Based on {rows:,} entries in this report.")
+    plural = (record_context(analysis.metadata_ or {}) or {}).get("plural", "entries")
+    text = (f"Based on the first {rows:,} imported {plural}, not the whole file."
+            if truncated else f"Based on {rows:,} {plural} in this report.")
     cleaning = ((analysis.metadata_ or {}).get("upload_context") or {}).get("cleaning") or {}
     if cleaning.get("enabled"):
-        text += " Uses the copy after cleaning; entry numbers refer to that copy."
+        text += " Uses the copy after cleaning. Entry numbers refer to that copy."
     return text
+
+
+def _filter_description(selected: dict) -> str:
+    name, values = label(selected["column"]), selected["values"]
+    if selected["op"] == "date_between":
+        start, end = (date.fromisoformat(str(value)).strftime("%d %b %Y").lstrip("0") for value in values)
+        return f"{name} was from {start} to {end}"
+    if selected["op"] == "between":
+        return f"{name} was between {values[0]} and {values[1]}"
+    return f"{name} was " + " or ".join(str(value) for value in values)
 
 
 async def compare(analysis: Any, plan: ComparisonPlan, *, resolve_categories: bool = False) -> dict[str, Any]:
@@ -245,16 +256,18 @@ async def compare(analysis: Any, plan: ComparisonPlan, *, resolve_categories: bo
         if survey and plan.column == survey["percentage"]:
             note += " Supplied Average rows are excluded; these are country percentages, not an overall population estimate."
         if filters:
-            note += f" Selected filters match {matched:,} entries."
-            note += " Filters: " + "; ".join(f"{label(f['column'])}: {', '.join(str(v) for v in f['values'])}" for f in filters) + "."
+            note += f" Your choices selected {matched:,} entries."
+            note += " We used entries where " + ", and ".join(_filter_description(f) for f in filters) + "."
         if group_count > len(groups):
             note += f" Showing {len(groups)} of {group_count} groups, ordered by the result."
         if plan.aggregation == "weighted_average":
-            note += f" Entries with higher {label(plan.weight_column)} count more toward this average; only positive weights are used."
+            note += f" Entries with a larger {label(plan.weight_column)} have more say in this average. Only weights above zero are used."
         if plan.aggregation == "distinct_count":
-            note += " Different recorded values are counted separately; identity is not independently checked."
-        if plan.aggregation in {"sum", "average"}:
-            note += " Blank values are left out of the calculation."
+            note += " We counted each different value once. We have not checked who or what each value belongs to."
+        if plan.aggregation == "sum":
+            note += f" We added the filled-in numbers for {label(plan.column)}. Blank values are left out of the calculation."
+        if plan.aggregation == "average":
+            note += f" We added the filled-in numbers for {label(plan.column)}. Then we divided by how many numbers there were. Blank values are left out of the calculation."
         answer = "\n\n".join(lines)
         if group:
             title += f" by {label(plan.group_by)}"
@@ -268,6 +281,7 @@ async def compare(analysis: Any, plan: ComparisonPlan, *, resolve_categories: bo
         response = {"title": title, "answer": answer, "scope": note, "groups": groups, "ranking": ranking,
                 "evidence_revision": evidence_revision(analysis.id, analysis.row_count, analysis.metadata_ or {}),
                 "matched_entries": matched, "group_count": group_count, "plan": plan.model_dump(),
+                "record_context": record_context(analysis.metadata_ or {}),
                 "calculation": expression, "source": "analysed_file", "sample_truncated": truncated, "value_unit": "%" if percentage else None}
         response["answer"] = comparison_answer(response)
         return response
@@ -332,6 +346,16 @@ def _check_relationship_fields(conn: duckdb.DuckDBPyConnection, metadata: dict, 
         )
 
 
+def _cohort_label(filters: list[ComparisonFilter], fallback: str) -> str:
+    periods = [selected for selected in filters if selected.op == "date_between"]
+    if len(periods) == 1:
+        start, end = periods[0].values
+        year = str(start)[:4]
+        if start == f"{year}-01-01" and end == f"{year}-12-31":
+            return year
+    return fallback
+
+
 def _retention_result(conn: duckdb.DuckDBPyConnection, analysis: Any, plan: ComparisonPlan,
                       entity: str, baseline_filters: list[dict], rows: int, truncated: bool) -> dict:
     schema = list(_schema(analysis.metadata_ or {}).values())
@@ -349,15 +373,23 @@ def _retention_result(conn: duckdb.DuckDBPyConnection, analysis: Any, plan: Comp
         f"SELECT COUNT(*), COUNT(CASE WHEN {valid} THEN 1 END) FROM data WHERE {baseline_where}",
         baseline_params).fetchone()
     value = 100.0 * numerator / denominator if denominator else None
-    title = f"Retention of distinct {label(plan.column)}"
-    answer = (f"{numerator:,} of {denominator:,} distinct {label(plan.column)} in the starting cohort "
-              f"also appear in the return cohort ({value:.1f}%).") if denominator else (
-                  "No distinct entities match the starting cohort, so the retention percentage is unavailable.")
+    items = f"{label(plan.column)}s" if label(plan.column).endswith(" ID") else f"different {label(plan.column)} values"
+    first = _cohort_label(plan.cohort_filters, "the first group")
+    second = _cohort_label(plan.return_filters, "the second group")
+    title = f"How many {items} appear in both groups"
+    answer = (f"{numerator:,} of {denominator:,} {items} in {first} "
+              f"also appear in {second} ({value:.1f}%).") if denominator else (
+                  "The first group has no filled-in values to count, so its percentage is unavailable.")
+    if value is not None and 1 <= value <= 99:
+        answer += f" That is about {value:.0f} out of every 100."
     scope = _scope(analysis, rows, truncated)
-    scope += " Each recorded entity is counted once per cohort. Blank and unknown identifiers are excluded."
-    for description, selected in (("Starting cohort", baseline_filters), ("Return cohort", return_filters)):
-        scope += f" {description} filters include " + ", ".join(
-            f"{label(f['column'])} {f['op']} {' to '.join(str(v) for v in f['values'])}" for f in selected) + "."
+    scope += f" We counted each different {label(plan.column)} once in each group. Blank values and values marked 'unknown' were left out."
+    if re.search(r"(?:^|[\s_])(id|key|code)$", str(plan.column), re.I):
+        scope += " An ID is a code in your file. We have not checked who or what each code belongs to."
+    if denominator:
+        scope += f" We divided {numerator:,} by {denominator:,} and multiplied by 100 to get the percentage."
+    for description, selected in (("first", baseline_filters), ("second", return_filters)):
+        scope += f" In the {description} group, " + ", and ".join(_filter_description(f) for f in selected) + "."
     return {
         "title": title, "answer": answer, "scope": scope,
         "groups": [{"group": None, "group_value": None, "value": value,
@@ -388,9 +420,11 @@ def comparison_answer(result: dict) -> str:
                    "runner_up": groups[1] if len(groups) > 1 else None}
     operation = plan.get("aggregation")
     measure = label(plan.get("column"))
-    metric = {"sum": f"total {measure}", "average": f"average {measure} per entry",
+    context = result.get("record_context") or {}
+    singular, plural = context.get("singular", "entry"), context.get("plural", "entries")
+    metric = {"sum": f"total {measure}", "average": f"average {measure} per {singular}",
               "weighted_average": f"{measure}, weighted by {label(plan.get('weight_column'))}",
-              "count": "number of entries", "distinct_count": f"number of different {measure} values"}.get(operation)
+              "count": f"number of {plural}", "distinct_count": f"number of different {measure} values"}.get(operation)
     if metric is None:
         return result.get("answer", "")
     suffix = result.get("value_unit") or ""
@@ -608,7 +642,7 @@ async def entries(analysis: Any, request: EntryRequest) -> dict[str, Any]:
             records.append({"entry_number": row[0], "record_label": record_label(values, schema, context, row[0]), "values": values})
         scope = _scope(analysis, rows, truncated)
         if request.comparison and request.comparison.aggregation == "retention":
-            scope += " Shows starting-cohort transactions with valid entity IDs. Multiple transactions from one entity count once in the retention denominator."
+            scope += " Shows entries from the first group with a filled-in ID. One ID can appear on several entries. We count it only once when working out the percentage."
         if context:
             scope = scope.replace("entry numbers", "record positions").replace("entries", context["plural"])
         return {"matched_entries": matched, "offset": request.offset, "limit": request.limit,

@@ -20,6 +20,15 @@ def record_context(metadata: dict) -> dict | None:
     if is_admission(schema):
         return metadata.get("record_context") or {"kind": "admission", "singular": "applicant record", "plural": "applicant records", "description": "Applicant scores, grades, research experience and recorded admission chances. Actual admission decisions and dates are not included.", "label_columns": ["serial_no"] if any(c["name"] == "serial_no" for c in schema) else ["gre_score", "cgpa"]}
     fields = {_key(c["name"]): c for c in schema}
+    upload = metadata.get("upload_context") or {}
+    parser = metadata.get("parser") or {}
+    disconnected = (upload.get("combined") and upload.get("combine_strategy") != "relational") or (
+        len(parser.get("included_sheets") or []) > 1 and not parser.get("relationship_resolution")
+    )
+    if {"giftid", "donorid", "giftdate"}.issubset(fields) and not disconnected:
+        return {"kind": "donation_gift", "singular": "gift", "plural": "gifts",
+                "description": "Each row lists one gift. A donor can give more than one gift. Donor IDs are codes used to link gifts to donors.",
+                "label_columns": [fields[key]["name"] for key in ("giftid", "donorid", "giftdate")]}
     if {"appointmentdate", "clinic", "appointmentstatus", "waitminutes"}.issubset(fields):
         return {"kind": "clinic_appointment", "singular": "appointment record", "plural": "appointment records",
                 "description": "Each row describes a scheduled clinic appointment, its recorded status and wait time where supplied. A cancelled appointment may have no wait time.",

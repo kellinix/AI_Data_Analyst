@@ -108,7 +108,7 @@ def build_pdf_report(
     story.append(Spacer(1, 12))
 
     if summary:
-        story.append(Paragraph("Executive Summary", heading))
+        story.append(Paragraph("What your data shows", heading))
         for line in summary.splitlines():
             if line.strip():
                 story.append(Paragraph(escape(line.strip()), body))
@@ -139,7 +139,7 @@ def build_pdf_report(
             rows.append([kpi.get("title", ""), formatted])
         table = Table(rows, colWidths=[9 * cm, 6 * cm])
         table.setStyle(_table_style())
-        story.append(KeepTogether([Paragraph("Key Metrics", heading), table]))
+        story.append(KeepTogether([Paragraph("Important numbers", heading), table]))
 
     findings = _finding_insights(insights)
     if findings:
@@ -207,7 +207,7 @@ def build_excel_report(
     overview.write(2, 0, "Information fields")
     overview.write(2, 1, column_count if column_count is not None else "Unknown")
     if summary:
-        overview.write(4, 0, "Executive summary")
+        overview.write(4, 0, "What your data shows")
         overview.write(4, 1, summary, wrap_fmt)
         overview.set_row(4, 60)
     if limitations:

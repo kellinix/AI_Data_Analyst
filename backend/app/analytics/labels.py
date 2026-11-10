@@ -85,6 +85,16 @@ def sentence_label(label: str) -> str:
     return " ".join(words)
 
 
+def reader_label(column: str) -> str:
+    """Use a short field name and explain units that the header supplies."""
+    name = re.sub(r"\bavg\b", "average", str(column).replace("_", " "), flags=re.I)
+    text = sentence_label(derive_label(name))
+    for code, meaning in (("USD", "US dollars"), ("GBP", "British pounds"), ("EUR", "euros")):
+        replacement = meaning if text == code else f"({meaning})"
+        text = re.sub(rf"\b{code}\b", replacement, text)
+    return text
+
+
 def _extract_unit(tokens: list[str]) -> tuple[list[str], str]:
     """Lift a unit out of the name so it can be shown as a suffix."""
     if "pct" in tokens:

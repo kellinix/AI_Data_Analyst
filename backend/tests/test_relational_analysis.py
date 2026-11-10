@@ -136,7 +136,7 @@ async def test_retention_uses_distinct_entities_and_filters_both_periods(activit
     drilldown = await entries(activity, EntryRequest(kind="comparison", comparison=retention(), evidence_revision=result["evidence_revision"]))
     assert drilldown["matched_entries"] == 4
     assert {row["values"]["customer_id"] for row in drilldown["entries"]} == {"A", "B", "C"}
-    assert "denominator" in drilldown["scope"]
+    assert "only once" in drilldown["scope"]
 
 
 async def test_zero_baseline_is_unavailable_and_sampling_is_qualified(activity):
