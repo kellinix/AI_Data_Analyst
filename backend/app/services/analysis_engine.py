@@ -437,7 +437,7 @@ async def compute_analysis(
         cleaning = upload_context.get("cleaning", {}) if isinstance(upload_context, dict) else {}
         source_parser = (cleaning.get("report") or {}).get("parser") if isinstance(cleaning, dict) else None
         statistics["parser"] = source_parser or file_processor._parser_metadata(storage_path, extension)
-        if truncated:
+        if truncated or (isinstance(upload_context, dict) and upload_context.get("source_sample_truncated")):
             statistics["sample_truncated"] = True
             statistics["sample_row_limit"] = file_processor.SAMPLE_ROWS
         _adjust_portfolio_data_quality(statistics, upload_context)

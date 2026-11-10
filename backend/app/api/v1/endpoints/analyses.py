@@ -6,7 +6,7 @@ from pathlib import Path
 import duckdb
 from fastapi import APIRouter, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse, JSONResponse, Response
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import selectinload
 
 from app.analytics.histogram_presentation import present_histogram
@@ -239,51 +239,76 @@ async def _regenerate_cleaned_file_for_rerun(
     current_user: CurrentUser,
     db: DB,
 ) -> UploadedFile:
-    """Rerun must redo cleaning, not just replay the file it produced last
-    time. run_analysis_task reads whatever analysis.file already points to
-    — if cleaning was applied, that's a cleaned artifact baked from the
-    cleaning logic and options in effect at creation time. A rerun that
-    skips this regenerates nothing: it just recomputes stats over the same
-    (possibly since-fixed-in-code, but still-stale-on-disk) file.
-
-    Returns the UploadedFile the analysis should use afterward (unchanged if
-    cleaning isn't in play).
-    """
+    """Rebuild derived combined/cleaned copies from owner-scoped originals."""
     old_file = analysis.file
     upload_context = (analysis.metadata_ or {}).get("upload_context") or {}
     cleaning = upload_context.get("cleaning") if isinstance(upload_context, dict) else None
-    if not (isinstance(cleaning, dict) and cleaning.get("enabled") and cleaning.get("mode") == "clean"):
+    combined = bool(upload_context.get("combined"))
+    clean = isinstance(cleaning, dict) and cleaning.get("enabled") and cleaning.get("mode") == "clean"
+    if not combined and not clean:
         return old_file
-
-    source_file_id = cleaning.get("source_file_id")
-    if not source_file_id:
-        return old_file
-
-    source_result = await db.execute(
-        select(UploadedFile).where(
-            UploadedFile.id == uuid.UUID(source_file_id),
-            UploadedFile.user_id == current_user.id,
+    processor = FileProcessor()
+    source_ids = []
+    generated_path = None
+    old_source = None
+    if combined:
+        try:
+            source_ids = [uuid.UUID(item["id"]) for item in upload_context.get("source_files", [])]
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HTTPException(409, "This combined report has incomplete source references. Upload the original files again.") from exc
+        if len(set(source_ids)) < 2:
+            raise HTTPException(409, "Upload the original files again to rebuild this combined report.")
+        source_result = await db.execute(select(UploadedFile).where(
+            UploadedFile.id.in_(source_ids), UploadedFile.user_id == current_user.id,
+        ))
+        sources = {item.id: item for item in source_result.scalars().all()}
+        if set(sources) != set(source_ids) or any(not Path(item.storage_path).is_file() for item in sources.values()):
+            raise HTTPException(409, "An original source file is unavailable. Upload the original files again to rebuild this report.")
+        generated_path = Path(settings.upload_dir) / str(current_user.id) / f"{uuid.uuid4()}.parquet"
+        upload_context = {**upload_context}
+        try:
+            profile = await processor.combine_uploaded_files([sources[key] for key in source_ids], str(generated_path), upload_context)
+            size = generated_path.stat().st_size
+            ensure_storage_quota(current_user, size)
+        except Exception:
+            _delete_file_quietly(str(generated_path))
+            raise
+        source_file = UploadedFile(
+            id=uuid.uuid4(), user_id=current_user.id, filename=generated_path.name,
+            original_filename=f"{analysis.name}.parquet", file_size=size,
+            mime_type="application/vnd.apache.parquet", storage_path=str(generated_path),
+            row_count=profile.get("row_count"), column_count=profile.get("column_count"),
+            columns=profile.get("columns"), checksum=None,
         )
-    )
-    source_file = source_result.scalar_one_or_none()
-    if source_file is None:
-        # Original raw upload is gone — fall back to replaying the existing
-        # cleaned file rather than failing the rerun outright.
-        return old_file
+        db.add(source_file)
+        current_user.storage_used_bytes = (current_user.storage_used_bytes or 0) + size
+        await db.flush()
+    else:
+        source_file_id = cleaning.get("source_file_id")
+        if not source_file_id:
+            return old_file
+        source_result = await db.execute(select(UploadedFile).where(
+            UploadedFile.id == uuid.UUID(source_file_id), UploadedFile.user_id == current_user.id,
+        ))
+        source_file = source_result.scalar_one_or_none()
+        if source_file is None:
+            return old_file
 
-    original_options = (cleaning.get("report") or {}).get("options") or {}
-    new_file, new_cleaning_metadata = await _create_cleaned_uploaded_file(
-        source_file=source_file,
-        current_user=current_user,
-        db=db,
-        processor=FileProcessor(),
-        cleaning={"mode": "clean", **original_options},
-    )
+    try:
+        original_options = ((cleaning.get("report") or {}).get("options") or {}) if clean else {}
+        new_file, new_cleaning_metadata = await _create_cleaned_uploaded_file(
+            source_file=source_file, current_user=current_user, db=db, processor=processor,
+            cleaning={"mode": "clean", **original_options} if clean else None,
+        )
+    except Exception:
+        if generated_path:
+            _delete_file_quietly(str(generated_path))
+        raise
 
     analysis.file_id = new_file.id
     analysis.metadata_ = {
         **(analysis.metadata_ or {}),
-        "upload_context": {**upload_context, "cleaning": new_cleaning_metadata},
+        "upload_context": {**upload_context, "cleaning": new_cleaning_metadata or {"enabled": False, "mode": "raw"}},
     }
     # Sessions here use autoflush=False, so the file_id reassignment above
     # wouldn't otherwise be visible to this analysis's own row yet — without
@@ -291,17 +316,35 @@ async def _regenerate_cleaned_file_for_rerun(
     # pointing at old_file.id and never reclaim it.
     await db.flush()
 
-    # Reclaim the old cleaned file if this rerun was the only thing using it.
-    if old_file is not None and old_file.id != new_file.id:
+    # Files are unlinked only after commit. A failed transaction can still replay
+    # its previous copy. Never reclaim an original input or a shared derived copy.
+    obsolete = [old_file]
+    if combined and clean and cleaning.get("source_file_id"):
+        result = await db.execute(select(UploadedFile).where(
+            UploadedFile.id == uuid.UUID(cleaning["source_file_id"]), UploadedFile.user_id == current_user.id,
+        ))
+        old_source = result.scalar_one_or_none()
+        if old_source and old_source.id != old_file.id:
+            obsolete.append(old_source)
+    analysis._rerun_obsolete_paths = []
+    for old in obsolete:
+        if old is None or old.id in {*source_ids, new_file.id, source_file.id}:
+            continue
         remaining = await db.execute(
-            select(func.count()).select_from(Analysis).where(Analysis.file_id == old_file.id)
+            select(func.count()).select_from(Analysis).where(or_(
+                Analysis.file_id == old.id,
+                Analysis.metadata_["upload_context"]["cleaning"]["source_file_id"].astext == str(old.id),
+                Analysis.metadata_["upload_context"]["source_files"].contains([{"id": str(old.id)}]),
+            ))
         )
         if remaining.scalar_one() == 0:
-            _delete_file_quietly(old_file.storage_path)
+            analysis._rerun_obsolete_paths.append(old.storage_path)
+            if old.id == old_file.id and clean:
+                analysis._rerun_obsolete_paths.append(cleaning.get("cleaned_csv_path"))
             current_user.storage_used_bytes = max(
-                0, (current_user.storage_used_bytes or 0) - (old_file.file_size or 0)
+                0, (current_user.storage_used_bytes or 0) - (old.file_size or 0)
             )
-            await db.delete(old_file)
+            await db.delete(old)
 
     return new_file
 
@@ -1065,11 +1108,14 @@ async def rerun_analysis(
     result = await db.execute(
         select(Analysis).where(
             Analysis.id == analysis_id, Analysis.user_id == current_user.id
-        ).options(selectinload(Analysis.file), selectinload(Analysis.insights))
+        ).with_for_update().options(selectinload(Analysis.file), selectinload(Analysis.insights))
     )
     analysis = result.scalar_one_or_none()
     if not analysis:
         raise HTTPException(status_code=404, detail="Analysis not found")
+
+    if getattr(analysis, "status", None) in {AnalysisStatus.PENDING.value, AnalysisStatus.PROCESSING.value}:
+        raise HTTPException(status_code=409, detail="This analysis is already queued or processing.")
 
     analysis_file = await _regenerate_cleaned_file_for_rerun(
         analysis=analysis,
@@ -1092,6 +1138,9 @@ async def rerun_analysis(
     await db.refresh(analysis)
     await db.commit()
 
+    for obsolete_path in getattr(analysis, "_rerun_obsolete_paths", []):
+        _delete_file_quietly(obsolete_path)
+
     try:
         task = run_analysis_task.delay(str(analysis.id))
         analysis.celery_task_id = task.id
@@ -1103,5 +1152,8 @@ async def rerun_analysis(
             analysis_id=str(analysis.id),
             exc=str(exc),
         )
+        analysis.status = AnalysisStatus.FAILED.value
+        analysis.error_message = "The analysis could not be queued. Please try re-analysis again."
+        await db.flush()
 
     return _analysis_detail_response(analysis, analysis_file)

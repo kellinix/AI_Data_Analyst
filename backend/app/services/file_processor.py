@@ -1203,7 +1203,7 @@ class FileProcessor:
             self._combine_uploaded_files_sync,
             uploaded_files,
             output_path,
-            relationship_context or {},
+            {} if relationship_context is None else relationship_context,
         )
 
     def _combine_uploaded_files_sync(
@@ -1213,9 +1213,12 @@ class FileProcessor:
         relationship_context: dict[str, Any],
     ) -> dict[str, Any]:
         frames = []
+        source_samples = []
         for uploaded_file in uploaded_files:
             extension = Path(uploaded_file.storage_path).suffix.lower()
-            frame = self._read_file(uploaded_file.storage_path, extension)
+            frame, truncated = self._read_file_ex(uploaded_file.storage_path, extension)
+            source_samples.append({"name": uploaded_file.original_filename,
+                                   "row_count": len(frame), "truncated": truncated})
             if frame.is_empty():
                 continue
             frame = frame.with_columns(
@@ -1223,6 +1226,8 @@ class FileProcessor:
             )
             frames.append(frame)
 
+        relationship_context["source_samples"] = source_samples
+        relationship_context["source_sample_truncated"] = any(item["truncated"] for item in source_samples)
         if not frames:
             combined = pl.DataFrame()
         else:
@@ -1237,8 +1242,23 @@ class FileProcessor:
         frames: list[pl.DataFrame],
         relationship_context: dict[str, Any],
     ) -> pl.DataFrame:
+        from app.services.relational_files import enrich_related_files
+
+        if relationship_context.get("source_sample_truncated"):
+            relationship_context["combine_strategy"] = "portfolio"
+            relationship_context["relationship_resolution"] = {
+                "status": "unresolved",
+                "reason": "Source tables were sampled. Identifier uniqueness across the full lookup cannot be verified, so different record types were appended without joining.",
+            }
+            return pl.concat(frames, how="diagonal_relaxed")
+        enriched, resolution = enrich_related_files(frames)
+        relationship_context["relationship_resolution"] = resolution
+        if enriched is not None:
+            relationship_context["combine_strategy"] = "relational"
+            return enriched
         combine_strategy = relationship_context.get("combine_strategy", "portfolio")
         if combine_strategy != "join":
+            relationship_context["combine_strategy"] = "portfolio"
             return pl.concat(frames, how="diagonal_relaxed")
 
         suggestion = _top_relationship_suggestion(relationship_context)
@@ -1251,6 +1271,13 @@ class FileProcessor:
                 suggested_columns if isinstance(suggested_columns, list) else [],
             )
             if join_columns:
+                if any(frame.select(join_columns).n_unique() != len(frame) for frame in frames):
+                    relationship_context["combine_strategy"] = "portfolio"
+                    relationship_context["relationship_resolution"] = {
+                        "status": "unresolved",
+                        "reason": "The proposed join repeats keys on both sides or has ambiguous record grain. Files were appended without aggregating or multiplying transactions.",
+                    }
+                    return pl.concat(frames, how="diagonal_relaxed")
                 prepared = self._prepare_join_frames(frames, join_columns)
                 combined = prepared[0]
                 for frame in prepared[1:]:

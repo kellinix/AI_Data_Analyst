@@ -202,6 +202,8 @@ def _relationship_profile(upload_context: dict[str, Any] | None) -> dict[str, An
         "instructions": upload_context.get("instructions"),
         "suggestions": upload_context.get("suggestions", [])[:10],
         "source_files": upload_context.get("source_files", []),
+        "resolution": upload_context.get("relationship_resolution", {}),
+        "source_samples": upload_context.get("source_samples", []),
     }
 
 

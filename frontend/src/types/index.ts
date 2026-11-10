@@ -323,12 +323,14 @@ export interface ChatMessage {
 }
 
 export interface ComparisonPlan {
-  aggregation: "sum" | "average" | "count" | "distinct_count" | "weighted_average"
+  aggregation: "sum" | "average" | "count" | "distinct_count" | "weighted_average" | "retention"
   column?: string | null
   group_by?: string | null
   weight_column?: string | null
   date_bucket?: "day" | "month" | "year" | null
   filters?: ActiveFilter[]
+  cohort_filters?: ActiveFilter[]
+  return_filters?: ActiveFilter[]
   order?: "desc" | "asc"
   limit?: number
 }
@@ -353,6 +355,7 @@ export interface EvidenceEntries {
   has_more: boolean
 }
 export interface ComparisonResult {
+  cohort?: { baseline_entities: number; returning_entities: number }
   value_unit?: string | null
   evidence_revision: string
   title: string

@@ -13,7 +13,7 @@ from typing import Any, Literal
 import duckdb
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.analytics.category_values import category_expression, category_label
+from app.analytics.category_values import category_expression, category_filter_value, category_label
 from app.analytics.live_filter import build_where_clause, validate_filters
 from app.analytics.plain_language import plain_english
 from app.analytics.record_context import identifying_columns, record_context, record_label
@@ -31,12 +31,14 @@ class ComparisonFilter(BaseModel):
 
 class ComparisonPlan(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    aggregation: Literal["sum", "average", "count", "distinct_count", "weighted_average"]
+    aggregation: Literal["sum", "average", "count", "distinct_count", "weighted_average", "retention"]
     column: str | None = None
     group_by: str | None = None
     weight_column: str | None = None
     date_bucket: Literal["day", "month", "year"] | None = None
     filters: list[ComparisonFilter] = Field(default_factory=list, max_length=8)
+    cohort_filters: list[ComparisonFilter] = Field(default_factory=list, max_length=8)
+    return_filters: list[ComparisonFilter] = Field(default_factory=list, max_length=8)
     order: Literal["desc", "asc"] = "desc"
     limit: int = Field(default=10, ge=1, le=50)
 
@@ -72,6 +74,20 @@ def evidence_revision(analysis_id: Any, rows: int | None, metadata: dict) -> str
 
 def validate_plan(plan: ComparisonPlan, metadata: dict) -> tuple[str, str | None, list[dict]]:
     schema = _schema(metadata)
+    if plan.aggregation == "retention":
+        entity = schema.get(plan.column or "")
+        if not entity or entity.get("analysis_role") not in {"identifier", "dimension"}:
+            raise ValueError("Retention needs a recorded entity identifier, such as customer ID.")
+        if plan.group_by or plan.weight_column or plan.date_bucket:
+            raise ValueError("Retention compares distinct entities in two cohorts without grouping or weights.")
+        if not plan.cohort_filters or not plan.return_filters:
+            raise ValueError("Choose both the starting cohort and the return cohort for retention.")
+        validate_filters([f.model_dump() for f in plan.return_filters], list(schema.values()))
+        filters = validate_filters([f.model_dump() for f in [*plan.filters, *plan.cohort_filters]], list(schema.values()))
+        entity_expression = f"NULLIF(TRIM(CAST({quote(plan.column)} AS VARCHAR)), '')"
+        return entity_expression, None, filters
+    if plan.cohort_filters or plan.return_filters:
+        raise ValueError("Cohort filters require a retention calculation.")
     from app.analytics.survey_context import survey_fields
     survey = survey_fields(list(schema.values()))
     if survey and plan.column == survey["percentage"] and plan.aggregation in {"average", "weighted_average"}:
@@ -143,7 +159,8 @@ async def _load(analysis: Any) -> tuple[duckdb.DuckDBPyConnection, int, bool]:
             expected_rows = analysis.row_count
         if expected_rows is not None and rows != expected_rows:
             raise ValueError("The saved file's entry count has changed. Analyse it again before comparing entries.")
-        return conn, rows, truncated or bool(saved_sample.get("sample_truncated"))
+        source_sample = ((analysis.metadata_ or {}).get("upload_context") or {}).get("source_sample_truncated")
+        return conn, rows, truncated or bool(saved_sample.get("sample_truncated")) or bool(source_sample)
     except Exception:
         conn.close()
         raise
@@ -170,7 +187,7 @@ def _scope(analysis: Any, rows: int, truncated: bool) -> str:
     return text
 
 
-async def compare(analysis: Any, plan: ComparisonPlan) -> dict[str, Any]:
+async def compare(analysis: Any, plan: ComparisonPlan, *, resolve_categories: bool = False) -> dict[str, Any]:
     expression, group, filters = validate_plan(plan, analysis.metadata_ or {})
     from app.analytics.admission_context import is_admission
     from app.analytics.survey_context import survey_fields
@@ -178,13 +195,19 @@ async def compare(analysis: Any, plan: ComparisonPlan) -> dict[str, Any]:
     percentage = plan.column == "chance_of_admit" and plan.aggregation in {"average", "weighted_average"} and is_admission(list(_schema(analysis.metadata_ or {}).values()))
     if percentage:
         expression = f"100.0 * ROUND(({expression}), 12)"
-    where, params = build_where_clause(filters)
-    if survey and plan.column == survey["percentage"]:
-        exclude_average = f"LOWER(CAST({quote(survey['country'])} AS VARCHAR)) <> 'average'"
-        where = f"({where}) AND {exclude_average}" if where else exclude_average
-    clause = f" WHERE {where}" if where else ""
     conn, rows, truncated = await _load(analysis)
     try:
+        _check_relationship_fields(conn, analysis.metadata_ or {}, plan)
+        if resolve_categories:
+            plan = _resolve_category_filters(conn, plan)
+            _expression, _group, filters = validate_plan(plan, analysis.metadata_ or {})
+        if plan.aggregation == "retention":
+            return _retention_result(conn, analysis, plan, expression, filters, rows, truncated)
+        where, params = build_where_clause(filters)
+        if survey and plan.column == survey["percentage"]:
+            exclude_average = f"LOWER(CAST({quote(survey['country'])} AS VARCHAR)) <> 'average'"
+            where = f"({where}) AND {exclude_average}" if where else exclude_average
+        clause = f" WHERE {where}" if where else ""
         matched = conn.execute("SELECT COUNT(*) FROM data" + clause, params).fetchone()[0]
         supplied = "COUNT(*)" if plan.column is None else f"COUNT({quote(plan.column)})"
         if plan.aggregation == "weighted_average":
@@ -250,6 +273,101 @@ async def compare(analysis: Any, plan: ComparisonPlan) -> dict[str, Any]:
         return response
     finally:
         conn.close()
+
+
+class ComparisonUnavailable(ValueError):
+    """A requested comparison needs clarification or repaired source evidence."""
+
+
+class RelationshipUnavailable(ComparisonUnavailable):
+    """Fields on disconnected record types cannot establish a zero result."""
+
+
+def _resolve_category_filters(conn: duckdb.DuckDBPyConnection, plan: ComparisonPlan) -> ComparisonPlan:
+    """Resolve model label casing only when the recorded category is unique.
+
+    Dashboard slicers retain exact matching. Model-authored filters are checked
+    against the analysed file, never accepted as evidence of a missing cohort.
+    """
+    resolved = plan.model_dump()
+    for name in ("filters", "cohort_filters", "return_filters"):
+        for selected in resolved[name]:
+            if selected["op"] != "in":
+                continue
+            column = selected["column"]
+            expression = category_expression(column)
+            values = []
+            for value in selected["values"]:
+                exact = category_filter_value(column, value)
+                if conn.execute(f"SELECT EXISTS(SELECT 1 FROM data WHERE {expression} = ?)", [exact]).fetchone()[0]:
+                    values.append(value)
+                    continue
+                matches = conn.execute(
+                    f"SELECT DISTINCT {expression} FROM data WHERE LOWER(TRIM({expression})) = LOWER(TRIM(?)) LIMIT 2",
+                    [exact]).fetchall()
+                if len(matches) != 1:
+                    reason = "matches multiple recorded categories" if matches else "does not match a recorded category"
+                    raise ComparisonUnavailable(f"The requested {label(column)} value {str(value)!r} {reason}. Choose the exact category shown in this report.")
+                values.append(matches[0][0])
+            selected["values"] = values
+    return ComparisonPlan.model_validate(resolved)
+
+
+def _check_relationship_fields(conn: duckdb.DuckDBPyConnection, metadata: dict, plan: ComparisonPlan) -> None:
+    context = metadata.get("upload_context") or {}
+    if not context.get("combined") or context.get("combine_strategy") not in {None, "portfolio"}:
+        return
+    fields = list(dict.fromkeys(c for c in [plan.column, plan.group_by, plan.weight_column,
+        *[f.column for f in [*plan.filters, *plan.cohort_filters, *plan.return_filters]]] if c))
+    if len(fields) < 2:
+        return
+    predicates = [f"{quote(c)} IS NOT NULL AND TRIM(CAST({quote(c)} AS VARCHAR)) <> ''" for c in fields]
+    together = " AND ".join(f"({p})" for p in predicates)
+    if conn.execute(f"SELECT EXISTS(SELECT 1 FROM data WHERE {together})").fetchone()[0]:
+        return
+    if all(conn.execute(f"SELECT EXISTS(SELECT 1 FROM data WHERE {p})").fetchone()[0] for p in predicates):
+        raise RelationshipUnavailable(
+            "These fields are stored on separate record types in this older combined report. "
+            "Re-analyse the original files to verify their identifier relationship before comparing them."
+        )
+
+
+def _retention_result(conn: duckdb.DuckDBPyConnection, analysis: Any, plan: ComparisonPlan,
+                      entity: str, baseline_filters: list[dict], rows: int, truncated: bool) -> dict:
+    schema = list(_schema(analysis.metadata_ or {}).values())
+    return_filters = validate_filters([f.model_dump() for f in [*plan.filters, *plan.return_filters]], schema)
+    baseline_where, baseline_params = build_where_clause(baseline_filters)
+    return_where, return_params = build_where_clause(return_filters)
+    valid = f"{entity} IS NOT NULL AND LOWER({entity}) <> 'unknown'"
+    # Distinct sets prevent multiple transactions from counting an entity twice.
+    cte = (f"WITH baseline AS (SELECT DISTINCT {entity} AS entity FROM data WHERE ({baseline_where}) AND {valid}), "
+           f"return_cohort AS (SELECT DISTINCT {entity} AS entity FROM data WHERE ({return_where}) AND {valid}) ")
+    denominator, numerator = conn.execute(cte +
+        "SELECT COUNT(*), COUNT(return_cohort.entity) FROM baseline LEFT JOIN return_cohort USING (entity)",
+        [*baseline_params, *return_params]).fetchone()
+    matched, supplied = conn.execute(
+        f"SELECT COUNT(*), COUNT(CASE WHEN {valid} THEN 1 END) FROM data WHERE {baseline_where}",
+        baseline_params).fetchone()
+    value = 100.0 * numerator / denominator if denominator else None
+    title = f"Retention of distinct {label(plan.column)}"
+    answer = (f"{numerator:,} of {denominator:,} distinct {label(plan.column)} in the starting cohort "
+              f"also appear in the return cohort ({value:.1f}%).") if denominator else (
+                  "No distinct entities match the starting cohort, so the retention percentage is unavailable.")
+    scope = _scope(analysis, rows, truncated)
+    scope += " Each recorded entity is counted once per cohort. Blank and unknown identifiers are excluded."
+    for description, selected in (("Starting cohort", baseline_filters), ("Return cohort", return_filters)):
+        scope += f" {description} filters include " + ", ".join(
+            f"{label(f['column'])} {f['op']} {' to '.join(str(v) for v in f['values'])}" for f in selected) + "."
+    return {
+        "title": title, "answer": answer, "scope": scope,
+        "groups": [{"group": None, "group_value": None, "value": value,
+                    "entries": matched, "supplied_values": supplied}],
+        "cohort": {"baseline_entities": denominator, "returning_entities": numerator},
+        "ranking": None, "matched_entries": matched, "group_count": 1,
+        "evidence_revision": evidence_revision(analysis.id, analysis.row_count, analysis.metadata_ or {}),
+        "plan": plan.model_dump(), "calculation": "100 * distinct intersecting entities / distinct starting entities",
+        "source": "analysed_file", "sample_truncated": truncated, "value_unit": "%",
+    }
 
 
 def comparison_answer(result: dict) -> str:
@@ -446,6 +564,8 @@ async def entries(analysis: Any, request: EntryRequest) -> dict[str, Any]:
             raise ValueError("Choose a comparison first.")
         _expression, group, filters = validate_plan(request.comparison, metadata)
         predicate, params = build_where_clause(filters)
+        if request.comparison.aggregation == "retention":
+            predicate = f"({predicate}) AND {_expression} IS NOT NULL AND LOWER({_expression}) <> 'unknown'"
         if group and request.group_value is not None:
             predicate = (predicate + " AND " if predicate else "") + f"{group} = ?"
             params.append(request.group_value)
@@ -461,6 +581,8 @@ async def entries(analysis: Any, request: EntryRequest) -> dict[str, Any]:
         expected = spec.get("expected")
     conn, rows, truncated = await _load(analysis)
     try:
+        if request.comparison:
+            _check_relationship_fields(conn, metadata, request.comparison)
         columns = list(schema)
         # Entry numbers describe positions in the analysed copy, never Excel
         # row numbers. Exact-repeat numbering excludes the first copy.
@@ -485,6 +607,8 @@ async def entries(analysis: Any, request: EntryRequest) -> dict[str, Any]:
             values = {c: _cell(v) for c, v in zip(shown, row[1:], strict=True)}
             records.append({"entry_number": row[0], "record_label": record_label(values, schema, context, row[0]), "values": values})
         scope = _scope(analysis, rows, truncated)
+        if request.comparison and request.comparison.aggregation == "retention":
+            scope += " Shows starting-cohort transactions with valid entity IDs. Multiple transactions from one entity count once in the retention denominator."
         if context:
             scope = scope.replace("entry numbers", "record positions").replace("entries", context["plural"])
         return {"matched_entries": matched, "offset": request.offset, "limit": request.limit,
