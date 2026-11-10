@@ -16,6 +16,11 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from app.analytics.category_values import category_expression, category_filter_value, category_label
 from app.analytics.labels import reader_label
 from app.analytics.live_filter import build_where_clause, validate_filters
+from app.analytics.measure_grain import (
+    annotate_measure_grain,
+    is_repeated_lookup,
+    lookup_aggregation_message,
+)
 from app.analytics.measure_semantics import is_power_reading, is_rate_or_average
 from app.analytics.percentage_scale import SCALE_WARNING, raw_percentage_label
 from app.analytics.plain_language import plain_english
@@ -92,7 +97,8 @@ def _display_number(value: float, scale: str | None = None) -> str:
 
 
 def _schema(metadata: dict) -> dict[str, dict]:
-    return {c["name"]: c for c in metadata.get("schema") or (metadata.get("data_profile") or {}).get("columns", [])}
+    fields = metadata.get("schema") or (metadata.get("data_profile") or {}).get("columns", [])
+    return {c["name"]: c for c in annotate_measure_grain(fields, metadata.get("upload_context"), metadata.get("parser"))}
 
 
 def evidence_revision(analysis_id: Any, rows: int | None, metadata: dict) -> str:
@@ -101,6 +107,26 @@ def evidence_revision(analysis_id: Any, rows: int | None, metadata: dict) -> str
               for issue in (metadata.get("data_quality") or {}).get("issues", [])]
     return hashlib.sha256(json.dumps([str(analysis_id), rows, profile.get("generated_at"),
         profile.get("dataset"), checks], sort_keys=True, default=str).encode()).hexdigest()
+
+
+def _verified_binary_flag(column: str, metadata: dict) -> bool:
+    profile = metadata.get("data_profile") or {}
+    saved = next((field for field in profile.get("columns", []) if field.get("name") == column), {})
+    stats = ((metadata.get("numeric_stats") or {}).get(column) or saved.get("numeric_summary")
+             or ((profile.get("metrics") or {}).get("numeric_statistics") or {}).get(column) or {})
+    count, minimum, maximum = (_finite(stats.get(key)) for key in ("count", "min", "max"))
+    if count is None or count <= 0 or minimum not in {0, 1} or maximum not in {0, 1}:
+        return False
+    if _finite(stats.get("integer_count")) == count or _finite(stats.get("unique_count")) == len({minimum, maximum}):
+        return True
+    categories = ((metadata.get("categorical_stats") or {}).get(column) or saved.get("categorical_summary")
+                  or (profile.get("categories") or {}).get(column) or {})
+    values = categories.get("top_values") or []
+    try:
+        return bool(values) and sum(item["count"] for item in values) == count and all(
+            _numeric_filter_value(item["value"]) in {0, 1} for item in values)
+    except (KeyError, TypeError, ValueError):
+        return False
 
 
 def validate_plan(plan: ComparisonPlan, metadata: dict) -> tuple[str, str | None, list[dict]]:
@@ -141,7 +167,12 @@ def validate_plan(plan: ComparisonPlan, metadata: dict) -> tuple[str, str | None
             column = _identifier_expression(plan.column) if measure.get("analysis_role") == "identifier" else quote(plan.column)
             expression = f"COUNT(DISTINCT CASE WHEN TRIM(CAST({column} AS VARCHAR)) <> '' AND LOWER(TRIM(CAST({column} AS VARCHAR))) <> 'unknown' THEN {column} END)"
         else:
-            if not measure.get("is_numeric") or measure.get("analysis_role") != "metric":
+            if is_repeated_lookup(measure):
+                raise ComparisonUnavailable(lookup_aggregation_message(measure))
+            if plan.aggregation == "average" and measure.get("is_numeric") and measure.get("analysis_role") == "flag" and not _verified_binary_flag(plan.column, metadata):
+                raise ComparisonUnavailable("An average requires saved measurements that verify every supplied flag is 0 or 1.")
+            descriptive_average = plan.aggregation == "average" and measure.get("analysis_role") in {"flag", "attribute"}
+            if not measure.get("is_numeric") or (measure.get("analysis_role") != "metric" and not descriptive_average):
                 raise ValueError("Totals and averages need a measurable number, not an ID or label.")
             if plan.aggregation == "sum" and is_power_reading(plan.column, measure):
                 raise ComparisonUnavailable(
@@ -152,6 +183,8 @@ def validate_plan(plan: ComparisonPlan, metadata: dict) -> tuple[str, str | None
                 raise ValueError("This measure is a rate or average. Compare its average per entry instead of adding it up.")
             if plan.aggregation == "weighted_average":
                 weight = schema.get(plan.weight_column or "")
+                if weight and is_repeated_lookup(weight):
+                    raise ComparisonUnavailable(lookup_aggregation_message(weight))
                 if not weight or not weight.get("is_numeric") or weight.get("analysis_role") != "metric":
                     raise ValueError("Choose a numeric measure for the weights.")
                 x, w = quote(plan.column), quote(plan.weight_column)
@@ -163,7 +196,8 @@ def validate_plan(plan: ComparisonPlan, metadata: dict) -> tuple[str, str | None
     group = None
     if plan.group_by:
         field = schema.get(plan.group_by)
-        if not field or field.get("analysis_role") not in {"identifier", "dimension", "flag", "temporal_dimension"}:
+        numeric_group = field and field.get("is_numeric") and field.get("analysis_role") == "metric"
+        if not field or (field.get("analysis_role") not in {"identifier", "dimension", "flag", "temporal_dimension"} and not numeric_group):
             raise ValueError("Choose a grouping field, such as region or category.")
         if plan.date_bucket:
             if not field.get("is_date") or field.get("analysis_role") != "temporal_dimension":
@@ -179,9 +213,15 @@ def validate_plan(plan: ComparisonPlan, metadata: dict) -> tuple[str, str | None
 
 def _comparison_filters(filters: list[dict], schema: dict[str, dict]) -> list[dict]:
     # An owner-scoped question may name an ID, even though IDs are deliberately
-    # excluded from general dashboard slicers. Leave the saved roles untouched.
-    fields = [{**field, "analysis_role": "dimension"} if field.get("analysis_role") == "identifier" else field
-              for field in schema.values()]
+    # excluded from general dashboard slicers. Numeric calendar labels such as
+    # year also support explicit filters. Leave the saved roles untouched.
+    fields = []
+    for field in schema.values():
+        numeric_calendar = field.get("analysis_role") == "temporal_dimension" and field.get("is_numeric")
+        if field.get("analysis_role") == "identifier" or numeric_calendar:
+            fields.append({**field, "analysis_role": "dimension"})
+        else:
+            fields.append(field)
     validated = []
     for selected in filters:
         probe = selected
@@ -195,20 +235,24 @@ def _comparison_filters(filters: list[dict], schema: dict[str, dict]) -> list[di
             continue
         validated.append(selected)
         field = schema[selected["column"]]
-        if field.get("analysis_role") == "identifier" and field.get("is_numeric") and selected["op"] == "in":
+        if _numeric_filter_field(field) and selected["op"] == "in":
             for value in selected["values"]:
-                _numeric_identifier(value)
+                _numeric_filter_value(value, "ID" if field.get("analysis_role") == "identifier" else "calendar value")
     return validated
 
 
-def _numeric_identifier(value: Any) -> Decimal:
+def _numeric_filter_field(field: dict) -> bool:
+    return bool(field.get("is_numeric") and field.get("analysis_role") in {"identifier", "temporal_dimension"})
+
+
+def _numeric_filter_value(value: Any, kind: str = "ID") -> Decimal:
     try:
         number = Decimal(str(value))
         if isinstance(value, bool) or not number.is_finite():
             raise InvalidOperation
         return number
     except InvalidOperation as exc:
-        raise ValueError("Choose a finite numeric ID from this report.") from exc
+        raise ValueError(f"Choose a finite numeric {kind} from this report.") from exc
 
 
 def _comparison_where(filters: list[dict], schema: dict[str, dict]) -> tuple[str, list[Any]]:
@@ -219,11 +263,12 @@ def _comparison_where(filters: list[dict], schema: dict[str, dict]) -> tuple[str
             operator = _NUMERIC_COMPARISONS[selected["op"]][0]
             clauses.append(f"{quote(selected['column'])} {operator} ?")
             params.append(selected["values"][0])
-        elif field.get("analysis_role") == "identifier" and selected["op"] == "in":
+        elif selected["op"] == "in" and (field.get("analysis_role") == "identifier" or _numeric_filter_field(field)):
             placeholders = ", ".join("?" for _ in selected["values"])
-            if field.get("is_numeric"):
+            if _numeric_filter_field(field):
                 clauses.append(f"{quote(selected['column'])} IN ({placeholders})")
-                params.extend(_numeric_identifier(value) for value in selected["values"])
+                kind = "ID" if field.get("analysis_role") == "identifier" else "calendar value"
+                params.extend(_numeric_filter_value(value, kind) for value in selected["values"])
             else:
                 clauses.append(f"{_identifier_expression(selected['column'])} IN ({placeholders})")
                 params.extend(str(value).strip(_IDENTIFIER_WHITESPACE) for value in selected["values"])
@@ -434,10 +479,12 @@ def _resolve_category_filters(conn: duckdb.DuckDBPyConnection, plan: ComparisonP
             expression = category_expression(column)
             values = []
             for value in selected["values"]:
-                if schema[column].get("analysis_role") == "identifier":
+                if schema[column].get("analysis_role") == "identifier" or _numeric_filter_field(schema[column]):
                     predicate, params = _comparison_where([{**selected, "values": [value]}], schema)
                     if not conn.execute(f"SELECT EXISTS(SELECT 1 FROM data WHERE {predicate})", params).fetchone()[0]:
-                        raise ComparisonUnavailable(f"The requested {label(column)} code {str(value)!r} was not found. Choose the exact code shown in this report.")
+                        kind = "code" if schema[column].get("analysis_role") == "identifier" else "value"
+                        choice = "the exact code shown" if kind == "code" else "a recorded value"
+                        raise ComparisonUnavailable(f"The requested {label(column)} {kind} {str(value)!r} was not found. Choose {choice} in this report.")
                     values.append(value)
                     continue
                 exact = category_filter_value(column, value)

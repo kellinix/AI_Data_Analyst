@@ -1,6 +1,93 @@
 from __future__ import annotations
 
+import pytest
+
+from app.analytics.kpi_detector import detect_kpis
 from app.analytics.semantic_detector import enrich_schema_with_semantics
+
+
+def test_constant_quantity_remains_a_measure_instead_of_a_binary_flag():
+    names = ("quantity", "order_quantity")
+    schema = [{"name": name, "dtype": "BIGINT", "is_numeric": True, "is_date": False}
+              for name in names]
+    statistics = {name: {"min": 1, "max": 1, "unique_count": 1, "count": 100}
+                  for name in names}
+
+    fields = enrich_schema_with_semantics(schema, statistics, {})
+
+    assert all(field["analysis_role"] == "metric" for field in fields)
+    assert all(field["semantic_type"] == "count" for field in fields)
+
+
+@pytest.mark.parametrize(("original", "semantic_type", "role"), [
+    ("OrderQuantity", "count", "metric"),
+    ("CustomerCount", "count", "metric"),
+    ("NumberOfPassengers", "count", "metric"),
+    ("WarehouseLatitude", "numeric_attribute", "attribute"),
+    ("UnitPrice", "currency", "metric"),
+    ("EmployeeID", "identifier", "identifier"),
+    ("IsReturned", "boolean", "flag"),
+    ("AverageQuantity", "average_metric", "metric"),
+    ("AverageUnitPrice", "average_metric", "metric"),
+])
+def test_cleaned_compact_names_retain_original_header_meaning(original, semantic_type, role):
+    name = original.lower()
+    schema = [{"name": name, "dtype": "BIGINT", "is_numeric": True, "is_date": False}]
+    numeric = {name: {"min": 1, "max": 3, "unique_count": 3, "count": 100}}
+
+    enriched = enrich_schema_with_semantics(schema, numeric, {}, original_names={name: original})
+
+    assert enriched[0]["name"] == name
+    assert enriched[0]["semantic_type"] == semantic_type
+    assert enriched[0]["analysis_role"] == role
+    assert list(numeric) == [name]
+    assert "semantic_type" not in schema[0]
+
+
+def test_lookup_source_header_preserves_numeric_measure_and_provenance():
+    origin = {"kind": "fact", "source_table": "sales.csv", "source_column": "OrderQuantity", "repeated": False}
+    schema = [{"name": "orderquantity", "dtype": "BIGINT", "is_numeric": True, "measure_grain": origin}]
+    numeric = {"orderquantity": {"min": 1, "max": 1, "unique_count": 1, "count": 100}}
+
+    enriched = enrich_schema_with_semantics(schema, numeric, {})
+
+    assert enriched[0]["semantic_type"] == "count"
+    assert enriched[0]["analysis_role"] == "metric"
+    assert enriched[0]["measure_grain"] == origin
+    assert enriched[0]["name"] == "orderquantity"
+
+
+def test_original_average_quantity_stays_an_average_kpi():
+    schema = [{"name": "averagequantity", "dtype": "BIGINT", "is_numeric": True}]
+    numeric = {"averagequantity": {"min": 1, "max": 3, "unique_count": 3, "count": 100, "mean": 2, "total": 200}}
+
+    enriched = enrich_schema_with_semantics(schema, numeric, {}, original_names={"averagequantity": "AverageQuantity"})
+    kpis = detect_kpis(enriched, numeric)
+
+    assert enriched[0]["semantic_type"] == "average_metric"
+    assert kpis[0]["value"] == 2
+    assert kpis[0]["is_total"] is False
+
+
+def test_three_named_medal_columns_are_counts_while_medal_ids_remain_labels():
+    names = ("gold", "silver", "bronze", "gold_id")
+    schema = [{"name": name, "dtype": "BIGINT", "is_numeric": True} for name in names]
+    numeric = {name: {"min": 0, "max": 2, "unique_count": 3, "count": 100} for name in names}
+
+    fields = {field["name"]: field for field in enrich_schema_with_semantics(schema, numeric, {})}
+
+    assert all(fields[name]["semantic_type"] == "count" for name in names[:3])
+    assert all(fields[name]["analysis_role"] == "metric" for name in names[:3])
+    assert fields["gold_id"]["analysis_role"] == "identifier"
+
+
+def test_one_bounded_gold_column_does_not_establish_a_medal_count():
+    schema = [{"name": "gold", "dtype": "BIGINT", "is_numeric": True}]
+    numeric = {"gold": {"min": 0, "max": 2, "unique_count": 3, "count": 100}}
+
+    fields = enrich_schema_with_semantics(schema, numeric, {})
+
+    assert fields[0]["analysis_role"] == "dimension"
 
 
 def test_two_named_operational_groups_are_dimensions_not_boolean_flags():

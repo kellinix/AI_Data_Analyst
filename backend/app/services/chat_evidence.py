@@ -6,6 +6,7 @@ import re
 from typing import Any
 
 from app.analytics.labels import reader_label
+from app.analytics.measure_grain import is_repeated_lookup
 from app.analytics.measure_semantics import is_power_reading, is_rate_or_average
 from app.analytics.percentage_scale import raw_percentage_label
 from app.analytics.summary_evidence import _finite, _format, build_summary_facts
@@ -171,7 +172,7 @@ def build_chat_facts(analysis: Any) -> list[dict[str, Any]]:
 
     for column, values in list(stats["numeric_stats"].items())[:30]:
         field = schema.get(column, {})
-        if field.get("analysis_role") not in {"metric", "flag"}:
+        if field.get("analysis_role") not in {"metric", "flag"} or is_repeated_lookup(field):
             continue
         count = _finite(values.get("count"))
         if count is None or count <= 0:

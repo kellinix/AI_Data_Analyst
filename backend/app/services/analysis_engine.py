@@ -48,8 +48,15 @@ from app.analytics.football_context import (
 from app.analytics.forecasting import generate_forecasts
 from app.analytics.kpi_detector import detect_kpis
 from app.analytics.live_filter import populate_chart_option
+from app.analytics.measure_grain import (
+    analytical_schema,
+    analytical_statistics,
+    annotate_measure_grain,
+    is_repeated_lookup,
+)
 from app.analytics.percentage_scale import clarify_percentage_display
 from app.analytics.recommendations import generate_recommendations
+from app.analytics.semantic_detector import enrich_schema_with_semantics
 from app.analytics.statistics import StatisticsEngine
 from app.analytics.summary_evidence import build_summary_facts, render_summary
 from app.analytics.survey_context import (
@@ -355,12 +362,16 @@ class AnalysisEngine:
         analysis.column_count = column_count
         analysis.summary = summary
         analysis.charts = charts
+        repeated_columns = {column["name"] for column in metadata.get("schema", []) if is_repeated_lookup(column)}
+        raw_joined_statistics = {name: values for name, values in metadata.get("numeric_stats", {}).items()
+                                 if name in repeated_columns or values.get("weight_column") in repeated_columns}
         analysis.metadata_ = {
             "upload_context": metadata.get("upload_context"),
             "data_quality": metadata.get("data_quality", {}),
             "analysis_evidence": metadata.get("analysis_evidence", {}),
             "date_range": metadata.get("date_range", {}),
             "schema": metadata.get("schema", []),
+            **({"raw_joined_numeric_statistics": raw_joined_statistics} if raw_joined_statistics else {}),
             "parser": metadata.get("parser", {}),
             "profile_json_path": metadata.get("profile_json_path"),
             "data_profile": metadata.get("profile_json", {}),
@@ -440,6 +451,12 @@ async def compute_analysis(
         cleaning = upload_context.get("cleaning", {}) if isinstance(upload_context, dict) else {}
         source_parser = (cleaning.get("report") or {}).get("parser") if isinstance(cleaning, dict) else None
         statistics["parser"] = source_parser or file_processor._parser_metadata(storage_path, extension)
+        statistics["schema"] = annotate_measure_grain(statistics["schema"], upload_context, statistics["parser"])
+        original_names = {cleaned: original for original, cleaned in ((cleaning.get("report") or {}).get("renamed_columns") or {}).items()}
+        statistics["schema"] = enrich_schema_with_semantics(
+            statistics["schema"], statistics["numeric_stats"], statistics["categorical_stats"],
+            original_names=original_names,
+        )
         if truncated or (isinstance(upload_context, dict) and upload_context.get("source_sample_truncated")):
             statistics["sample_truncated"] = True
             statistics["sample_row_limit"] = file_processor.SAMPLE_ROWS
@@ -454,17 +471,21 @@ async def compute_analysis(
         statistics["analysis_evidence"] = analysis_evidence(statistics, upload_context)
         await progress(35)
 
-        clarify_statistics(statistics)
-        clarify_survey(statistics)
-        survey_catalog(statistics, conn)
+        if is_admission(analytical_schema(statistics["schema"])):
+            clarify_statistics(statistics)
+        if survey_fields(analytical_schema(statistics["schema"])):
+            clarify_survey(statistics)
+            survey_catalog(statistics, conn)
 
         # Step 3: Detect KPIs
         kpis = detect_kpis(
             schema=statistics["schema"],
             numeric_stats=statistics["numeric_stats"],
         )
-        if is_football(statistics["schema"]):
-            kpis = football_kpis(statistics)
+        if is_football(analytical_schema(statistics["schema"])):
+            kpis = football_kpis(analytical_statistics(statistics))
+        kpis = [kpi for kpi in kpis if not any(column["name"] == kpi.get("column") and is_repeated_lookup(column)
+                                               for column in statistics["schema"])]
         currency = _resolve_currency(statistics, upload_context)
         if currency:
             statistics["currency"] = currency
@@ -487,7 +508,8 @@ async def compute_analysis(
                 chart.get("xAxis") == "wait_minutes" and chart.get("yAxis") == "appointment_status"
             )]
             if (statistics.get("categorical_stats", {}).get("clinic", {}).get("unique_count", 0) >= 2
-                    and statistics.get("numeric_stats", {}).get("wait_minutes", {}).get("count", 0) > 0):
+                    and statistics.get("numeric_stats", {}).get("wait_minutes", {}).get("count", 0) > 0
+                    and "wait_minutes" in {field["name"] for field in analytical_schema(statistics["schema"])}):
                 charts.append(_horizontal_bar_chart("clinic", "wait_minutes", aggregation="average"))
         charts = _populate_charts(conn, charts)
         semantic_display = await SemanticWrangler().build_display_metadata(
@@ -496,7 +518,7 @@ async def compute_analysis(
             charts=charts,
             upload_context=upload_context,
         )
-        if is_football(statistics["schema"]):
+        if is_football(analytical_schema(statistics["schema"])):
             clarify_football_display(semantic_display)
         clarify_percentage_display(statistics, semantic_display, charts)
         statistics = apply_display_metadata_to_statistics(statistics, semantic_display)
@@ -510,15 +532,15 @@ async def compute_analysis(
                         "at each clinic. Cancelled appointments are excluded."
                     )
                     chart["echarts_option"]["xAxis"]["name"] = "Wait time (minutes)"
-        if is_football(statistics["schema"]):
+        if is_football(analytical_schema(statistics["schema"])):
             for chart in charts:
                 clarify_football_chart(chart)
-        if is_admission(statistics["schema"]):
+        if is_admission(analytical_schema(statistics["schema"])):
             statistics["semantic_display"] = semantic_display
             clarify_statistics(statistics)
             for chart in charts:
                 clarify_chart(chart)
-        if survey_fields(statistics["schema"]):
+        if survey_fields(analytical_schema(statistics["schema"])):
             clarify_survey(statistics)
             for chart in charts:
                 populate_survey(conn, chart, "", [])
@@ -529,11 +551,11 @@ async def compute_analysis(
         await progress(65)
 
         # Step 5: Forecasting, anomalies, and deterministic recommendations
-        forecasts = generate_forecasts(conn, statistics["schema"], kpis)
-        anomalies = detect_anomalies(conn, statistics["schema"], statistics["numeric_stats"])
-        if is_admission(statistics["schema"]):
+        forecasts = generate_forecasts(conn, analytical_schema(statistics["schema"]), kpis)
+        anomalies = detect_anomalies(conn, analytical_schema(statistics["schema"]), statistics["numeric_stats"])
+        if is_admission(analytical_schema(statistics["schema"])):
             anomalies = [item for item in anomalies if not (item.get("column") in {"cgpa", "chance_of_admit"} and 0 <= float(item.get("value", -1)) <= (10 if item.get("column") == "cgpa" else 1))]
-        if survey_fields(statistics["schema"]):
+        if survey_fields(analytical_schema(statistics["schema"])):
             anomalies = []
         deterministic_recommendations = generate_recommendations(
             kpis=kpis,
@@ -585,22 +607,22 @@ async def compute_analysis(
             },
             kpis=kpis,
         )
-        if is_admission(statistics["schema"]):
+        if is_admission(analytical_schema(statistics["schema"])):
             ai_result["insights"] = [item for item in ai_result.get("insights", []) if item.get("type") != "anomaly"]
-        if survey_fields(statistics["schema"]):
+        if survey_fields(analytical_schema(statistics["schema"])):
             ai_result["insights"] = []
         await progress(85)
 
         ai_result["executive_summary"], summary_checks = render_summary(
             summary_facts, ai_result.get("summary_fact_ids")
         )
-        if is_admission(statistics["schema"]):
-            ai_result["executive_summary"] = admission_summary(statistics)
+        if is_admission(analytical_schema(statistics["schema"])):
+            ai_result["executive_summary"] = admission_summary(analytical_statistics(statistics))
             summary_checks = {"method": "admission_measured_v1", "facts": [], "scope": "All analysed applicant records"}
-        if is_football(statistics["schema"]):
-            ai_result["executive_summary"] = football_summary(statistics)
+        if is_football(analytical_schema(statistics["schema"])):
+            ai_result["executive_summary"] = football_summary(analytical_statistics(statistics))
             summary_checks = {"method": "football_measured_v1", "facts": [], "scope": "All analysed player records"}
-        if survey_fields(statistics["schema"]):
+        if survey_fields(analytical_schema(statistics["schema"])):
             published = statistics["numeric_stats"][survey_fields(statistics["schema"])["percentage"]]["count"]
             ai_result["executive_summary"] = (f"This file contains {row_count:,} published survey result records, not individual respondents.\n"
                 f"{published:,} records contain a published percentage; the other {row_count - published:,} remain unavailable. Blank notes are optional.\n"

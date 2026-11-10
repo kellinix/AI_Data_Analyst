@@ -181,6 +181,36 @@ def test_fallback_kpi_shows_average_not_raw_sum():
     assert kpis[0]["is_total"] is False
 
 
+@pytest.mark.parametrize(("semantic_type", "value", "is_total"), [
+    ("count", 36, True),
+    ("average_metric", 4.5, False),
+    ("percentage", 4.5, False),
+])
+def test_compact_named_measure_uses_recorded_semantics_for_aggregation(semantic_type, value, is_total):
+    schema = [{"name": "orderquantity", "is_numeric": True, "analysis_role": "metric", "semantic_type": semantic_type}]
+    numeric = {"orderquantity": {"total": 36, "mean": 4.5, "count": 8}}
+
+    kpi = detect_kpis(schema, numeric)[0]
+
+    assert kpi["column"] == "orderquantity"
+    assert kpi["value"] == value
+    assert kpi["is_total"] is is_total
+    assert kpi["fallback_reason"].startswith("Total" if is_total else "Average")
+
+
+def test_count_semantics_preserve_role_and_repeated_lookup_exclusions():
+    schema = [
+        {"name": "identifier", "analysis_role": "identifier"},
+        {"name": "attribute", "analysis_role": "attribute"},
+        {"name": "flag", "analysis_role": "flag"},
+        {"name": "orderquantity", "analysis_role": "metric", "measure_grain": {"kind": "lookup", "repeated": True}},
+    ]
+    schema = [{**field, "is_numeric": True, "semantic_type": "count"} for field in schema]
+    numeric = {field["name"]: {"total": 36, "mean": 4.5, "count": 8} for field in schema}
+
+    assert detect_kpis(schema, numeric) == []
+
+
 def test_per_unit_cost_is_averaged_not_summed():
     schema = [{"name": "cost_per_box", "is_numeric": True, "analysis_role": "metric"}]
     stats = {"cost_per_box": {"total": 146.23, "mean": 5.85, "count": 25}}

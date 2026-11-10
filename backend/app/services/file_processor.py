@@ -12,6 +12,7 @@ import duckdb
 import pandas as pd
 import polars as pl
 
+from app.analytics.identifier_names import canonical_identifier_name
 from app.analytics.text_matching import is_withheld_value
 from app.core.logging import get_logger
 
@@ -28,6 +29,7 @@ _MISSING_TEXT_VALUES = {
     "missing",
     "#n/a",
     "#na",
+    r"\n",  # SQL/TSV exports commonly use a literal backslash-N for null.
 }
 
 # Bare NA, none and nil can be valid country/product codes or answers such as
@@ -910,7 +912,7 @@ class FileProcessor:
         if len(frames) > 1 and all(frame.height <= self.SAMPLE_ROWS for frame in frames):
             from app.services.relational_files import enrich_related_files
 
-            enriched, resolution = enrich_related_files(frames)
+            enriched, resolution = enrich_related_files(frames, table_names=names)
             report["relationship_resolution"] = {**resolution, "sheet_names": names}
             if resolution.get("reason_code") == "conflicting_identifiers":
                 raise ValueError("These worksheets could not be matched safely. Their IDs disagree about which records belong together. Check the IDs or upload the worksheets separately.")
@@ -948,7 +950,7 @@ class FileProcessor:
         if names != attempted_names and all(frame.height <= self.SAMPLE_ROWS for frame in frames):
             from app.services.relational_files import enrich_related_files
 
-            enriched, resolution = enrich_related_files(frames)
+            enriched, resolution = enrich_related_files(frames, table_names=names)
             report["relationship_resolution"] = {**resolution, "sheet_names": names}
             if resolution.get("reason_code") == "conflicting_identifiers":
                 raise ValueError("These worksheets could not be matched safely. Their IDs disagree about which records belong together. Check the IDs or upload the worksheets separately.")
@@ -1261,6 +1263,7 @@ class FileProcessor:
     ) -> dict[str, Any]:
         frames = []
         source_samples = []
+        table_sources = []
         for uploaded_file in uploaded_files:
             extension = Path(uploaded_file.storage_path).suffix.lower()
             frame, truncated = self._read_file_ex(uploaded_file.storage_path, extension)
@@ -1272,8 +1275,17 @@ class FileProcessor:
                 pl.lit(uploaded_file.original_filename).alias("Source file")
             )
             frames.append(frame)
+            source_id = getattr(uploaded_file, "id", None)
+            reference = str(source_id) if source_id is not None else str(len(table_sources))
+            parser = self._parser_metadata(uploaded_file.storage_path, extension) if extension in {".xlsx", ".xls"} else {}
+            origins = (parser.get("relationship_resolution") or {}).get("field_origins") or {}
+            table_sources.append({"id": reference, "name": uploaded_file.original_filename,
+                "field_origins": {column: {**origin, "source_file": uploaded_file.original_filename,
+                    "source_file_id": reference, "source_sheet": origin.get("source_table")}
+                    for column, origin in origins.items()}})
 
         relationship_context["source_samples"] = source_samples
+        relationship_context["_table_sources"] = table_sources
         relationship_context["source_sample_truncated"] = any(item["truncated"] for item in source_samples)
         if not frames:
             combined = pl.DataFrame()
@@ -1291,6 +1303,7 @@ class FileProcessor:
     ) -> pl.DataFrame:
         from app.services.relational_files import enrich_related_files
 
+        table_sources = relationship_context.pop("_table_sources", [])
         if relationship_context.get("source_sample_truncated"):
             relationship_context["combine_strategy"] = "portfolio"
             relationship_context["relationship_resolution"] = {
@@ -1298,12 +1311,19 @@ class FileProcessor:
                 "reason": "Source tables were sampled. Identifier uniqueness across the full lookup cannot be verified, so different record types were appended without joining.",
             }
             return pl.concat(frames, how="diagonal_relaxed")
-        enriched, resolution = enrich_related_files(frames)
+        enriched, resolution = enrich_related_files(
+            frames,
+            table_names=[source["name"] for source in table_sources] if table_sources else None,
+            table_ids=[source["id"] for source in table_sources] if table_sources else None,
+            table_origins=[source.get("field_origins", {}) for source in table_sources] if table_sources else None,
+            declared_relationships=relationship_context.get("declared_relationships"),
+            fact_table=relationship_context.get("fact_file"),
+        )
         relationship_context["relationship_resolution"] = resolution
         if enriched is not None:
             relationship_context["combine_strategy"] = "relational"
             return enriched
-        if resolution.get("reason_code") == "conflicting_identifiers":
+        if resolution.get("reason_code") in {"conflicting_identifiers", "invalid_declared_relationship"}:
             relationship_context["combine_strategy"] = "portfolio"
             return pl.concat(frames, how="diagonal_relaxed")
         combine_strategy = relationship_context.get("combine_strategy", "portfolio")
@@ -1614,6 +1634,7 @@ def _standardize_column_name(column: str) -> str:
         name = f"{prefix}_id" if prefix else "row_number"
     # Preserve the word boundary that says a camelCase header is an identifier.
     # Otherwise DonorID becomes donorid and may be parsed as a numeric measure.
+    name = re.sub(r"^((?i:id|code|key|uuid|guid))(?=[A-Z][a-z])", r"\1_", name)
     name = re.sub(r"(?<=[a-z0-9])(?=(?:ID|Id|Key|KEY|Code|CODE|UUID|Guid|GUID)$)", "_", name).lower()
     name = name.replace("&", " and ")
     name = re.sub(r"[%]+", " pct ", name)
@@ -1627,13 +1648,8 @@ def _looks_like_identifier_column(column: str) -> bool:
     normalized = _standardize_column_name(column)
     normalized = re.sub(r"_(?:related_)?\d+$", "", normalized)
     return (
-        normalized == "id"
-        or normalized.endswith("_id")
-        or normalized.startswith("id_")
-        or normalized.endswith("_uuid")
-        or normalized.endswith("_guid")
-        or normalized.endswith("_code")
-        or normalized.endswith("_key")
+        canonical_identifier_name(column) is not None
+        or canonical_identifier_name(normalized) is not None
         or normalized in {"code", "postcode", "zipcode", "zip", "postal_code", "row_number"}
     )
 

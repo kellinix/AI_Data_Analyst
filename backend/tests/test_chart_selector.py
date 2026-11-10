@@ -1,7 +1,73 @@
 from __future__ import annotations
 
+import duckdb
+import pytest
+
 from app.analytics.chart_selector import select_charts
+from app.analytics.kpi_detector import detect_kpis
+from app.analytics.live_filter import populate_chart_option
 from app.analytics.report_relevance import useful_charts
+from app.analytics.semantic_detector import enrich_schema_with_semantics
+from app.analytics.statistics import StatisticsEngine
+
+
+@pytest.mark.parametrize(("original", "aggregation", "headline", "time_values", "department_values"), [
+    ("OrderQuantity", "sum", 36, [14, 22], [10, 26]),
+    ("AverageQuantity", "average", 4.5, [3.5, 5.5], [2.5, 6.5]),
+])
+@pytest.mark.parametrize("sparse", [False, True])
+def test_original_count_or_average_stays_consistent_in_kpis_and_populated_charts(original, aggregation, headline, time_values, department_values, sparse):
+    name = original.lower()
+    connection = duckdb.connect(":memory:")
+    try:
+        connection.execute(f'CREATE TABLE data (period_date DATE, department VARCHAR, appointment_status VARCHAR, "{name}" DOUBLE)')
+        connection.executemany("INSERT INTO data VALUES (?, ?, ?, ?)", [
+            ("2026-01-01", "A", "Open", 1), ("2026-01-01", "A", "Closed", 2),
+            ("2026-01-02", "A", "Open", 3), ("2026-01-02", "A", "Closed", 4),
+            ("2026-01-01", "B", "Open", 5), ("2026-01-01", "B", "Closed", 6),
+            ("2026-01-02", "B", "Open", 7), ("2026-01-02", "B", "Closed", 8),
+        ])
+        if sparse:
+            connection.executemany("INSERT INTO data VALUES (?, ?, ?, ?)", [(None, None, None, None)] * 30)
+        stats = StatisticsEngine(connection).describe_all()
+        schema = enrich_schema_with_semantics(stats["schema"], stats["numeric_stats"], stats["categorical_stats"], original_names={name: original})
+        kpi = next(item for item in detect_kpis(schema, stats["numeric_stats"]) if item["column"] == name)
+        charts = select_charts(schema, stats["numeric_stats"], stats["categorical_stats"], stats["date_range"], {}, max_charts=20)
+        measures = [chart for chart in charts if name in chart.get("series", []) or chart.get("yAxis") == name]
+
+        assert kpi["value"] == headline
+        assert kpi["is_total"] is (aggregation == "sum")
+        assert {chart["type"] for chart in measures} >= {"line", "bar"}
+        for chart in measures:
+            assert chart["aggregation"] == aggregation
+            assert chart["echarts_option"]["_columns"]["aggregation"] == aggregation
+            assert populate_chart_option(connection, chart)
+        timeline = next(chart for chart in measures if chart["type"] == "line")
+        assert timeline["echarts_option"]["series"][0]["data"] == time_values
+        assert timeline["title"].startswith("Total " if aggregation == "sum" else "Average ")
+        if sparse:
+            assert timeline["echarts_option"]["series"][0]["lineStyle"]["opacity"] == 0
+        bar = next(chart for chart in measures if chart["xAxis"] == name and chart["yAxis"] == "department")
+        assert sorted(bar["echarts_option"]["series"][0]["data"]) == department_values
+        assert bar["title"].startswith("Avg ") is (aggregation == "average")
+        stacked = next(chart for chart in measures if chart.get("series_by"))
+        assert f"the {'total' if aggregation == 'sum' else 'average'} " in stacked["description"]
+    finally:
+        connection.close()
+
+
+def test_multiple_semantic_counts_keep_sum_queries_on_the_combined_time_chart():
+    schema = [{"name": "period_date", "is_numeric": False, "is_date": True, "analysis_role": "temporal_dimension"}]
+    schema += [{"name": name, "is_numeric": True, "is_date": False, "analysis_role": "metric", "semantic_type": "count"}
+               for name in ("orderquantity", "returnquantity")]
+    numeric = {name: {"mean": 4.5, "min": 1, "max": 8, "count": 8} for name in ("orderquantity", "returnquantity")}
+
+    charts = select_charts(schema, numeric, {}, {}, {})
+
+    combined = next(chart for chart in charts if chart["yAxis"] == "metrics")
+    assert combined["aggregation"] == "sum"
+    assert combined["echarts_option"]["_columns"]["ys"] == ["orderquantity", "returnquantity"]
+    assert combined["echarts_option"]["_columns"]["aggregations"] == ["sum", "sum"]
 
 
 def test_football_rank_is_not_a_time_axis_and_goals_lead():

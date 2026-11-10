@@ -11,6 +11,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from app.analytics.identifier_names import canonical_identifier_name
 from app.analytics.measure_semantics import (
     FLOW_KEYWORDS,
     NON_ADDITIVE_KEYWORDS,
@@ -88,13 +89,21 @@ def enrich_schema_with_semantics(
     schema: list[dict[str, Any]],
     numeric_stats: dict[str, Any],
     categorical_stats: dict[str, Any],
+    original_names: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
     """Return schema rows with semantic_type, confidence, and role metadata."""
     enriched: list[dict[str, Any]] = []
     from app.analytics.survey_context import survey_fields
     survey = survey_fields(schema)
+    semantic_names = {column["name"]: (column.get("measure_grain") or {}).get("source_column")
+                      or (original_names or {}).get(column["name"]) or column["name"] for column in schema}
+    medal_names = {"gold", "silver", "bronze"}
+    has_medal_counts = medal_names <= {_normalize(semantic_names[column["name"]]) for column in schema if column.get("is_numeric")}
     for column in schema:
-        profile = detect_column_semantics(column, numeric_stats, categorical_stats)
+        original_name = semantic_names[column["name"]]
+        profile = detect_column_semantics(column, numeric_stats, categorical_stats, original_name=original_name)
+        if has_medal_counts and column.get("is_numeric") and _normalize(original_name) in medal_names:
+            profile = _profile("count", 0.9, "Column is one of three recorded medal counts", "metric")
         if (column.get("is_numeric") and ambiguous_percentage(column["name"], numeric_stats.get(column["name"], {}))
                 and not (survey and column["name"] == survey["percentage"])):
             profile.update({"percentage_scale": "unconfirmed", "display_warning": SCALE_WARNING})
@@ -106,9 +115,24 @@ def detect_column_semantics(
     column: dict[str, Any],
     numeric_stats: dict[str, Any],
     categorical_stats: dict[str, Any],
+    original_name: str | None = None,
 ) -> dict[str, Any]:
     name = str(column["name"])
-    normalized = _normalize(name)
+    semantic_name = original_name or name
+    normalized = _normalize(semantic_name)
+    stats = numeric_stats.get(name, {})
+
+    identifier = canonical_identifier_name(semantic_name)
+    if identifier is not None and (
+        not identifier.endswith("code") or normalized.startswith("code_") or normalized == "code"
+    ):
+        return _profile("identifier", 0.9, "Column name explicitly identifies a recorded code", "identifier")
+
+    if column.get("is_numeric") and stats.get("aggregation_warning"):
+        return _profile("unresolved_duration", 0.9, stats["aggregation_warning"]["description"], "unresolved")
+
+    if column.get("is_numeric") and (normalized.startswith("number_of_") or normalized.endswith("_count")):
+        return _profile("count", 0.9, "Column explicitly counts recorded items or people", "metric")
 
     if column.get("is_date"):
         return _profile("date", 0.98, "Date or timestamp dtype", "temporal_dimension")
@@ -136,9 +160,6 @@ def detect_column_semantics(
         component = calendar_component(normalized, numeric_stats.get(name, {}))
         if component:
             return _profile(component, 0.94, "Calendar component, not a measurable quantity", "dimension")
-        stats = numeric_stats.get(name, {})
-        if stats.get("aggregation_warning"):
-            return _profile("unresolved_duration", 0.9, stats["aggregation_warning"]["description"], "unresolved")
         # Explicit code vocabulary wins over activity words (e.g. click_code).
         # Bare singular activity words with a tiny bounded integer domain can
         # also be ratings. Plurals and explicit count/total names remain counts.
@@ -153,15 +174,15 @@ def detect_column_semantics(
 
     if _looks_like_identifier(normalized):
         return _profile("identifier", 0.9, "Column name looks like a record identifier", "identifier")
-    if column.get("is_numeric") and (normalized.startswith("number_of_") or normalized.endswith("_count")):
-        return _profile("count", 0.9, "Explicit count of items or people, rather than their identifier", "metric")
-
     if normalized in SPORT_COUNT_COLUMNS:
         return _profile("numeric_metric", 0.7, "A short numeric field name does not establish its unit or whether values can be added", "metric")
     if column.get("is_numeric") and named_percentage(normalized):
         return _profile("percentage", 0.94, "Column explicitly names a percentage, rather than an amount of money", "metric")
 
-    if column.get("is_numeric") and contains_keyword(normalized, VOLUME_KEYWORDS) and is_additive_flow(normalized):
+    if column.get("is_numeric") and contains_keyword(normalized, ("average", "avg", "mean", "median")):
+        return _profile("average_metric", 0.9, "Column explicitly names an average or midpoint", "metric")
+
+    if column.get("is_numeric") and contains_keyword(normalized, (*VOLUME_KEYWORDS, "quantity")) and is_additive_flow(normalized):
         return _profile("count", 0.88, "Named count of activity", "metric")
 
     if normalized.startswith("is_") or normalized.startswith("has_") or normalized.endswith("_flag"):
@@ -222,11 +243,16 @@ def _normalize(value: str) -> str:
 
 
 def _looks_like_identifier(normalized: str) -> bool:
+    if normalized.startswith("number_of_") or normalized.endswith("_count"):
+        return False
     if is_serial_identifier(normalized):
         return True
     if normalized in {"id", "uuid", "guid", "shipmentid", "spid", "pid", "gid", "gmppidnumber"}:
         return True
     if normalized.startswith("rk_stats_"):
+        return True
+    canonical = canonical_identifier_name(normalized)
+    if canonical is not None and not canonical.endswith("code"):
         return True
     compact = normalized.replace("_", "")
     if compact in {"flight", "registration", "sku", "trackingnumber"}:

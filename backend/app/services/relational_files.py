@@ -2,61 +2,118 @@
 from __future__ import annotations
 
 import re
+from itertools import combinations
+from pathlib import Path
 from typing import Any
 
 import polars as pl
+
+from app.analytics.identifier_names import canonical_identifier_name
+
+KeyLink = tuple[tuple[str, ...], tuple[str, ...]]
+_GENERIC_KEYS = {"id", "key", "code", "uuid", "guid"}
 
 
 def _identifier_columns(frame: pl.DataFrame) -> dict[str, str]:
     names: dict[str, list[str]] = {}
     for column in frame.columns:
-        words = re.sub(r"([a-z])([A-Z])", r"\1_\2", column).lower()
-        parts = re.findall(r"[a-z0-9]+", words)
-        if len(parts) > 1 and parts[-1] in {"id", "key", "code"}:
-            names.setdefault("".join(parts), []).append(column)
+        name = canonical_identifier_name(column)
+        if name:
+            names.setdefault(name, []).append(column)
     return {name: columns[0] for name, columns in names.items() if len(columns) == 1}
 
 
 def _key(frame: pl.DataFrame, column: str) -> pl.Series:
     # Keep case and leading zeroes. Only surrounding whitespace is insignificant.
     values = frame[column].cast(pl.String).str.strip_chars()
-    return values.replace("", None)
+    return values.replace(["", r"\N"], None)
 
 
-def _candidate_relationships(fact: pl.DataFrame, lookup: pl.DataFrame, *, allow_unique: bool = False) -> list[tuple[str, str]]:
+def _keys(frame: pl.DataFrame, columns: tuple[str, ...]) -> pl.DataFrame:
+    return pl.DataFrame({f"key_{index}": _key(frame, column)
+                         for index, column in enumerate(columns)})
+
+
+def _table_entities(name: str) -> set[str]:
+    stem = re.sub(r"([a-z])([A-Z])", r"\1_\2", Path(name).stem).lower()
+    words = re.findall(r"[a-z0-9]+", stem)
+    if words and words[-1].isdigit():
+        words.pop()
+    if not words:
+        return set()
+    variants = {words[-1]}
+    if words[-1].endswith("ies"):
+        variants.add(words[-1][:-3] + "y")
+    if words[-1].endswith("s") and not words[-1].endswith("ss"):
+        variants.add(words[-1][:-1])
+    if words[-1].endswith(("ches", "shes", "sses", "xes", "zes")):
+        variants.add(words[-1][:-2])
+    return variants | {"".join([*words[:-1], word]) for word in variants}
+
+
+def _valid_link(fact: pl.DataFrame, lookup: pl.DataFrame, link: KeyLink, allow_unique: bool) -> bool:
+    foreign, primary = _keys(fact, link[0]), _keys(lookup, link[1])
+    if any(primary.null_count().row(0)) or primary.n_unique() != primary.height:
+        return False
+    supplied = foreign.drop_nulls()
+    matched = supplied.join(primary, on=primary.columns, how="semi")
+    if not allow_unique and matched.n_unique() == matched.height:
+        return False
+    return matched.height > 0
+
+
+def _candidate_relationships(
+    fact: pl.DataFrame, lookup: pl.DataFrame, *, allow_unique: bool = False, lookup_name: str = "",
+) -> list[KeyLink]:
     left, right = _identifier_columns(fact), _identifier_columns(lookup)
-    candidates = []
-    for name in left.keys() & right.keys():
-        foreign, primary = _key(fact, left[name]), _key(lookup, right[name])
-        if primary.null_count() or primary.n_unique() != len(primary):
-            continue
-        # One-to-one and many-to-many relationships need an explicit grain choice.
-        supplied = foreign.drop_nulls()
-        if not allow_unique and supplied.n_unique() == len(supplied):
-            continue
-        if supplied.is_in(primary.implode()).any():
-            candidates.append((left[name], right[name]))
+    pairs = [(left[name], right[name]) for name in sorted((left.keys() & right.keys()) - _GENERIC_KEYS)]
+    entities = _table_entities(lookup_name)
+    # A bare parent ID needs its table name. Independent sequential row IDs
+    # from two unrelated tables must never become a relationship by overlap.
+    for marker in sorted(right.keys() & _GENERIC_KEYS):
+        pairs.extend((column, right[marker]) for name, column in left.items()
+                     if name not in _GENERIC_KEYS and name.endswith(marker)
+                     and name[:-len(marker)] in entities)
+    pairs = list(dict.fromkeys(pairs))
+    singles = [((foreign,), (primary,)) for foreign, primary in pairs]
+    candidates = [link for link in singles if _valid_link(fact, lookup, link, allow_unique)]
+    # Search only minimal composite identifier keys. Never build a key from
+    # arbitrary descriptive values just because their combination is unique.
+    unique_parent_columns = {link[1][0] for link in singles
+                             if _valid_link(fact, lookup, link, True)}
+    remaining = [pair for pair in pairs if pair[1] not in unique_parent_columns]
+    if len(remaining) <= 8:
+        for size in (2, 3):
+            for selected in combinations(remaining, size):
+                link = (tuple(pair[0] for pair in selected), tuple(pair[1] for pair in selected))
+                if any(set(existing[1]) <= set(link[1]) for existing in candidates):
+                    continue
+                if _valid_link(fact, lookup, link, allow_unique):
+                    candidates.append(link)
     return candidates
 
 
-def _relationship(fact: pl.DataFrame, lookup: pl.DataFrame, *, allow_unique: bool = False) -> tuple[str, str] | None:
-    candidates = _candidate_relationships(fact, lookup, allow_unique=allow_unique)
+def _relationship(fact: pl.DataFrame, lookup: pl.DataFrame, *, allow_unique: bool = False, lookup_name: str = "") -> KeyLink | None:
+    candidates = _candidate_relationships(fact, lookup, allow_unique=allow_unique, lookup_name=lookup_name)
     return candidates[0] if len(candidates) == 1 else None
 
 
 def _conflicting_identifier_associations(
-    fact: pl.DataFrame, lookup: pl.DataFrame, candidates: list[tuple[str, str]],
+    fact: pl.DataFrame, lookup: pl.DataFrame, candidates: list[KeyLink],
 ) -> bool:
-    left = fact.select([_key(fact, foreign).alias(f"foreign_{index}")
-                        for index, (foreign, _primary) in enumerate(candidates)])
-    right = lookup.select([_key(lookup, primary).alias(f"primary_{index}")
-                           for index, (_foreign, primary) in enumerate(candidates)])
+    left = pl.DataFrame({f"foreign_{index}_{part}": _key(fact, column)
+                         for index, (columns, _) in enumerate(candidates) for part, column in enumerate(columns)})
+    right = pl.DataFrame({f"primary_{index}_{part}": _key(lookup, column)
+                          for index, (_, columns) in enumerate(candidates) for part, column in enumerate(columns)})
     for index in range(len(candidates)):
-        matched = left.join(right, left_on=f"foreign_{index}", right_on=f"primary_{index}",
+        left_keys = [f"foreign_{index}_{part}" for part in range(len(candidates[index][0]))]
+        right_keys = [f"primary_{index}_{part}" for part in range(len(candidates[index][1]))]
+        matched = left.join(right, left_on=left_keys, right_on=right_keys,
                             how="inner", validate="m:1", coalesce=False)
         for other in range(len(candidates)):
-            if not matched[f"foreign_{other}"].eq_missing(matched[f"primary_{other}"]).all():
-                return True
+            for part in range(len(candidates[other][0])):
+                if not matched[f"foreign_{other}_{part}"].eq_missing(matched[f"primary_{other}_{part}"]).all():
+                    return True
     return False
 
 
@@ -70,7 +127,43 @@ def _reachable(graph: dict, root: int) -> set[int]:
     return found
 
 
-def enrich_related_files(frames: list[pl.DataFrame]) -> tuple[pl.DataFrame | None, dict[str, Any]]:
+def _inherit_field_origin(
+    origin: dict, column: str, source_origins: list[dict], renames: dict[str, str], combined: pl.DataFrame,
+) -> dict:
+    inherited = [origins[column] for origins in source_origins if isinstance(origins.get(column), dict)]
+    if not inherited:
+        return origin
+    sources = []
+    for previous in inherited:
+        for source in previous.get("source_origins") or [previous]:
+            mapped = {**source, "entity_key_columns": [renames.get(key, key)
+                      for key in source.get("entity_key_columns", [])]}
+            if mapped not in sources:
+                sources.append(mapped)
+    result = {**origin, **sources[0]} if len(sources) == 1 else {
+        **origin, "source_table": "Multiple source tables", "source_origins": sources,
+        "entity_key_columns": [], "key_basis": "multiple_sources",
+    }
+    if all(source.get("kind") == "fact" for source in sources):
+        result["entity_key_columns"] = origin["entity_key_columns"]
+        if origin.get("key_basis"):
+            result["key_basis"] = origin["key_basis"]
+    result["kind"] = "lookup" if origin["kind"] == "lookup" or any(
+        item.get("kind") == "lookup" for item in inherited) else "fact"
+    result["repeated"] = origin["repeated"] or any(item.get("repeated") is True for item in inherited)
+    keys = result.get("entity_key_columns") or []
+    if keys and any(item.get("kind") == "lookup" for item in inherited) and all(key in combined.columns for key in keys):
+        represented = _keys(combined, tuple(keys)).drop_nulls()
+        result["matched_entries"] = represented.height
+        result["repeated"] = result["repeated"] or represented.height > represented.n_unique()
+    return result
+
+
+def enrich_related_files(
+    frames: list[pl.DataFrame], *, table_names: list[str] | None = None,
+    table_ids: list[str] | None = None, declared_relationships: list[dict] | None = None,
+    fact_table: str | None = None, table_origins: list[dict] | None = None,
+) -> tuple[pl.DataFrame | None, dict[str, Any]]:
     """Join only a single unambiguous fact table to unique-key lookup tables.
 
     Same-schema files are partitions of the same record type. Unrelated or
@@ -78,12 +171,61 @@ def enrich_related_files(frames: list[pl.DataFrame]) -> tuple[pl.DataFrame | Non
     No fact aggregation, inner joins or many-to-many expansion is permitted.
     """
     partitions: dict[tuple[str, ...], list[pl.DataFrame]] = {}
-    for frame in frames:
+    partition_names: dict[tuple[str, ...], list[str]] = {}
+    partition_origins: dict[tuple[str, ...], list[dict]] = {}
+    original_tables = {}
+    for original, frame in enumerate(frames):
         signature = tuple(sorted(c for c in frame.columns if c != "Source file"))
+        original_tables[original] = list(partitions).index(signature) if signature in partitions else len(partitions)
         partitions.setdefault(signature, []).append(frame)
+        inferred = frame["Source file"][0] if "Source file" in frame.columns and frame.height else f"Table {original + 1}"
+        partition_names.setdefault(signature, []).append(table_names[original] if table_names else str(inferred))
+        supplied_origins = table_origins[original] if table_origins else {}
+        partition_origins.setdefault(signature, []).append({column: {
+            "source_table": partition_names[signature][-1], "source_column": column,
+            "kind": "fact", "repeated": False, "entity_key_columns": [], **supplied_origins.get(column, {}),
+        } for column in frame.columns if column != "Source file"})
     tables = [pl.concat(group, how="diagonal_relaxed") for group in partitions.values()]
+    names = [values[0] for values in partition_names.values()]
+    origins = list(partition_origins.values())
     if len(tables) < 2:
-        return None, {"status": "stacked", "reason": "Files have the same fields and were appended."}
+        field_origins = {column: _inherit_field_origin({"source_table": names[0], "source_column": column,
+            "kind": "fact", "repeated": False, "entity_key_columns": []}, column, origins[0], {}, tables[0])
+            for column in tables[0].columns if column != "Source file"} if tables else {}
+        return None, {"status": "stacked", "reason": "Files have the same fields and were appended.",
+                      "field_origins": field_origins}
+
+    declared = {}
+    declared_root = None
+    if declared_relationships or fact_table:
+        try:
+            references = {}
+            for original in range(len(frames)):
+                reference = str(table_ids[original]) if table_ids else str(original)
+                if reference in references:
+                    raise ValueError("Source file references must be unique.")
+                references[reference] = original_tables[original]
+            if fact_table is not None:
+                declared_root = references[str(fact_table)]
+            if not isinstance(declared_relationships or [], list) or len(declared_relationships or []) > 16:
+                raise ValueError("Choose at most sixteen relationships.")
+            for item in declared_relationships or []:
+                child, parent = references[str(item["from_file"])], references[str(item["to_file"])]
+                foreign, primary = item["from_columns"], item["to_columns"]
+                if (child == parent or not isinstance(foreign, list) or not isinstance(primary, list)
+                        or not 1 <= len(foreign) == len(primary) <= 3
+                        or len(set(foreign)) != len(foreign) or len(set(primary)) != len(primary)
+                        or any(not isinstance(column, str) or column not in tables[child].columns for column in foreign)
+                        or any(not isinstance(column, str) or column not in tables[parent].columns for column in primary)):
+                    raise ValueError("Choose existing columns from two different tables.")
+                link = (tuple(foreign), tuple(primary))
+                if not _valid_link(tables[child], tables[parent], link, True):
+                    raise ValueError("The parent keys must be unique, filled in and match source records.")
+                if (child, parent) in declared and declared[child, parent] != link:
+                    raise ValueError("Multiple roles for the same lookup need separate, qualified relationships.")
+                declared[child, parent] = link
+        except (KeyError, TypeError, ValueError) as error:
+            return None, {"status": "unresolved", "reason_code": "invalid_declared_relationship", "reason": str(error)}
 
     graph = {}
     constraints = {}
@@ -91,7 +233,12 @@ def enrich_related_files(frames: list[pl.DataFrame]) -> tuple[pl.DataFrame | Non
         graph[index] = {}
         for other, lookup in enumerate(tables):
             if other != index:
-                candidates = _candidate_relationships(fact, lookup, allow_unique=True)
+                if (index, other) in declared:
+                    candidates = [declared[index, other]]
+                elif (other, index) in declared:
+                    continue
+                else:
+                    candidates = _candidate_relationships(fact, lookup, allow_unique=True, lookup_name=names[other])
                 if len(candidates) > 1 and _conflicting_identifier_associations(fact, lookup, candidates):
                     return None, {
                         "status": "unresolved", "reason_code": "conflicting_identifiers",
@@ -105,7 +252,10 @@ def enrich_related_files(frames: list[pl.DataFrame]) -> tuple[pl.DataFrame | Non
     # lookup links can then extend that known grain without choosing a new one.
     roots = [index for index, fact in enumerate(tables)
              if _reachable(graph, index) == set(range(len(tables)))
-             and any(_relationship(fact, tables[parent]) for parent in graph[index])]
+             and (index == declared_root or any(_valid_link(fact, tables[parent], link, False)
+                                               for parent, link in graph[index].items()))]
+    if declared_root is not None:
+        roots = [root for root in roots if root == declared_root]
     if len(roots) != 1:
         return None, {
             "status": "unresolved",
@@ -116,8 +266,12 @@ def enrich_related_files(frames: list[pl.DataFrame]) -> tuple[pl.DataFrame | Non
     combined = tables[index]
     attached = {index}
     field_names = {(index, column): column for column in combined.columns}
+    field_origins = {column: _inherit_field_origin({"source_table": names[index], "source_column": column,
+                             "kind": "fact", "repeated": False, "entity_key_columns": []},
+                             column, origins[index], {}, combined)
+                     for column in combined.columns if column != "Source file"}
     resolution: dict[str, Any] = {
-        "status": "enriched", "grain": "One entry per source transaction",
+        "status": "enriched", "grain": "One entry per record in the main source table",
         "fact_files": combined["Source file"].unique(maintain_order=True).to_list() if "Source file" in combined.columns else [],
         "input_rows": sum(len(frame) for frame in frames), "row_count": len(combined), "joins": [],
     }
@@ -126,17 +280,20 @@ def enrich_related_files(frames: list[pl.DataFrame]) -> tuple[pl.DataFrame | Non
                      for other in range(len(tables)) if other not in attached]
         available = [(other, paths) for other, paths in available if paths]
         other, paths = available[0]
-        child, (source_column, primary_column) = paths[0]
-        foreign_column = field_names[(child, source_column)]
+        child, (source_columns, primary_columns) = paths[0]
+        foreign_columns = tuple(field_names[(child, column)] for column in source_columns)
         lookup = tables[other]
-        foreign, primary = _key(combined, foreign_column), _key(lookup, primary_column)
-        matched = int(foreign.is_in(primary.implode()).fill_null(False).sum())
-        unused = int((~primary.is_in(foreign.drop_nulls().unique().implode())).sum())
-        key_name = "__relationship_key"
-        while key_name in combined.columns or key_name in lookup.columns:
-            key_name += "_"
+        foreign, primary = _keys(combined, foreign_columns), _keys(lookup, primary_columns)
+        matched = foreign.join(primary, on=primary.columns, how="semi").height
+        unused = primary.join(foreign.drop_nulls().unique(), on=primary.columns, how="anti").height
+        key_names = []
+        for part in range(len(primary_columns)):
+            key_name = f"__relationship_key_{part}"
+            while key_name in combined.columns or key_name in lookup.columns:
+                key_name += "_"
+            key_names.append(key_name)
         source_files = lookup["Source file"].unique(maintain_order=True).to_list() if "Source file" in lookup.columns else []
-        payload = lookup.drop([c for c in (primary_column, "Source file") if c in lookup.columns])
+        payload = lookup.drop("Source file") if "Source file" in lookup.columns else lookup
         used = set(combined.columns) | set(payload.columns)
         renames = {}
         for column in payload.columns:
@@ -146,28 +303,43 @@ def enrich_related_files(frames: list[pl.DataFrame]) -> tuple[pl.DataFrame | Non
                     replacement += "_"
                 renames[column] = replacement
                 used.add(replacement)
-        payload = payload.rename(renames).with_columns(primary.alias(key_name))
-        combined = combined.with_columns(foreign.alias(key_name)).join(
-            payload, on=key_name, how="left", validate="m:1", maintain_order="left",
-        ).drop(key_name)
-        field_names[(other, primary_column)] = foreign_column
+        payload = payload.rename(renames).with_columns([primary[name].alias(key_name)
+            for name, key_name in zip(primary.columns, key_names, strict=True)])
+        combined = combined.with_columns([foreign[name].alias(key_name)
+            for name, key_name in zip(foreign.columns, key_names, strict=True)]).join(
+            payload, on=key_names, how="left", validate="m:1", maintain_order="left",
+        ).drop(key_names)
         field_names.update({(other, column): renames.get(column, column) for column in lookup.columns
-                            if column not in {primary_column, "Source file"}})
+                            if column != "Source file"})
+        entity_columns = tuple(field_names[(other, column)] for column in primary_columns)
+        represented = _keys(combined, entity_columns).drop_nulls()
+        repeated = represented.height > represented.n_unique()
+        field_origins.update({renames.get(column, column): _inherit_field_origin({
+            "source_table": names[other], "source_column": column, "kind": "lookup",
+            "entity_key_columns": list(entity_columns), "key_basis": "parent_primary",
+            "repeated": repeated, "matched_entries": matched, "source_rows": lookup.height,
+        }, column, origins[other], renames, combined) for column in lookup.columns if column != "Source file"})
         attached.add(other)
         resolution["joins"].append({
-            "foreign_key": foreign_column, "lookup_key": primary_column,
+            "foreign_key": foreign_columns[0] if len(foreign_columns) == 1 else list(foreign_columns),
+            "lookup_key": primary_columns[0] if len(primary_columns) == 1 else list(primary_columns),
+            "foreign_keys": list(foreign_columns), "lookup_keys": list(primary_columns),
             "lookup_files": source_files, "lookup_rows": len(lookup),
             "matched_entries": matched, "unmatched_entries": len(combined) - matched,
             "lookup_only_entries": unused, "renamed_fields": renames,
+            "declared": (child, other) in declared,
         })
     # Check paths that became available after a table was attached as well.
     # Input order must never decide which conflicting identifier to believe.
     # An ambiguous pair cannot choose an attachment path, but every plausible
     # identifier still constrains the finished rows if another path joined it.
     for (child, parent), links in constraints.items():
-        for foreign_column, primary_column in links:
-            left = _key(combined, field_names[(child, foreign_column)])
-            right = _key(combined, field_names[(parent, primary_column)])
-            if not left.eq_missing(right).all():
-                return None, {"status": "unresolved", "reason_code": "conflicting_identifiers", "reason": "The identifier links disagree about which rows belong together. Choose the intended relationship before combining these files."}
+        for foreign_columns, primary_columns in links:
+            for foreign_column, primary_column in zip(foreign_columns, primary_columns, strict=True):
+                left = _key(combined, field_names[(child, foreign_column)])
+                right = _key(combined, field_names[(parent, primary_column)])
+                known = left.is_not_null() & right.is_not_null()
+                if not left.filter(known).eq_missing(right.filter(known)).all():
+                    return None, {"status": "unresolved", "reason_code": "conflicting_identifiers", "reason": "The identifier links disagree about which rows belong together. Choose the intended relationship before combining these files."}
+    resolution["field_origins"] = field_origins
     return combined, resolution

@@ -7,6 +7,7 @@ import re
 from typing import Any
 
 from app.analytics.labels import derive_label
+from app.analytics.measure_grain import is_repeated_lookup
 from app.analytics.measure_semantics import is_power_reading, is_rate_or_average
 from app.analytics.percentage_scale import raw_percentage_label
 from app.analytics.semantic_detector import is_serial_identifier
@@ -144,9 +145,11 @@ def build_summary_facts(
         role = schema.get(column, {}).get("analysis_role")
         value = _finite(kpi.get("value"))
         stats = statistics.get("numeric_stats", {}).get(column, {})
-        if role not in {"metric", "flag"} or value is None:
+        if role not in {"metric", "flag"} or value is None or is_repeated_lookup(schema.get(column, {})):
             continue
         weighted = kpi.get("weighted_by")
+        if weighted and is_repeated_lookup(schema.get(weighted, {})):
+            continue
         operation = "weighted_mean" if weighted else "mean" if not kpi.get("is_total", True) else "total"
         if operation == "total" and (is_power_reading(column, schema.get(column)) or is_rate_or_average(column, schema.get(column))):
             continue
@@ -222,6 +225,8 @@ def build_summary_facts(
         if latest is None or low is None or high is None or not low <= latest <= high:
             continue
         column = str(forecast.get("metric") or "")
+        if is_repeated_lookup(schema.get(column, {})):
+            continue
         add(f"forecast_{index}", f"For {label(column)}, the next-month model range of {_format(low)} to {_format(high)} includes the latest month's {_format(latest)}; the direction of change is uncertain.",
             f"forecasts.{index}.predictions.next_month", "Compare latest monthly value with next-month model range",
             {"column": column, "latest": latest, "lower": low, "upper": high,

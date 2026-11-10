@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.analytics.measure_grain import analytical_numeric_statistics, analytical_schema
 from app.analytics.measure_semantics import (
     VOLUME_KEYWORDS,
     calendar_component,
@@ -61,6 +62,8 @@ def detect_kpis(
     """
     Return a list of detected KPIs with their values and metadata.
     """
+    numeric_stats = analytical_numeric_statistics(schema, numeric_stats)
+    schema = analytical_schema(schema)
     from app.analytics.survey_context import survey_fields
     if survey_fields(schema):
         return []
@@ -91,7 +94,7 @@ def detect_kpis(
         if kpi_type and col not in matched_cols:
             matched_cols.add(col)
             power_reading = is_power_reading(col, col_info)
-            use_mean = power_reading or is_rate_or_average(col, col_info) or _uses_average(col_lower, kpi_type)
+            use_mean = uses_average_aggregation(col_lower, kpi_type, field=col_info)
             # A percentage averaged over records lets a tiny record outvote a
             # huge one; the statistics layer weights it by the money it
             # applies to when it can work out which column that is.
@@ -215,7 +218,7 @@ def _uses_average(col: str, kpi_type: str) -> bool:
     } or contains_keyword(col, _AVERAGE_NAME_KEYWORDS)
 
 
-def uses_average_aggregation(column: str, kpi_type: str | None = None) -> bool:
+def uses_average_aggregation(column: str, kpi_type: str | None = None, *, field: dict[str, Any] | None = None) -> bool:
     """Whether a column should be averaged rather than summed.
 
     The single source of truth for KPI tiles and for charts. They used separate
@@ -225,6 +228,10 @@ def uses_average_aggregation(column: str, kpi_type: str | None = None) -> bool:
     KPI fallback already does with it.
     """
     resolved = kpi_type or _classify_column(column)
+    if is_rate_or_average(column, field) or is_power_reading(column, field):
+        return True
+    if (field or {}).get("semantic_type") == "count" and not _uses_average(column, resolved or "other"):
+        return False
     if resolved is None:
         return True
     return _uses_average(column, resolved)
@@ -301,27 +308,24 @@ def _fallback_kpis(
         stats = numeric_stats.get(col, {})
         if calendar_component(col, stats):
             continue
-        # No keyword matched, so we don't know the column is additive —
-        # a raw SUM of e.g. blood pressures or 0/1 codes is meaningless.
-        # The average is the only safe headline value for an unknown metric.
-        # Weighted by the money it applies to where the statistics layer could
-        # establish it: an unweighted mean of percentages misreports a
-        # portfolio whose records differ in size by orders of magnitude.
-        weighted = stats.get("weighted_mean")
-        value = weighted if weighted is not None else stats.get("mean")
+        # Original-header semantics can establish a recorded count even when
+        # its cleaned SQL name no longer contains separated business words.
+        use_mean = uses_average_aggregation(col_lower, field=col_info)
+        weighted = stats.get("weighted_mean") if use_mean else None
+        value = (weighted if weighted is not None else stats.get("mean")) if use_mean else stats.get("total")
         if value is None:
             continue
         ranked.append({
             "column": col,
             "kpi_type": "other",
             "value": value,
-            "is_total": False,
+            "is_total": not use_mean,
             "is_currency": _is_currency(col.lower().replace(" ", "_")),
             "mean": stats.get("mean"),
             "count": stats.get("count", 0),
             "weighted_by": stats.get("weight_column") if weighted is not None else None,
             "score": _fallback_score(col_lower, stats),
-            "fallback_reason": "Average of a numeric column with no recognized business meaning",
+            "fallback_reason": "Average of a numeric column with no recognized business meaning" if use_mean else "Total of a recorded count measure",
         })
     ranked.sort(key=lambda item: item.get("score", 0), reverse=True)
     for item in ranked:

@@ -5,6 +5,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from app.analytics.measure_grain import analytical_numeric_statistics, is_repeated_lookup
+
 PROFILE_VERSION = "1.0"
 
 
@@ -22,8 +24,10 @@ def build_data_profile_schema(
 ) -> dict[str, Any]:
     """Build the lightweight Profile JSON used as the AI source of truth."""
     schema = statistics.get("schema", [])
-    numeric_stats = statistics.get("numeric_stats", {})
+    numeric_stats = analytical_numeric_statistics(schema, statistics.get("numeric_stats", {}))
     categorical_stats = statistics.get("categorical_stats", {})
+    excluded_numeric = {column["name"] for column in schema
+                        if column.get("analysis_role") == "identifier" or is_repeated_lookup(column)}
 
     profile = {
         "profile_version": PROFILE_VERSION,
@@ -43,8 +47,9 @@ def build_data_profile_schema(
         ],
         "metrics": {
             "kpis": [_compact_kpi(kpi) for kpi in kpis],
-            "numeric_statistics": _compact_numeric_stats({name: values for name, values in numeric_stats.items() if not any(c["name"] == name and c.get("analysis_role") == "identifier" for c in schema)}),
-            "correlations": statistics.get("correlations", {}),
+            "numeric_statistics": _compact_numeric_stats({name: values for name, values in numeric_stats.items() if name not in excluded_numeric}),
+            "correlations": {pair: value for pair, value in statistics.get("correlations", {}).items()
+                             if not excluded_numeric.intersection(pair.split("|"))},
             "forecasts": forecasts[:5],
             "anomalies": anomalies[:10],
         },
@@ -99,6 +104,7 @@ def _column_profile(
         "analysis_role": column.get("analysis_role"),
         "display_label": column.get("display_label"),
         "display_description": column.get("display_description"),
+        **({"measure_grain": column["measure_grain"]} if column.get("measure_grain") else {}),
     }
 
     if name in numeric_stats:
@@ -118,6 +124,9 @@ def _column_profile(
             "weight_column": stats.get("weight_column"),
             **({"aggregation_warning": stats["aggregation_warning"]} if stats.get("aggregation_warning") else {}),
         }
+        if is_repeated_lookup(column):
+            profile["numeric_summary"] = {key: value for key, value in profile["numeric_summary"].items()
+                                          if key in {"count", "null_count", "min", "max"}}
 
     if name in categorical_stats:
         stats = categorical_stats[name]

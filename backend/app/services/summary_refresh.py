@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.analytics.measure_grain import annotate_measure_grain
 from app.analytics.summary_evidence import build_summary_facts, render_summary
 
 
@@ -16,7 +17,8 @@ def saved_measurements(analysis: Any) -> tuple[dict[str, Any], list[dict[str, An
     evidence = dict(metadata.get("analysis_evidence") or {})
     dataset = profile.get("dataset") or {}
     metrics = profile.get("metrics") or {}
-    schema = metadata.get("schema") or profile["columns"]
+    schema = annotate_measure_grain(metadata.get("schema") or profile["columns"],
+                                   metadata.get("upload_context"), metadata.get("parser"))
     numeric = {column["name"]: dict(column["numeric_summary"])
                for column in profile["columns"] if column.get("numeric_summary")}
     for name, values in (metrics.get("numeric_statistics") or {}).items():

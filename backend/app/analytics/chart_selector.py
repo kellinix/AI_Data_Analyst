@@ -11,6 +11,7 @@ from app.analytics.admission_context import is_admission
 from app.analytics.football_context import is_football
 from app.analytics.kpi_detector import is_outcome_column, uses_average_aggregation
 from app.analytics.labels import derive_label, sentence_label
+from app.analytics.measure_grain import analytical_schema
 from app.analytics.measure_semantics import VOLUME_KEYWORDS, is_observation_date
 from app.analytics.report_relevance import useful_charts
 from app.analytics.survey_context import survey_fields
@@ -41,6 +42,9 @@ def select_charts(
     correlations: dict[str, float],
     max_charts: int = 8,
 ) -> list[dict[str, Any]]:
+    schema = analytical_schema(schema)
+    names = {field["name"] for field in schema}
+    numeric_stats = {name: values for name, values in numeric_stats.items() if name in names}
     charts: list[dict[str, Any]] = []
     survey = survey_fields(schema)
     if survey:
@@ -84,6 +88,8 @@ def select_charts(
     # actually earned. Lead with outcome measures so the first time and group
     # charts answer the business question rather than describe input prices.
     numeric_cols.sort(key=_metric_priority)
+    fields = {column["name"]: column for column in schema}
+    aggregations = {column: _aggregation(column, fields[column]) for column in numeric_cols}
     categorical_cols = sorted(
         [
             c["name"]
@@ -109,16 +115,16 @@ def select_charts(
         dense_cols = [c for c in numeric_cols[:3] if not _is_sparse_numeric_column(c, numeric_stats)]
         if (
             len(dense_cols) >= 2
-            and len({_aggregation(col) for col in dense_cols}) == 1
+            and len({aggregations[col] for col in dense_cols}) == 1
             and len({_metric_priority(col) for col in dense_cols}) == 1
             and _comparable_scales(dense_cols, numeric_stats)
         ):
-            charts.append(_multi_line_chart(date_col, dense_cols))
+            charts.append(_multi_line_chart(date_col, dense_cols, aggregations=[aggregations[col] for col in dense_cols]))
         primary_metric = numeric_cols[0]
         if _is_sparse_numeric_column(primary_metric, numeric_stats):
-            charts.append(_sparse_metric_over_time_chart(date_col, primary_metric))
+            charts.append(_sparse_metric_over_time_chart(date_col, primary_metric, aggregation=aggregations[primary_metric]))
         else:
-            charts.append(_time_series_chart(date_col, primary_metric))
+            charts.append(_time_series_chart(date_col, primary_metric, aggregation=aggregations[primary_metric]))
 
     # A binary outcome column (e.g. "target") is the story of the dataset:
     # show its overall split and how its rate varies across the top dimension.
@@ -144,7 +150,7 @@ def select_charts(
     if categorical_cols and numeric_cols:
         primary_category = categorical_cols[0]
         for numeric_col in numeric_cols[:bar_budget]:
-            charts.append(_horizontal_bar_chart(primary_category, numeric_col))
+            charts.append(_horizontal_bar_chart(primary_category, numeric_col, aggregation=aggregations[numeric_col]))
             if len(charts) >= max_charts:
                 break
 
@@ -154,7 +160,7 @@ def select_charts(
         if len(top_values) >= 2 and numeric_cols and not any(chart.get("xAxis") == numeric_cols[0] and chart.get("yAxis") == cat_col for chart in charts):
             role = next((c.get("analysis_role") for c in schema if c["name"] == cat_col), None)
             charts.append(_horizontal_bar_chart(cat_col, numeric_cols[0], top_values,
-                                                aggregation="average" if role == "flag" else None))
+                                                aggregation="average" if role == "flag" and fields[numeric_cols[0]].get("semantic_type") != "count" else aggregations[numeric_cols[0]]))
         if len(charts) >= max_charts:
             break
 
@@ -164,7 +170,7 @@ def select_charts(
     if status_col and categorical_cols and numeric_cols and len(charts) < max_charts:
         primary_category = next((col for col in categorical_cols if col != status_col), None)
         if primary_category:
-            charts.append(_stacked_bar_chart(primary_category, numeric_cols[0], status_col))
+            charts.append(_stacked_bar_chart(primary_category, numeric_cols[0], status_col, aggregation=aggregations[numeric_cols[0]]))
 
     for cat_col in categorical_cols:
         if cat_col in {"sheet", "source_file"}:
@@ -379,9 +385,9 @@ def _chart_id() -> str:
     return str(uuid.uuid4())[:8]
 
 
-def _aggregation(column: str) -> str:
+def _aggregation(column: str, field: dict[str, Any] | None = None) -> str:
     """Shared with the KPI tiles, so a chart never averages what its tile sums."""
-    return "average" if uses_average_aggregation(column) else "sum"
+    return "average" if uses_average_aggregation(column, field=field) else "sum"
 
 
 def _comparable_scales(columns: list[str], numeric_stats: dict[str, Any]) -> bool:
@@ -390,10 +396,10 @@ def _comparable_scales(columns: list[str], numeric_stats: dict[str, Any]) -> boo
     return len(positive) >= 2 and max(positive) / min(positive) <= 10
 
 
-def _time_series_chart(date_col: str, value_col: str) -> dict[str, Any]:
+def _time_series_chart(date_col: str, value_col: str, aggregation: str | None = None) -> dict[str, Any]:
     value_label = _humanize(value_col)
     date_label = _humanize(date_col)
-    aggregation = _aggregation(value_col)
+    aggregation = aggregation or _aggregation(value_col)
     aggregation_label = "Total" if aggregation == "sum" else "Average"
     return {
         "id": _chart_id(),
@@ -426,7 +432,7 @@ def _time_series_chart(date_col: str, value_col: str) -> dict[str, Any]:
     }
 
 
-def _sparse_metric_over_time_chart(date_col: str, value_col: str) -> dict[str, Any]:
+def _sparse_metric_over_time_chart(date_col: str, value_col: str, aggregation: str | None = None) -> dict[str, Any]:
     """Same data query as _time_series_chart (chronological, non-null values
     only) but rendered as disconnected markers rather than a smoothed line —
     a metric that's null on most rows has no real trend to connect between
@@ -434,14 +440,17 @@ def _sparse_metric_over_time_chart(date_col: str, value_col: str) -> dict[str, A
     """
     value_label = _humanize(value_col)
     date_label = _humanize(date_col)
+    aggregation = aggregation or _aggregation(value_col)
+    aggregation_label = "Total" if aggregation == "sum" else "Average"
     return {
         "id": _chart_id(),
         "type": "line",
-        "title": f"{value_label} over time",
-        "description": f"Shows the individual {sentence_label(value_label)} entries recorded across {sentence_label(date_label)} — most rows have no value for this field",
+        "title": f"{aggregation_label} {value_label} over time",
+        "description": f"Shows the {aggregation} {sentence_label(value_label)} for each {sentence_label(date_label)} — most rows have no value for this field",
         "xAxis": date_col,
         "yAxis": value_col,
         "series": [value_col],
+        "aggregation": aggregation,
         "color_scheme": ["#2563eb"],
         "echarts_option": {
             "tooltip": {"trigger": "item"},
@@ -456,13 +465,14 @@ def _sparse_metric_over_time_chart(date_col: str, value_col: str) -> dict[str, A
                 "name": value_col,
                 "lineStyle": {"opacity": 0},
             }],
-            "_columns": {"x": date_col, "y": value_col},
+            "_columns": {"x": date_col, "y": value_col, "aggregation": aggregation},
         },
     }
 
 
-def _multi_line_chart(date_col: str, value_cols: list[str]) -> dict[str, Any]:
+def _multi_line_chart(date_col: str, value_cols: list[str], aggregations: list[str] | None = None) -> dict[str, Any]:
     date_label = _humanize(date_col)
+    aggregations = aggregations or [_aggregation(column) for column in value_cols]
     return {
         "id": _chart_id(),
         "type": "line",
@@ -471,6 +481,7 @@ def _multi_line_chart(date_col: str, value_cols: list[str]) -> dict[str, Any]:
         "xAxis": date_col,
         "yAxis": "metrics",
         "series": value_cols,
+        "aggregation": aggregations[0] if len(set(aggregations)) == 1 else None,
         "color_scheme": ["#2563eb", "#10b981", "#f59e0b"],
         "echarts_option": {
             "tooltip": {"trigger": "axis"},
@@ -487,7 +498,7 @@ def _multi_line_chart(date_col: str, value_cols: list[str]) -> dict[str, Any]:
                 }
                 for col in value_cols
             ],
-            "_columns": {"x": date_col, "ys": value_cols, "aggregations": [_aggregation(c) for c in value_cols]},
+            "_columns": {"x": date_col, "ys": value_cols, "aggregations": aggregations},
         },
     }
 
@@ -577,11 +588,11 @@ def _status_dimension(
     return None
 
 
-def _stacked_bar_chart(cat_col: str, value_col: str, series_col: str) -> dict[str, Any]:
+def _stacked_bar_chart(cat_col: str, value_col: str, series_col: str, aggregation: str | None = None) -> dict[str, Any]:
     cat_label = _humanize(cat_col)
     value_label = _humanize(value_col)
     series_label = _humanize(series_col)
-    aggregation = _aggregation(value_col)
+    aggregation = aggregation or _aggregation(value_col)
     aggregation_word = "total" if aggregation == "sum" else "average"
     return {
         "id": _chart_id(),
