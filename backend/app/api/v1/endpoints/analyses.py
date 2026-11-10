@@ -1,3 +1,4 @@
+import asyncio
 import math
 import secrets
 import uuid
@@ -144,6 +145,12 @@ def _delete_file_quietly(path: str | None) -> None:
         logger.warning("Failed to delete file during cleanup", path=path, exc=str(exc))
 
 
+def _require_resolved_relationship(context: dict) -> None:
+    if (context.get("relationship_resolution") or {}).get("status") == "unresolved":
+        raise HTTPException(422, "These files could not be matched safely. Analyse them separately or check which IDs should link them. "
+                            + context["relationship_resolution"]["reason"])
+
+
 def _cleaning_enabled(cleaning: dict | None) -> bool:
     if not cleaning:
         return False
@@ -179,22 +186,32 @@ async def _create_cleaned_uploaded_file(
     processor: FileProcessor,
     cleaning: dict | None,
 ) -> tuple[UploadedFile, dict | None]:
+    extension = Path(source_file.storage_path).suffix.lower()
     if not _cleaning_enabled(cleaning):
+        if extension in {".xls", ".xlsx"}:
+            try:
+                await asyncio.to_thread(processor._read_file, source_file.storage_path, extension)
+            except ValueError as exc:
+                raise HTTPException(422, str(exc)) from exc
         return source_file, None
 
     upload_dir = Path(settings.upload_dir) / str(current_user.id)
     cleaned_stem = str(uuid.uuid4())
     parquet_path = upload_dir / f"{cleaned_stem}.cleaned.parquet"
     csv_path = upload_dir / f"{cleaned_stem}.cleaned.csv"
-    extension = Path(source_file.storage_path).suffix.lower()
     cleaning_options = _cleaning_options(cleaning)
-    profile = await processor.clean_file(
-        source_file.storage_path,
-        extension,
-        str(parquet_path),
-        str(csv_path),
-        cleaning_options,
-    )
+    try:
+        profile = await processor.clean_file(
+            source_file.storage_path,
+            extension,
+            str(parquet_path),
+            str(csv_path),
+            cleaning_options,
+        )
+    except ValueError as exc:
+        parquet_path.unlink(missing_ok=True)
+        csv_path.unlink(missing_ok=True)
+        raise HTTPException(422, str(exc)) from exc
     if cleaning_options.get("semantic_categorical_merging"):
         profile = await SemanticWrangler().canonicalize_cleaned_file(
             parquet_path=str(parquet_path),
@@ -246,6 +263,9 @@ async def _regenerate_cleaned_file_for_rerun(
     combined = bool(upload_context.get("combined"))
     clean = isinstance(cleaning, dict) and cleaning.get("enabled") and cleaning.get("mode") == "clean"
     if not combined and not clean:
+        if Path(old_file.storage_path).suffix.lower() in {".xls", ".xlsx"}:
+            await _create_cleaned_uploaded_file(source_file=old_file, current_user=current_user,
+                db=db, processor=FileProcessor(), cleaning=None)
         return old_file
     processor = FileProcessor()
     source_ids = []
@@ -268,6 +288,7 @@ async def _regenerate_cleaned_file_for_rerun(
         upload_context = {**upload_context}
         try:
             profile = await processor.combine_uploaded_files([sources[key] for key in source_ids], str(generated_path), upload_context)
+            _require_resolved_relationship(upload_context)
             size = generated_path.stat().st_size
             ensure_storage_quota(current_user, size)
         except Exception:
@@ -509,6 +530,11 @@ async def create_combined_analysis(
         str(combined_path),
         relationship_context,
     )
+    try:
+        _require_resolved_relationship(relationship_context)
+    except HTTPException:
+        _delete_file_quietly(str(combined_path))
+        raise
     file_size = combined_path.stat().st_size if combined_path.exists() else 0
     source_names = [uploaded_file.original_filename for uploaded_file in ordered_files]
     analysis_name = body.name or "Combined analysis"

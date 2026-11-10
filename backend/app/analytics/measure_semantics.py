@@ -29,6 +29,32 @@ def tokens(name: str) -> set[str]:
     return set(re.findall(r"[a-z0-9]+", name.lower()))
 
 
+def is_power_reading(name: str, field: dict[str, Any] | None = None) -> bool:
+    """Power samples cannot be added into energy without known time intervals."""
+    words = tokens(re.sub(r"([a-z])([A-Z])", r"\1_\2", name))
+    metadata = field or {}
+    unit = str(metadata.get("unit") or metadata.get("display_unit") or "").strip().lower()
+    power_units = {"w", "kw", "mw", "watt", "watts", "kilowatt", "kilowatts", "megawatt", "megawatts"}
+    if unit in power_units:
+        return True
+    # A kilowatt-hour is energy. The word kilowatt alone is power.
+    if not words & {"hour", "hours", "hr", "hrs", "h"} and words & (power_units - {"w"}):
+        return True
+    # W alone can also mean wins, width or a code. Require power vocabulary.
+    return "w" in words and bool(words & {
+        "power", "load", "demand", "electric", "electricity", "consumption", "output", "input",
+    })
+
+
+def is_rate_or_average(name: str, field: dict[str, Any] | None = None) -> bool:
+    """Rate/average fields need a per-entry average instead of a raw sum."""
+    return bool(
+        (field or {}).get("semantic_type") in {"percentage", "average_metric"}
+        or name.lower() in {"cgpa", "gpa"}
+        or re.search(r"(?:^|_)(?:pct|percent|percentage|rate)(?:_|$)|%", name, re.I)
+    )
+
+
 def calendar_component(name: str, stats: dict[str, Any]) -> str | None:
     """Require both calendar vocabulary and plausible component bounds."""
     words = tokens(name)

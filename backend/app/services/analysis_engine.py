@@ -48,6 +48,7 @@ from app.analytics.football_context import (
 from app.analytics.forecasting import generate_forecasts
 from app.analytics.kpi_detector import detect_kpis
 from app.analytics.live_filter import populate_chart_option
+from app.analytics.percentage_scale import clarify_percentage_display
 from app.analytics.recommendations import generate_recommendations
 from app.analytics.statistics import StatisticsEngine
 from app.analytics.summary_evidence import build_summary_facts, render_summary
@@ -253,6 +254,8 @@ class AnalysisEngine:
                     "column": kpi["column"],
                     "is_total": is_total,
                     "weighted_by": kpi.get("weighted_by"),
+                    "percentage_scale": kpi.get("percentage_scale"),
+                    "display_warning": kpi.get("display_warning"),
                 },
             )
             db.add(insight)
@@ -495,6 +498,7 @@ async def compute_analysis(
         )
         if is_football(statistics["schema"]):
             clarify_football_display(semantic_display)
+        clarify_percentage_display(statistics, semantic_display, charts)
         statistics = apply_display_metadata_to_statistics(statistics, semantic_display)
         charts = apply_display_metadata_to_charts(charts, semantic_display)
         if statistics.get("clinic_wait_attended_only"):

@@ -322,15 +322,21 @@ export interface ChatMessage {
   comparison?: ComparisonResult | null
 }
 
+export interface ComparisonFilter {
+  column: string
+  op: FilterOp | "gt" | "gte" | "lt" | "lte"
+  values: (string | number)[]
+}
+
 export interface ComparisonPlan {
   aggregation: "sum" | "average" | "count" | "distinct_count" | "weighted_average" | "retention"
   column?: string | null
   group_by?: string | null
   weight_column?: string | null
   date_bucket?: "day" | "month" | "year" | null
-  filters?: ActiveFilter[]
-  cohort_filters?: ActiveFilter[]
-  return_filters?: ActiveFilter[]
+  filters?: ComparisonFilter[]
+  cohort_filters?: ComparisonFilter[]
+  return_filters?: ComparisonFilter[]
   order?: "desc" | "asc"
   limit?: number
 }

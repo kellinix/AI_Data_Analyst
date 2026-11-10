@@ -7,6 +7,8 @@ import re
 from typing import Any
 
 from app.analytics.labels import derive_label
+from app.analytics.measure_semantics import is_power_reading, is_rate_or_average
+from app.analytics.percentage_scale import raw_percentage_label
 from app.analytics.semantic_detector import is_serial_identifier
 
 
@@ -46,6 +48,8 @@ def build_summary_facts(
     scope = "analysed sample" if sampled else "analysed file"
 
     def label(column: str) -> str:
+        if schema.get(column, {}).get("percentage_scale") == "unconfirmed":
+            return raw_percentage_label(column)
         normalized_column = re.sub(r"[^a-z0-9]+", "_", column.lower()).strip("_")
         if normalized_column.startswith("ipa_delivery_confidence_assessment"):
             return "Delivery confidence assessment"
@@ -144,6 +148,8 @@ def build_summary_facts(
             continue
         weighted = kpi.get("weighted_by")
         operation = "weighted_mean" if weighted else "mean" if not kpi.get("is_total", True) else "total"
+        if operation == "total" and (is_power_reading(column, schema.get(column)) or is_rate_or_average(column, schema.get(column))):
+            continue
         measured = _finite(stats.get(operation))
         if measured is None:
             continue
@@ -152,7 +158,7 @@ def build_summary_facts(
         if not math.isclose(value, measured, rel_tol=1e-9, abs_tol=.051 if kpi.get("is_percent") else 1e-9):
             continue
         formatted = _format(value)
-        if kpi.get("is_percent") or any(token in column.lower() for token in ("%", "pct", "percent")):
+        if kpi.get("percentage_scale") != "unconfirmed" and (kpi.get("is_percent") or any(token in column.lower() for token in ("%", "pct", "percent"))):
             formatted += "%"
         elif kpi.get("is_currency") and kpi.get("currency_symbol"):
             formatted = str(kpi["currency_symbol"]) + formatted
@@ -166,10 +172,13 @@ def build_summary_facts(
             count = int(stats.get("count") or 0)
             text = f"{label(column)} {verb} {formatted} across {count:,} supplied values."
             calculation = f"{'SUM' if operation == 'total' else 'AVG'}({column})" + (" * 100" if kpi.get("is_percent") and kpi.get("display_multiplier", 100) == 100 else "")
+        if kpi.get("display_warning"):
+            text += " " + kpi["display_warning"]
         add(f"metric_{index}", text, f"numeric_stats.{column}.{operation}", calculation,
             {"column": column, "value": value, "operation": operation, "weighted_by": weighted,
              "display_value": formatted, "display_label": label(column),
              "is_percent": bool(kpi.get("is_percent")),
+             "display_warning": kpi.get("display_warning"),
              "weight_display_label": label(str(weighted)) if weighted else None}, 2 if index < 2 else 4)
 
     # A distinct-ID count only helps the headline when some records repeat an

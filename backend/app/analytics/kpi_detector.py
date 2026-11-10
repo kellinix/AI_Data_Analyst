@@ -7,7 +7,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from app.analytics.measure_semantics import VOLUME_KEYWORDS, calendar_component, is_additive_flow
+from app.analytics.measure_semantics import (
+    VOLUME_KEYWORDS,
+    calendar_component,
+    is_additive_flow,
+    is_power_reading,
+    is_rate_or_average,
+)
+from app.analytics.percentage_scale import SCALE_WARNING, ambiguous_percentage
 from app.analytics.text_matching import contains_keyword
 
 # Keyword maps for KPI detection
@@ -58,6 +65,7 @@ def detect_kpis(
     if survey_fields(schema):
         return []
     kpis = _outcome_rate_kpis(schema, numeric_stats)
+    semantic_types = {column["name"]: column.get("semantic_type") for column in schema}
     matched_cols: set[str] = {kpi["column"] for kpi in kpis}
 
     for col_info in schema:
@@ -82,11 +90,14 @@ def detect_kpis(
         kpi_type = _classify_column(col_lower)
         if kpi_type and col not in matched_cols:
             matched_cols.add(col)
-            use_mean = _uses_average(col_lower, kpi_type)
+            power_reading = is_power_reading(col, col_info)
+            use_mean = power_reading or is_rate_or_average(col, col_info) or _uses_average(col_lower, kpi_type)
             # A percentage averaged over records lets a tiny record outvote a
             # huge one; the statistics layer weights it by the money it
             # applies to when it can work out which column that is.
             weighted = stats.get("weighted_mean") if use_mean else None
+            if use_mean and weighted is None and mean is None:
+                continue
             if weighted is not None:
                 value = weighted
             elif use_mean and mean is not None:
@@ -98,7 +109,7 @@ def detect_kpis(
                 "kpi_type": kpi_type,
                 "value": value,
                 "is_total": not use_mean and total is not None,
-                "is_currency": _is_currency(col_lower),
+                "is_currency": _is_currency(col_lower) and not power_reading,
                 "is_percent": "%" in col or contains_keyword(col_lower, ["pct", "percent", "percentage"]),
                 "display_multiplier": 1,
                 "mean": mean,
@@ -127,10 +138,16 @@ def detect_kpis(
         else priority.get(k["kpi_type"], 9)
     ))
     for kpi in kpis:
+        if kpi.get("is_percent") or semantic_types.get(kpi["column"]) == "percentage":
+            kpi["is_currency"] = False
         if kpi["column"] == "chance_of_admit":
             kpi["value"] = round(kpi["value"], 12) * 100
             kpi["is_percent"] = True
             kpi["display_multiplier"] = 100
+        stats = numeric_stats.get(kpi["column"], {})
+        if ambiguous_percentage(kpi["column"], stats):
+            kpi.update({"is_percent": False, "is_currency": False, "display_multiplier": 1,
+                        "percentage_scale": "unconfirmed", "display_warning": SCALE_WARNING})
     return kpis[:10]
 
 
@@ -193,7 +210,7 @@ def _is_currency(col: str) -> bool:
 
 
 def _uses_average(col: str, kpi_type: str) -> bool:
-    return kpi_type in {
+    return is_power_reading(col) or kpi_type in {
         "margin", "conversion", "growth", "retention", "churn", "return", "average", "duration"
     } or contains_keyword(col, _AVERAGE_NAME_KEYWORDS)
 

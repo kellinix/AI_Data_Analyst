@@ -211,6 +211,9 @@ def present_insight(insight: dict[str, Any], metadata: dict[str, Any] | None = N
                 "We counted entries marked 1 in this field. We divided by the number of entries with a value. "
                 "Then we multiplied by 100 to get the percentage."
             )
+        if data.get("display_warning"):
+            result["description"] += " " + data["display_warning"]
+            data["calculation_explanation"] += " " + data["display_warning"]
     if kind == "recommendation":
         source = data.get("confidence_source")
         if str(source or "").startswith("rule:"):

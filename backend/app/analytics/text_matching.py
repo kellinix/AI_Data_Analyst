@@ -30,7 +30,7 @@ _WITHHELD_VALUE_RE = re.compile(
 # Deliberately separate from the withheld vocabulary above: a blank-ish label is
 # fine to fold into one slice of a chart, but it is not evidence that a numeric
 # column was redacted, and widening the withheld rule would change cleaning.
-_BLANK_CATEGORY_RE = re.compile(r"^(unknown|unspecified|undisclosed|none|null|n/?a|-|\.)$", re.IGNORECASE)
+_BLANK_CATEGORY_RE = re.compile(r"^(unknown|unspecified|undisclosed|null|n/a|-|\.)$", re.IGNORECASE)
 
 
 def is_withheld_value(text: str) -> bool:

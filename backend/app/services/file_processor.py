@@ -22,16 +22,17 @@ _MISSING_TEXT_VALUES = {
     "-",
     "--",
     "n/a",
-    "na",
     "nan",
-    "none",
     "null",
-    "nil",
     "unknown",
     "missing",
     "#n/a",
     "#na",
 }
+
+# Bare NA, none and nil can be valid country/product codes or answers such as
+# no treatment. Only unambiguous markers are converted before field typing.
+# In numeric/date fields, other failed conversions retain their own audit.
 
 # A numeric column null in more than this fraction of rows is treated as an
 # optional/sparse field, not a required metric, when deciding whether a row
@@ -113,7 +114,7 @@ class FileProcessor:
                 file_path,
                 sheet_id=0,
                 has_header=False,
-                read_options={"n_rows": self.SAMPLE_ROWS + 1},
+                read_options={"n_rows": self.SAMPLE_ROWS + self.HEADER_SCAN_ROWS + 1},
                 # A late text/error cell must remain visible to the cleaning
                 # audit, rather than being lost to a numeric sample inference.
                 infer_schema_length=None,
@@ -147,10 +148,6 @@ class FileProcessor:
         if not rows:
             return pl.DataFrame(), False
 
-        truncated = len(rows) > self.SAMPLE_ROWS
-        if truncated:
-            rows = rows[: self.SAMPLE_ROWS]
-
         width = max(len(row) for row in rows)
         padded_rows = [
             [self._clean_raw_text_cell(value) for value in row] + [None] * (width - len(row))
@@ -159,7 +156,7 @@ class FileProcessor:
         df = pl.DataFrame(
             {f"column_{index + 1}": [row[index] for row in padded_rows] for index in range(width)}
         )
-        return self._normalize_report_table(df), truncated
+        return self._cap_dataframe(self._normalize_report_table(df))
 
     def _parser_metadata(self, file_path: str, extension: str) -> dict[str, Any]:
         ext = extension.lower()
@@ -233,14 +230,16 @@ class FileProcessor:
         encoding: str,
         delimiter: str,
     ) -> list[list[str | None]]:
-        # Read one row beyond the cap so callers can detect truncation
-        # without a separate full-file scan.
-        read_limit = self.SAMPLE_ROWS + 1
+        # The cap counts data entries after header/title promotion. Keep enough
+        # rows for the header scan and one data entry beyond the cap.
+        read_limit = self.SAMPLE_ROWS + max(1, self.HEADER_SCAN_ROWS) + 1
         rows: list[list[str | None]] = []
         try:
             with open(file_path, encoding=encoding, errors="replace", newline="") as handle:
                 reader = csv.reader(handle, delimiter=delimiter)
                 for row in reader:
+                    if not any(value.strip() for value in row):
+                        continue
                     rows.append(row)
                     if len(rows) >= read_limit:
                         break
@@ -248,6 +247,8 @@ class FileProcessor:
             with open(file_path, encoding="utf-8", errors="replace", newline="") as handle:
                 reader = csv.reader(handle, delimiter=delimiter)
                 for row in reader:
+                    if not any(value.strip() for value in row):
+                        continue
                     rows.append(row)
                     if len(rows) >= read_limit:
                         break
@@ -903,6 +904,19 @@ class FileProcessor:
             frames.append(normalized)
             names.append(sheet_name)
 
+        report["included_sheets"] = names
+        attempted_names = names.copy()
+        resolution = {"status": "unresolved", "reason": "The worksheet relationships could not be verified."}
+        if len(frames) > 1 and all(frame.height <= self.SAMPLE_ROWS for frame in frames):
+            from app.services.relational_files import enrich_related_files
+
+            enriched, resolution = enrich_related_files(frames)
+            report["relationship_resolution"] = {**resolution, "sheet_names": names}
+            if resolution.get("reason_code") == "conflicting_identifiers":
+                raise ValueError("These worksheets could not be matched safely. Their IDs disagree about which records belong together. Check the IDs or upload the worksheets separately.")
+            if enriched is not None:
+                return enriched
+
         if frames:
             primary = max(frames, key=lambda frame: frame.height)
             selected = []
@@ -923,18 +937,29 @@ class FileProcessor:
         if not frames:
             return pl.DataFrame()
         if len(frames) == 1:
+            if report["excluded_sheets"]:
+                report["relationship_resolution"] = {
+                    "status": "primary_only", "sheet_names": names,
+                    "reason": "Only the main worksheet was included. Supporting worksheets with unrelated fields were kept separate.",
+                }
             return frames[0]
         # Workbooks can contain the same fact/lookup layout as separate uploads.
         # Validate complete lookup keys before the legacy one-to-one sheet merge.
-        if all(frame.height <= self.SAMPLE_ROWS for frame in frames):
+        if names != attempted_names and all(frame.height <= self.SAMPLE_ROWS for frame in frames):
             from app.services.relational_files import enrich_related_files
 
             enriched, resolution = enrich_related_files(frames)
+            report["relationship_resolution"] = {**resolution, "sheet_names": names}
+            if resolution.get("reason_code") == "conflicting_identifiers":
+                raise ValueError("These worksheets could not be matched safely. Their IDs disagree about which records belong together. Check the IDs or upload the worksheets separately.")
             if enriched is not None:
-                report["relationship_resolution"] = {**resolution, "sheet_names": names}
                 return enriched
         joined = self._join_sheets_by_common_dimensions(frames)
         if joined is not None:
+            report["relationship_resolution"] = {
+                "status": "aligned", "sheet_names": names,
+                "reason": "Worksheet measures were aligned using their shared unique dimensions.",
+            }
             return joined
         primary_index = max(range(len(frames)), key=lambda index: frames[index].height)
         primary = frames[primary_index]
@@ -952,7 +977,14 @@ class FileProcessor:
                 "reason": "Supporting sheet has different fields and cannot be joined without changing the main record count.",
             } for name, frame in supporting)
             report["included_sheets"] = [names[primary_index]]
+            report["relationship_resolution"] = {
+                "status": "primary_only", "sheet_names": [names[primary_index]],
+                "reason": "Only the main worksheet was included. Supporting worksheets could not be matched safely and were kept separate.",
+            }
             return primary
+        if len({tuple(sorted(frame.columns)) for frame in frames}) > 1:
+            report["relationship_resolution"] = {**resolution, "sheet_names": names}
+            raise ValueError("These worksheets contain different types of records that could not be matched safely. Check which IDs link them or upload the worksheets separately.")
         frames = [
             frame.with_columns(pl.lit(sheet_name).alias("Sheet"))
             for sheet_name, frame in zip(names, frames, strict=True)
@@ -971,6 +1003,12 @@ class FileProcessor:
         ]
         if not join_columns:
             return None
+        from app.services.relational_files import _identifier_columns, _key
+
+        identifiers = set(_identifier_columns(frames[0]).values())
+        frames = [frame.with_columns([_key(frame, column).alias(column)
+                                     for column in join_columns if column in identifiers])
+                  for frame in frames]
         if any(frame.select(join_columns).n_unique() != frame.height for frame in frames):
             # Aggregating repeated fact keys would turn individual sales or
             # shipment records into group totals and silently lose rows.
@@ -1265,6 +1303,9 @@ class FileProcessor:
         if enriched is not None:
             relationship_context["combine_strategy"] = "relational"
             return enriched
+        if resolution.get("reason_code") == "conflicting_identifiers":
+            relationship_context["combine_strategy"] = "portfolio"
+            return pl.concat(frames, how="diagonal_relaxed")
         combine_strategy = relationship_context.get("combine_strategy", "portfolio")
         if combine_strategy != "join":
             relationship_context["combine_strategy"] = "portfolio"
@@ -1297,6 +1338,10 @@ class FileProcessor:
                         coalesce=True,
                         suffix="_related",
                     )
+                relationship_context["relationship_resolution"] = {
+                    "status": "joined", "grain": "One entry per selected join key",
+                    "columns": join_columns, "row_count": len(combined),
+                }
                 return combined
 
         return pl.concat(frames, how="diagonal_relaxed")
@@ -1561,7 +1606,15 @@ def _standardize_column_names(columns: list[str]) -> list[str]:
 
 
 def _standardize_column_name(column: str) -> str:
-    name = str(column).strip().lower()
+    name = str(column).strip()
+    # A trailing number sign labels a code, such as an invoice number. Keep
+    # that meaning before punctuation is removed from the header.
+    if name.endswith("#"):
+        prefix = name[:-1].strip()
+        name = f"{prefix}_id" if prefix else "row_number"
+    # Preserve the word boundary that says a camelCase header is an identifier.
+    # Otherwise DonorID becomes donorid and may be parsed as a numeric measure.
+    name = re.sub(r"(?<=[a-z0-9])(?=(?:ID|Id|Key|KEY|Code|CODE|UUID|Guid|GUID)$)", "_", name).lower()
     name = name.replace("&", " and ")
     name = re.sub(r"[%]+", " pct ", name)
     name = re.sub(r"[$£€¥]+", " currency ", name)
@@ -1572,6 +1625,7 @@ def _standardize_column_name(column: str) -> str:
 
 def _looks_like_identifier_column(column: str) -> bool:
     normalized = _standardize_column_name(column)
+    normalized = re.sub(r"_(?:related_)?\d+$", "", normalized)
     return (
         normalized == "id"
         or normalized.endswith("_id")
@@ -1579,7 +1633,8 @@ def _looks_like_identifier_column(column: str) -> bool:
         or normalized.endswith("_uuid")
         or normalized.endswith("_guid")
         or normalized.endswith("_code")
-        or normalized in {"code", "postcode", "zipcode", "zip", "postal_code"}
+        or normalized.endswith("_key")
+        or normalized in {"code", "postcode", "zipcode", "zip", "postal_code", "row_number"}
     )
 
 

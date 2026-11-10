@@ -30,7 +30,18 @@ export const analysesApi = {
     return post(`/analyses/${id}/entries`, request)
   },
   compare(id: string, plan: ComparisonPlan): Promise<ComparisonResult> {
-    return post(`/analyses/${id}/compare`, plan)
+    const body = { ...plan }
+    for (const key of ["filters", "cohort_filters", "return_filters"] as const) {
+      const filters = plan[key]
+      if (filters) {
+        body[key] = filters.map(({ column, op, values }) => ({
+          column,
+          op,
+          values: [...values],
+        }))
+      }
+    }
+    return post(`/analyses/${id}/compare`, body)
   },
   list(params?: {
     page?: number

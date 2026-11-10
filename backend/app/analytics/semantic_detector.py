@@ -18,6 +18,7 @@ from app.analytics.measure_semantics import (
     calendar_component,
     is_additive_flow,
 )
+from app.analytics.percentage_scale import SCALE_WARNING, ambiguous_percentage, named_percentage
 from app.analytics.text_matching import contains_keyword
 
 EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -90,8 +91,13 @@ def enrich_schema_with_semantics(
 ) -> list[dict[str, Any]]:
     """Return schema rows with semantic_type, confidence, and role metadata."""
     enriched: list[dict[str, Any]] = []
+    from app.analytics.survey_context import survey_fields
+    survey = survey_fields(schema)
     for column in schema:
         profile = detect_column_semantics(column, numeric_stats, categorical_stats)
+        if (column.get("is_numeric") and ambiguous_percentage(column["name"], numeric_stats.get(column["name"], {}))
+                and not (survey and column["name"] == survey["percentage"])):
+            profile.update({"percentage_scale": "unconfirmed", "display_warning": SCALE_WARNING})
         enriched.append({**column, **profile})
     return enriched
 
@@ -112,6 +118,8 @@ def detect_column_semantics(
 
     if normalized in {"source_file", "sheet"}:
         return _profile("source", 0.96, "Column identifies the source table or workbook sheet", "dimension")
+    if not column.get("is_numeric") and (normalized in {"season", "seasons", "academic_year", "school_year"}):
+        return _profile("season", 0.95, "Named season or academic-period labels", "dimension")
 
     if re.fullmatch(r"column_\d+", normalized):
         return _profile("unknown", 0.95, "Unnamed source column needs a supplied label", "unknown")
@@ -145,9 +153,13 @@ def detect_column_semantics(
 
     if _looks_like_identifier(normalized):
         return _profile("identifier", 0.9, "Column name looks like a record identifier", "identifier")
+    if column.get("is_numeric") and (normalized.startswith("number_of_") or normalized.endswith("_count")):
+        return _profile("count", 0.9, "Explicit count of items or people, rather than their identifier", "metric")
 
     if normalized in SPORT_COUNT_COLUMNS:
-        return _profile("count", 0.9, "Named count of football events or appearances", "metric")
+        return _profile("numeric_metric", 0.7, "A short numeric field name does not establish its unit or whether values can be added", "metric")
+    if column.get("is_numeric") and named_percentage(normalized):
+        return _profile("percentage", 0.94, "Column explicitly names a percentage, rather than an amount of money", "metric")
 
     if column.get("is_numeric") and contains_keyword(normalized, VOLUME_KEYWORDS) and is_additive_flow(normalized):
         return _profile("count", 0.88, "Named count of activity", "metric")
@@ -180,7 +192,7 @@ def detect_column_semantics(
                 return _profile("boolean", 0.8, "Integer column with only two repeated values", "flag")
             return _profile("categorical_code", 0.78, "Small set of repeated integer codes, not a measurable quantity", "dimension")
         if minimum is not None and maximum is not None and 0 <= minimum <= maximum <= 1:
-            return _profile("percentage", 0.72, "Numeric values fall between 0 and 1", "metric")
+            return _profile("numeric_metric", 0.7, "Numeric values between 0 and 1 do not establish a percentage scale", "metric")
         if _looks_like_row_sequence(normalized, stats):
             return _profile("row_sequence", 0.85, "Unique consecutive integers starting at zero or one; likely row numbering, not a measure", "identifier")
         return _profile("numeric_metric", 0.7, "Numeric dtype", "metric")
@@ -192,7 +204,7 @@ def detect_column_semantics(
     if top_values and sum(EMAIL_RE.match(value) is not None for value in top_values) >= max(1, len(top_values) // 2):
         return _profile("email", 0.9, "Observed values look like email addresses", "identifier")
 
-    if top_values and sum(PHONE_RE.match(value) is not None for value in top_values) >= max(1, len(top_values) // 2):
+    if top_values and sum(PHONE_RE.match(value) is not None and len(re.sub(r"\D", "", value)) >= 7 for value in top_values) >= max(1, len(top_values) // 2):
         return _profile("phone", 0.86, "Observed values look like phone numbers", "identifier")
 
     if 1 <= unique_count <= 2:
@@ -205,7 +217,8 @@ def detect_column_semantics(
 
 
 def _normalize(value: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "_", value.lower()).strip("_")
+    separated = re.sub(r"([a-z])([A-Z])", r"\1_\2", value)
+    return re.sub(r"[^a-z0-9]+", "_", separated.lower()).strip("_")
 
 
 def _looks_like_identifier(normalized: str) -> bool:
@@ -214,6 +227,11 @@ def _looks_like_identifier(normalized: str) -> bool:
     if normalized in {"id", "uuid", "guid", "shipmentid", "spid", "pid", "gid", "gmppidnumber"}:
         return True
     if normalized.startswith("rk_stats_"):
+        return True
+    compact = normalized.replace("_", "")
+    if compact in {"flight", "registration", "sku", "trackingnumber"}:
+        return True
+    if re.fullmatch(r"(?:employee|staff|customer|client|patient|donor|student|member|user|account|order|invoice|shipment|product|supplier|vendor|booking|flight|policy|claim|transaction|ticket|asset|application)(?:id|number|num|no|code|key)", compact):
         return True
     return (
         normalized.endswith("_id")

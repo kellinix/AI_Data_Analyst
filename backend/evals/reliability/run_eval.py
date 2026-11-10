@@ -11,6 +11,7 @@ import json
 import os
 import tempfile
 from pathlib import Path
+from typing import Any
 
 CASES = {
     "missing_revenue": (["Order ID", "Revenue"], [["001", "100"], ["002", ""], ["003", "30"]]),
@@ -26,6 +27,28 @@ CASES = {
         ["Italy", "Group A", "b1_b", "Is it common?", "Yes", "40", ""],
     ]),
 }
+
+
+def _source_fidelity_failures(headers: list[str], rows: list[list[str]], frame: Any, cleaning_report: dict) -> list[str]:
+    """Follow the cleaner's saved header mapping when reconciling raw columns."""
+    failures = []
+    renamed = cleaning_report.get("renamed_columns") or {}
+    for index, header in enumerate(headers):
+        column = renamed.get(header, header)
+        # Formatting cleanup may remove a wholly blank optional column.
+        if all(not row[index] for row in rows):
+            continue
+        if column not in frame.columns:
+            failures.append(f"Source column {header} was lost")
+            continue
+        expected = [row[index] for row in rows]
+        if header.endswith((" ID", " Code")) and frame[column].to_list() != expected:
+            failures.append(f"Identifier values changed: {header}")
+        if header in {"Revenue", "Rating", "percentage"}:
+            expected_values = [float(value) if value not in {"", ":"} else None for value in expected]
+            if frame[column].to_list() != expected_values:
+                failures.append(f"Recorded numbers or gaps changed: {header}")
+    return failures
 
 
 async def run_case(name: str, workdir: Path, *, reverse: bool = False) -> dict:
@@ -57,20 +80,7 @@ async def run_case(name: str, workdir: Path, *, reverse: bool = False) -> dict:
 
     check(frame.height == len(rows), "Source records were lost or duplicated")
     check(not options["semantic_categorical_merging"], "Default cleaning permits unapproved category merging")
-    for index, header in enumerate(headers):
-        column = header.lower().replace(" ", "_")
-        # Formatting cleanup may remove a wholly blank optional column.
-        if all(not row[index] for row in rows):
-            continue
-        if column not in frame.columns:
-            check(False, f"Source column {header} was lost")
-            continue
-        expected = [row[index] for row in rows]
-        if header.endswith((" ID", " Code")):
-            check(frame[column].to_list() == expected, f"Identifier values changed: {header}")
-        if header in {"Revenue", "Rating", "percentage"}:
-            expected_values = [float(value) if value not in {"", ":"} else None for value in expected]
-            check(frame[column].to_list() == expected_values, f"Recorded numbers or gaps changed: {header}")
+    failures.extend(_source_fidelity_failures(headers, rows, frame, profile["cleaning_report"]))
     computed = await compute_analysis(
         file_processor=processor, ai_service=_OfflineAIService(), storage_path=str(target),
         file_name=source.name, analysis_id=name,

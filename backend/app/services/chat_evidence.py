@@ -6,6 +6,8 @@ import re
 from typing import Any
 
 from app.analytics.labels import reader_label
+from app.analytics.measure_semantics import is_power_reading, is_rate_or_average
+from app.analytics.percentage_scale import raw_percentage_label
 from app.analytics.summary_evidence import _finite, _format, build_summary_facts
 from app.services.summary_refresh import saved_measurements
 
@@ -60,6 +62,8 @@ def _friendly_fact(fact: dict[str, Any]) -> str:
             if values.get("weighted_by"):
                 weight_label = values.get("weight_display_label") or values["weighted_by"]
                 text += f" Entries with higher {_label(weight_label)} count more toward this average."
+            if values.get("display_warning"):
+                text += " " + values["display_warning"]
             return text
     if column and "category" in values:
         count, total = int(values["count"]), int(values["denominator"])
@@ -166,7 +170,8 @@ def build_chat_facts(analysis: Any) -> list[dict[str, Any]]:
                       "scope": scope, "required": False})
 
     for column, values in list(stats["numeric_stats"].items())[:30]:
-        if schema.get(column, {}).get("analysis_role") not in {"metric", "flag"}:
+        field = schema.get(column, {})
+        if field.get("analysis_role") not in {"metric", "flag"}:
             continue
         count = _finite(values.get("count"))
         if count is None or count <= 0:
@@ -174,6 +179,8 @@ def build_chat_facts(analysis: Any) -> list[dict[str, Any]]:
         for operation, phrase in (("total", "sums to"), ("mean", "has an arithmetic average of"),
                                   ("min", "has a smallest supplied value of"),
                                   ("max", "has a largest supplied value of")):
+            if operation == "total" and (is_power_reading(column, field) or is_rate_or_average(column, field)):
+                continue
             value = _finite(values.get(operation))
             if value is None:
                 continue
@@ -181,7 +188,9 @@ def build_chat_facts(analysis: Any) -> list[dict[str, Any]]:
                 f"in the {scope}, in the field's stored units.",
                 f"numeric_stats.{column}.{operation}",
                 f"{operation.upper()}({column}), excluding missing values",
-                {"column": column, "operation": operation, "value": value, "count": int(count)})
+                {"column": column, "operation": operation, "value": value, "count": int(count),
+                 "display_label": raw_percentage_label(column) if field.get("percentage_scale") == "unconfirmed" else None,
+                 "display_warning": field.get("display_warning")})
     rows = stats["row_count"] or 0
     for column, category in list(stats["categorical_stats"].items())[:30]:
         if schema.get(column, {}).get("analysis_role") not in {"dimension", "flag"} or rows <= 0:
