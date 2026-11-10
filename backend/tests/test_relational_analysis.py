@@ -266,6 +266,31 @@ async def test_truncated_lookup_cannot_claim_full_key_uniqueness(tmp_path):
     assert context["combine_strategy"] == "portfolio"
 
 
+async def test_related_excel_sheets_use_the_same_transaction_preserving_join(tmp_path):
+    from openpyxl import Workbook
+
+    workbook = Workbook()
+    donors = workbook.active
+    donors.title = "Customers"
+    donors.append(["customer_id", "segment"])
+    donors.append(["C001", "High Value"])
+    donors.append(["C002", "Mid-Level"])
+    gifts = workbook.create_sheet("Orders")
+    gifts.append(["order_id", "customer_id", "amount"])
+    gifts.append(["G001", "C001", 10])
+    gifts.append(["G002", "C001", 20])
+    gifts.append(["G003", "C002", 30])
+    path = tmp_path / "related.xlsx"
+    workbook.save(path)
+    processor = FileProcessor()
+    frame = processor._read_file(str(path), ".xlsx")
+    assert frame.height == 3
+    assert frame["amount"].sum() == 60
+    assert frame["segment"].to_list() == ["High Value", "High Value", "Mid-Level"]
+    report = processor._parser_metadata(str(path), ".xlsx")
+    assert report["relationship_resolution"]["sheet_names"] == ["Customers", "Orders"]
+
+
 @pytest.mark.parametrize("references", [0, 1])
 async def test_rerun_rebuilds_from_original_owner_scoped_files(tmp_path, monkeypatch, references):
     from app.api.v1.endpoints import analyses

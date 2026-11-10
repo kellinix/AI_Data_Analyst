@@ -151,8 +151,10 @@ def test_repeated_fact_keys_do_not_collapse_shipments_when_lookup_sheet_is_prese
     normalized = processor._normalize_excel_sheets(sheets, report)
     assert normalized.height == 20
     assert normalized["Amount"].sum() == 200
-    assert report["included_sheets"] == ["Shipments"]
-    assert report["excluded_sheets"][0]["name"] == "Products"
+    assert normalized["Product"].to_list() == ["Chocolate"] * 10 + ["Caramel"] * 10
+    assert report["included_sheets"] == ["Shipments", "Products"]
+    assert report["excluded_sheets"] == []
+    assert report["relationship_resolution"]["status"] == "enriched"
 
 
 def test_clean_dataframe_imputes_missing_values_and_drops_rows_without_metrics():

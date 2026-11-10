@@ -924,6 +924,15 @@ class FileProcessor:
             return pl.DataFrame()
         if len(frames) == 1:
             return frames[0]
+        # Workbooks can contain the same fact/lookup layout as separate uploads.
+        # Validate complete lookup keys before the legacy one-to-one sheet merge.
+        if all(frame.height <= self.SAMPLE_ROWS for frame in frames):
+            from app.services.relational_files import enrich_related_files
+
+            enriched, resolution = enrich_related_files(frames)
+            if enriched is not None:
+                report["relationship_resolution"] = {**resolution, "sheet_names": names}
+                return enriched
         joined = self._join_sheets_by_common_dimensions(frames)
         if joined is not None:
             return joined
