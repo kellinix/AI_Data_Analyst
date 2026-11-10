@@ -54,7 +54,7 @@
     "web": "npm run start -- --web",
     "type-check": "npm run prepare:assets && tsc --noEmit",
     "lint": "eslint src tests scripts app.config.ts",
-    "test": "tsx --test tests/core.test.ts tests/release-auth-config.test.mjs tests/store-purchases.test.ts",
+    "test": "tsx --test tests/core.test.ts tests/release-auth-config.test.mjs tests/store-purchases.test.ts tests/upload-workflow.test.ts",
     "export": "npm run prepare:assets && expo export --platform all",
     "doctor": "npx expo-doctor"
   },

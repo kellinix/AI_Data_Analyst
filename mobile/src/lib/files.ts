@@ -7,7 +7,7 @@ import { config } from './config';
 import { accessToken } from './api';
 import { ApiError, errorDetail } from './api-core';
 
-export const supportedFile = /\.(csv|xlsx?|json|parquet|tsv)$/i;
+export { supportedFile } from './upload-workflow';
 
 export async function uploadDocument(asset: DocumentPickerAsset, onProgress: (progress: number) => void): Promise<UploadedFile> {
   const token = await accessToken();

@@ -1,4 +1,4 @@
-# Mobile builds need only mobile source and the canonical API types.
+# Mobile builds include the shared API types and relationship detector.
 /*
 !/mobile
 !/frontend
@@ -8,6 +8,9 @@
 !/frontend/src/types
 /frontend/src/types/*
 !/frontend/src/types/index.ts
+!/frontend/src/lib
+/frontend/src/lib/*
+!/frontend/src/lib/upload-relationships.ts
 
 node_modules/
 .env
