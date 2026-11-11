@@ -7,6 +7,7 @@ from types import SimpleNamespace
 import polars as pl
 import pytest
 
+from app.analytics.survey_context import clarify_survey
 from app.services import ai_service as service
 from app.services.ai_service import AIService
 
@@ -177,3 +178,40 @@ async def test_malformed_equality_filters_remain_rejected(monkeypatch, operation
     answer = await AIService().chat(item, [], "How many entries match this filter?")
 
     assert answer["metadata"]["status"] == "unsupported"
+
+
+async def test_survey_average_with_required_context_preserves_plain_probe_scope(tmp_path, monkeypatch):
+    file = tmp_path / "survey.parquet"
+    pl.DataFrame({"countrycode": ["Austria", "France", "Average", "Austria"],
+        "subset": ["Group"] * 4, "question_code": ["a1", "a1", "a1", "b1"],
+        "question_label": ["Question A", "Question A", "Question A", "Question B"],
+        "answer": ["Yes"] * 4, "percentage": [8., 12., 10., 100.]}).write_parquet(file)
+    schema = [{"name": name, "is_numeric": name == "percentage", "is_date": False,
+               "dtype": "DOUBLE" if name == "percentage" else "VARCHAR"} for name in
+              ("countrycode", "subset", "question_code", "question_label", "answer", "percentage")]
+    metadata = {"schema": schema, "row_count": 4, "numeric_stats": {"percentage": {"min": 8, "max": 100}},
+                "data_quality": {"issues": []}}
+    clarify_survey(metadata)
+    plan = {"aggregation": "average", "column": "percentage", "group_by": "countrycode", "filters": [
+        {"column": "question_code", "op": "in", "values": ["a1"]},
+        {"column": "answer", "op": "in", "values": ["Yes"]},
+        {"column": "subset", "op": "in", "values": ["Group"]}]}
+    captured = []
+    fake_client(monkeypatch, {"answer_kind": "calculated", "plan": plan}, captured)
+    item = SimpleNamespace(id="conditional-survey", row_count=4, column_count=6, insights=[], metadata_=metadata,
+                           file=SimpleNamespace(storage_path=str(file)))
+
+    answer = await AIService().chat(item, [], "Compare published percentages by country for question a1, answer Yes and subset Group.")
+
+    assert answer["metadata"]["status"] == "succeeded"
+    comparison = answer["metadata"]["comparison"]
+    assert {entry["group_value"]: entry["value"] for entry in comparison["groups"]} == {"France": 12, "Austria": 8}
+    assert comparison["group_count"] == 2
+    assert catalogue(captured[0])["percentage"]["calculation_support"]["average"] is False
+    prompt = " ".join(captured[0].split())
+    assert "plain numeric checks without grouping or filters" in prompt
+    assert "Apply those requirements to the complete plan" in prompt
+    assert "repeated-lookup operand restrictions apply in every scope" in prompt
+    fake_client(monkeypatch, {"answer_kind": "calculated", "plan": {"aggregation": "average", "column": "percentage"}}, [])
+    rejected = await AIService().chat(item, [], "What is the overall average percentage?")
+    assert rejected["metadata"]["status"] == "unsupported"

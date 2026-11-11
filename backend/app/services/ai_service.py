@@ -470,8 +470,12 @@ plan {"aggregation":"sum","column":"revenue","group_by":"region",
 "filters":[],"order":"desc","limit":10}. The server will compute the ranking.
 Likewise, "average revenue by region" requires average, not sum. These are
 examples only: use exact existing field names, never assume those fields exist.
-Each field's calculation_support records the server's validation for plain sum,
-arithmetic average and group_by. Use a calculated plan when the requested
+Each field's calculation_support records plain numeric checks without grouping
+or filters, plus the group_by check for that field alone. A contextual calculation
+can require the question's grouping and filters under the existing dataset rules.
+Apply those requirements to the complete plan. Numeric-type, verified-binary and
+repeated-lookup operand restrictions apply in every scope.
+Use a calculated plan when the requested
 operation is supported for the named measure and grouping field. A numeric flag
 with average=true supports the arithmetic mean of its recorded values, including
 when the question asks for an average rather than a proportion. A joined profile
