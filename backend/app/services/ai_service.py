@@ -373,6 +373,68 @@ Before returning the JSON:
                 })
             return catalogue
 
+        def _source_tokens(value: str) -> tuple[str, ...]:
+            text = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", value)
+            text = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", text)
+            tokens = []
+            for word in re.findall(r"[a-z]+|[0-9]+", text.casefold()):
+                if len(word) > 4 and word.endswith("ies"):
+                    word = word[:-3] + "y"
+                elif word.endswith(("sses", "shes", "ches", "xes", "zes")):
+                    word = word[:-2]
+                elif len(word) > 3 and word.endswith("s") and not word.endswith(("ss", "us", "is")):
+                    word = word[:-1]
+                tokens.append(word)
+            return tuple(tokens)
+
+        def _source_attribute(field: dict[str, Any]) -> tuple[str, set[str]] | None:
+            from app.analytics.identifier_names import canonical_identifier_name
+
+            origin = field.get("measure_grain") or {}
+            table, column = origin.get("source_table"), origin.get("source_column")
+            if not isinstance(table, str) or not isinstance(column, str) or not table.strip() or not column.strip():
+                return None
+            if canonical_identifier_name(field["name"]) is not None or canonical_identifier_name(column) is not None:
+                return None
+            basename = table.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0]
+            # Export/date suffixes describe the file, not its recorded entity.
+            ignored = {"data", "dataset", "table", "lookup", "export", "extract", "snapshot", "record", "row", "dim", "dimension", "fact",
+                       "jan", "january", "feb", "february", "mar", "march", "apr", "april", "may", "jun", "june",
+                       "jul", "july", "aug", "august", "sep", "sept", "september", "oct", "october", "nov", "november", "dec", "december"}
+            entities = [word for word in _source_tokens(basename) if not word.isdigit() and word not in ignored]
+            attributes = set(_source_tokens(column))
+            return (entities[-1], attributes) if entities and attributes else None
+
+        def _bind_group_source(plan: ComparisonPlan, fields: list[dict[str, Any]]) -> tuple[ComparisonPlan, list[dict[str, Any]]]:
+            current = next((field for field in fields if field.get("name") == plan.group_by), None)
+            if (not current or current.get("analysis_role") != "dimension"
+                    or current.get("semantic_type") in {None, "unknown", "identifier"} or current.get("is_date")):
+                return plan, []
+            selected = _source_attribute(current)
+            if selected is None:
+                return plan, []
+            question_words = set(_source_tokens(user_message))
+            candidates = []
+            for field in fields:
+                if (field.get("analysis_role") != current["analysis_role"]
+                        or field.get("semantic_type") != current["semantic_type"] or field.get("is_date")):
+                    continue
+                source = _source_attribute(field)
+                if source is not None and source[0] in question_words and source[1] <= question_words:
+                    candidates.append((field, source))
+            if len(candidates) != 1:
+                return plan, []
+            field, source = candidates[0]
+            if field["name"] == plan.group_by:
+                return plan, []
+            if selected[1] > source[1] and (selected[1] - source[1]) & question_words:
+                return plan, []
+            origin = field["measure_grain"]
+            binding = {"field": "group_by", "model_column": plan.group_by, "bound_column": field["name"],
+                       "source_table": origin["source_table"], "source_column": origin["source_column"],
+                       "reason": "The question explicitly names one source entity and attribute"}
+            return plan.model_copy(update={"group_by": field["name"]}), [binding]
+
         facts = build_chat_facts(analysis)
         system_prompt = """Choose how the server should answer the user's question.
 There are two evidence sources: saved measured facts AND new server calculations
@@ -494,6 +556,7 @@ Measured fact catalogue:
         messages.extend(history[-10:])
         messages.append({"role": "user", "content": user_message})
 
+        source_bindings = []
         try:
             response = await asyncio.wait_for(
                 client.chat.completions.create(
@@ -523,6 +586,7 @@ Measured fact catalogue:
                     plan = ComparisonPlan.model_validate(plan_payload)
                     plan = _normalise_filtered_count(plan, {field["name"]: field
                         for field in metadata.get("schema") or profile.get("columns", [])})
+                    plan, source_bindings = _bind_group_source(plan, metadata.get("schema") or profile.get("columns", []))
                     result = await compare(analysis, plan, resolve_categories=True)
                     content = result["answer"] + "\n\n" + result["scope"]
                     checks = {"status": "succeeded", "method": "measured_chat_queries_v1", "comparison": result,
@@ -540,6 +604,7 @@ Measured fact catalogue:
                 "chart_config": None,
                 "metadata": {
                     **checks,
+                    **({"source_bindings": source_bindings} if source_bindings else {}),
                     "model": settings.openai_model,
                     "prompt_tokens": response.usage.prompt_tokens if response.usage else 0,
                     "completion_tokens": response.usage.completion_tokens if response.usage else 0,

@@ -17,12 +17,17 @@ from app.services.investigation import (
 
 
 @pytest.mark.parametrize("column", ["AEP_MW", "load_kw", "power_w", "PowerWatts", "demand_watts"])
-def test_power_reading_sums_need_an_energy_or_time_basis(column):
+async def test_power_reading_sums_need_an_energy_or_time_basis(column, tmp_path):
     metadata = {"schema": [{"name": column, "is_numeric": True, "analysis_role": "metric"}]}
     with pytest.raises(ComparisonUnavailable, match="energy total"):
         validate_plan(ComparisonPlan(aggregation="sum", column=column), metadata)
-    expression, _, _ = validate_plan(ComparisonPlan(aggregation="average", column=column), metadata)
-    assert expression.startswith("AVG(")
+    path = tmp_path / "power.parquet"
+    pl.DataFrame({column: [100., 200., None, 300.]}).write_parquet(path)
+    analysis = SimpleNamespace(id=uuid4(), row_count=4, metadata_=metadata,
+                               file=SimpleNamespace(storage_path=str(path)))
+    result = await compare(analysis, ComparisonPlan(aggregation="average", column=column))
+    assert result["groups"][0]["value"] == 200
+    assert result["groups"][0]["supplied_values"] == 3
 
 
 @pytest.mark.parametrize("unit", ["W", "kW", "MW", "watts", "megawatts"])

@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 import duckdb
+import polars as pl
 import pytest
 
 from app.analytics.admission_context import (
@@ -56,18 +57,16 @@ def test_outcome_charts_include_actual_group_sizes_and_filtered_percentages():
 
 
 @pytest.mark.asyncio
-async def test_admission_comparison_uses_percentages_and_percentage_point_gaps(monkeypatch):
+async def test_admission_comparison_uses_percentages_and_percentage_point_gaps(tmp_path):
     from app.services import investigation
 
-    conn = duckdb.connect()
-    conn.execute("create table data(research integer, chance_of_admit double)")
-    conn.execute("insert into data values (0,.4),(1,.8),(1,.9)")
-
-    async def load(_analysis):
-        return conn, 3, False
-
-    monkeypatch.setattr(investigation, "_load", load)
-    result = await investigation.compare(SimpleNamespace(id="admission", row_count=3, metadata_=profile()),
+    path = tmp_path / "admission.parquet"
+    data = {name: [float(maximum)] * 3 for name, (_, maximum) in FIELDS.items() if maximum is not None}
+    data.update(research=[0, 1, 1], chance_of_admit=[.4, .8, .9])
+    pl.DataFrame(data).write_parquet(path)
+    analysis = SimpleNamespace(id="admission", row_count=3, metadata_=profile(),
+                               file=SimpleNamespace(storage_path=str(path)))
+    result = await investigation.compare(analysis,
         ComparisonPlan(aggregation="average", column="chance_of_admit", group_by="research"))
     assert result["value_unit"] == "%"
     assert [row["value"] for row in result["groups"]] == [85., 40.]

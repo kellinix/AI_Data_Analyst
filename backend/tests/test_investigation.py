@@ -206,7 +206,9 @@ async def test_ranking_does_not_invent_a_winner_when_ties_are_hidden_by_limit(an
         pl.when(pl.col("id") == 3).then(30.).otherwise(pl.col("revenue")).alias("revenue"))
     frame.write_parquet(analysis.file.storage_path)
     result = await compare(analysis, ComparisonPlan(aggregation="sum", column="revenue", group_by="region", limit=1))
-    assert result["answer"] == "2 groups tie for the highest total revenue at 30 each."
+    assert result["answer"].startswith("2 groups tie for the highest total revenue at 30 each.")
+    assert "Showing 1 of these tied groups" in result["answer"]
+    assert result["groups"][0]["group"] in result["answer"]
     assert len(result["groups"]) == 1 and result["ranking"]["tied"] == 2
 
 
