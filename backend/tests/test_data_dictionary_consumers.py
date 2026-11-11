@@ -314,3 +314,82 @@ async def test_compact_planner_catalogue_keeps_every_field_and_typed_guide_evide
         assert column["definition_available"] and column["source_qualified_field"].startswith("records.Code")
         assert "source_table" not in column and "entity_key_columns" not in column
         assert set(column["calculation_support"]) == {"sum", "average", "group_by"}
+
+
+@pytest.mark.parametrize(("header", "code"), [("G", "G"), ("AB", "AB"), ("G", "g"), ("g", "G")])
+async def test_numeric_letter_header_is_a_field_definition_when_planner_repeats_it_as_code(monkeypatch, header, code):
+    schema = [measure("g", "Batting.csv", "G", "Games played"), measure("ab", "Batting.csv", "AB", "Official batting turns")]
+    item = SimpleNamespace(row_count=3, insights=[], metadata_={"schema": schema})
+    answer, calls = await chat(monkeypatch, item, f"What does {header} mean in Batting?", {"answer_kind": "definition", "columns": [header.lower()], "code": code})
+    assert answer["metadata"]["status"] == "succeeded"
+    assert answer["metadata"]["definition_fields"] == [header.lower()]
+    assert "unknown_code" not in answer["metadata"] and len(calls) == 1
+
+
+async def test_actual_bound_value_meaning_wins_over_matching_numeric_field_header(monkeypatch):
+    column = measure("g", "Batting.csv", "G", "Games played")
+    column["data_definition"]["value_labels"] = [{"value": "G", "label": "Recorded category"}]
+    item = SimpleNamespace(row_count=3, insights=[], metadata_={"schema": [column]})
+    answer, _ = await chat(monkeypatch, item, "What does G mean in Batting?", {"answer_kind": "definition", "columns": ["g"], "code": "G"})
+    assert "Recorded category (G)" in answer["content"]
+
+
+async def test_text_field_cannot_borrow_numeric_header_recovery(monkeypatch):
+    column = field("n", [("N", "No")])
+    column["data_definition"]["source_column"] = "N"
+    item = SimpleNamespace(row_count=3, insights=[], metadata_={"schema": [column]})
+    answer, _ = await chat(monkeypatch, item, "What does n mean?", {"answer_kind": "definition", "columns": ["n"], "code": "n"})
+    assert answer["metadata"]["status"] == "unsupported"
+    assert "No (N)" not in answer["content"]
+
+
+async def test_numeric_header_that_can_also_be_a_numeric_code_remains_unknown_without_a_definition(monkeypatch):
+    column = measure("1", "numbers.csv", "1", "Recorded number")
+    item = SimpleNamespace(row_count=3, insights=[], metadata_={"schema": [column]})
+    answer, _ = await chat(monkeypatch, item, "What does 1 mean?", {"answer_kind": "definition", "columns": ["1"], "code": "1"})
+    assert answer["metadata"]["status"] == "unsupported"
+
+
+async def test_unused_optional_null_keeps_all_explicitly_requested_field_definitions(monkeypatch):
+    schema = [measure("g", "Batting.csv", "G", "Games played"), measure("ab", "Batting.csv", "AB", "At bats"), measure("r", "Batting.csv", "R", "Runs")]
+    item = SimpleNamespace(row_count=3, insights=[], metadata_={"schema": schema})
+    answer, _ = await chat(monkeypatch, item, "What do G, AB and R mean in Batting?", {"answer_kind": "definition", "columns": ["g", "ab", "r"], "code": None})
+    assert answer["metadata"]["status"] == "succeeded"
+    assert answer["metadata"]["definition_fields"] == ["g", "ab", "r"]
+
+
+@pytest.mark.parametrize(("question", "values", "supported"), [
+    ("What does null mean in status?", [(None, "Not supplied")], True),
+    ("What does Not supplied mean in status?", [(None, "Not supplied")], True),
+    ("What does null mean in status?", [("M", "Married")], False),
+    ("What does NA mean in status?", [("M", "Married")], False),
+    ("What does M mean in status?", [("M", "Married")], False),
+    ("How many status entries are null? What does that mean?", [(None, "Not supplied")], False),
+])
+async def test_optional_null_does_not_erase_explicit_codes_or_numeric_questions(monkeypatch, question, values, supported):
+    item = SimpleNamespace(row_count=3, insights=[], metadata_={"schema": [field("status", values)]})
+    answer, _ = await chat(monkeypatch, item, question, {"answer_kind": "definition", "columns": ["status"], "code": None})
+    assert (answer["metadata"]["status"] == "succeeded") is supported
+    if supported:
+        assert "Not supplied (null)" in answer["content"]
+
+
+@pytest.mark.parametrize(("literal", "planner_code", "supported"), [("n", "N", False), ("N", "n", True), ("na", "NA", False), ("NA", "na", True)])
+async def test_planner_case_change_restores_the_single_literal_without_changing_code_meaning(monkeypatch, literal, planner_code, supported):
+    schema = [field("active", [("N", "Defunct"), ("NA", "Recorded category")])]
+    item = SimpleNamespace(row_count=3, insights=[], metadata_={"schema": schema})
+    answer, _ = await chat(monkeypatch, item, f"What does {literal} mean in Active?", {"answer_kind": "definition", "columns": ["active"], "code": planner_code})
+    assert (answer["metadata"]["status"] == "succeeded") is supported
+    if not supported:
+        assert answer["metadata"]["unknown_code"] == literal
+        assert "Defunct (N)" not in answer["content"] and "Recorded category (NA)" not in answer["content"]
+    assert schema[0]["data_definition"]["value_labels"][0]["value"] == "N"
+
+
+async def test_unused_null_cannot_hide_an_unknown_code_that_matches_a_source_file_name(monkeypatch):
+    column = field("gender", [("M", "Male"), ("F", "Female")])
+    column["data_definition"].update(source_table="NA.csv", source_column="Gender")
+    item = SimpleNamespace(row_count=3, insights=[], metadata_={"schema": [column]})
+    answer, _ = await chat(monkeypatch, item, "What does NA mean in Gender?", {"answer_kind": "definition", "columns": ["gender"], "code": None})
+    assert answer["metadata"]["status"] == "unsupported"
+    assert "Male (M)" not in answer["content"]

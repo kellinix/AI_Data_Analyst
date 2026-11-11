@@ -462,6 +462,41 @@ Before returning the JSON:
                 selected = columns
             code_supplied = "code" in payload
             code = payload.get("code")
+            if isinstance(code, str) and code and not _mentioned(code, exact_case=True):
+                spellings = {match.group(0) for match in re.finditer(
+                    r"(?<![\w./+-])" + re.escape(code) + r"(?![\w./+-])", user_message, flags=re.I)}
+                if len(spellings) == 1:
+                    # Restore the user's literal spelling after a planner case
+                    # change. Recorded codes and guide matching stay exact.
+                    code = spellings.pop()
+            if code_supplied and code is None and named:
+                null_requested = any(_code_mentioned(supplied[name], None) or _mentioned(
+                    (value_definition(supplied[name], None) or {}).get("label", "")) for name in named)
+                if not null_requested:
+                    # JSON null is commonly emitted for an unused optional key.
+                    # Accept that omission only for a request made entirely of
+                    # named fields, their recorded sources and question words.
+                    remaining = user_message
+                    aliases = []
+                    sources = []
+                    for name in named:
+                        definition = supplied[name]["data_definition"]
+                        origin = supplied[name].get("measure_grain") or {}
+                        aliases.extend(_definition_names(supplied[name]))
+                        table = str(definition.get("source_table") or origin.get("source_table") or "")
+                        sources.extend([table.replace("\\", "/").rsplit("/", 1)[-1].rsplit(".", 1)[0],
+                                        definition.get("source_sheet") or origin.get("source_sheet"),
+                                        origin.get("source_role_label"),
+                                        str(definition.get("source_role") or origin.get("source_role") or "").replace("_", " ")])
+                    for alias in sorted({str(alias) for alias in aliases if alias}, key=len, reverse=True):
+                        remaining = re.sub(r"(?<![\w./+-])" + re.escape(alias) + r"(?![\w./+-])", " ", remaining, flags=re.I)
+                    for source in sorted({str(source) for source in sources if source}, key=len, reverse=True):
+                        remaining = re.sub(r"\b(?:in|from|for)\s+(?:the\s+)?" + re.escape(source)
+                                           + r"(?![\w./+-])", " ", remaining, flags=re.I)
+                    words = set(re.findall(r"[\w]+", remaining.casefold()))
+                    if words <= {"what", "does", "do", "is", "are", "mean", "in", "from", "for", "of", "the", "these", "and", "or",
+                                 "please", "explain", "field", "fields", "column", "columns", "header", "headers", "definition", "definitions", "meaning", "meanings", "source", "table", "tables"}:
+                        code_supplied = False
             if code_supplied:
                 if not isinstance(code, str | int | float | bool | type(None)):
                     return unavailable()
@@ -470,11 +505,26 @@ Before returning the JSON:
                 except ValueError:
                     return unavailable()
                 candidates = selected if named else list(supplied)
-                selected = [name for name in candidates if name in supplied and (
-                    value_definition(supplied[name], code) is not None or (
-                        named and isinstance(code, int | float) and not isinstance(code, bool)
-                        and ((supplied[name]["data_definition"].get("time_basis") or {}).get("kind") == "relative_day")))]
-                if not any(_code_mentioned(supplied[name], code) for name in selected):
+                numeric_field_names = []
+                if isinstance(code, str) and _mentioned(code):
+                    try:
+                        float(code)
+                    except ValueError:
+                        numeric_field_names = [name for name in named if supplied[name].get("is_numeric")
+                            and code in {name, supplied[name]["data_definition"].get("source_column"),
+                                         (supplied[name].get("measure_grain") or {}).get("source_column")}]
+                if numeric_field_names and not any(value_definition(supplied[name], code) is not None for name in candidates):
+                    # A letter-named numeric field cannot contain that letter
+                    # as a typed numeric category. Render its supplied field
+                    # definition when the planner repeats the header as code.
+                    code_supplied = False
+                    selected = numeric_field_names
+                else:
+                    selected = [name for name in candidates if name in supplied and (
+                        value_definition(supplied[name], code) is not None or (
+                            named and isinstance(code, int | float) and not isinstance(code, bool)
+                            and ((supplied[name]["data_definition"].get("time_basis") or {}).get("kind") == "relative_day")))]
+                if code_supplied and not any(_code_mentioned(supplied[name], code) for name in selected):
                     selected = [name for name in selected if _mentioned((value_definition(supplied[name], code) or {}).get("label", ""))]
                 if not selected:
                     requested = [name for name in named or columns if name in supplied and _code_mentioned(supplied[name], code)]
