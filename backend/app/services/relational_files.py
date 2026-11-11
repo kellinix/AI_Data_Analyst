@@ -67,13 +67,17 @@ def _candidate_relationships(
 ) -> list[KeyLink]:
     left, right = _identifier_columns(fact), _identifier_columns(lookup)
     pairs = [(left[name], right[name]) for name in sorted((left.keys() & right.keys()) - _GENERIC_KEYS)]
+    pairs.extend((foreign, primary) for name, foreign in left.items()
+                 for parent, primary in right.items()
+                 if parent not in _GENERIC_KEYS and name != parent and name.endswith(parent)
+                 and any(parent.endswith(marker) for marker in _GENERIC_KEYS))
     entities = _table_entities(lookup_name)
     # A bare parent ID needs its table name. Independent sequential row IDs
     # from two unrelated tables must never become a relationship by overlap.
     for marker in sorted(right.keys() & _GENERIC_KEYS):
         pairs.extend((column, right[marker]) for name, column in left.items()
                      if name not in _GENERIC_KEYS and name.endswith(marker)
-                     and name[:-len(marker)] in entities)
+                     and any(name[:-len(marker)].endswith(entity) for entity in entities))
     pairs = list(dict.fromkeys(pairs))
     singles = [((foreign,), (primary,)) for foreign, primary in pairs]
     candidates = [link for link in singles if _valid_link(fact, lookup, link, allow_unique)]
@@ -85,12 +89,57 @@ def _candidate_relationships(
     if len(remaining) <= 8:
         for size in (2, 3):
             for selected in combinations(remaining, size):
+                if len({pair[0] for pair in selected}) != size or len({pair[1] for pair in selected}) != size:
+                    continue
                 link = (tuple(pair[0] for pair in selected), tuple(pair[1] for pair in selected))
-                if any(set(existing[1]) <= set(link[1]) for existing in candidates):
+                if any(set(existing[0]) <= set(link[0]) and set(existing[1]) <= set(link[1])
+                       for existing in candidates):
                     continue
                 if _valid_link(fact, lookup, link, allow_unique):
                     candidates.append(link)
     return candidates
+
+
+def _role_prefix(link: KeyLink, lookup_name: str) -> str | None:
+    prefixes = set()
+    entities = _table_entities(lookup_name)
+    for foreign, primary in zip(*link, strict=True):
+        child, parent = canonical_identifier_name(foreign), canonical_identifier_name(primary)
+        if not child or not parent:
+            continue
+        if child == parent:
+            continue
+        if child.endswith(parent) and parent not in _GENERIC_KEYS:
+            prefixes.add(child[:-len(parent)])
+        elif parent in _GENERIC_KEYS and child.endswith(parent):
+            base = child[:-len(parent)]
+            matches = [entity for entity in entities if base.endswith(entity)]
+            if matches:
+                prefixes.add(base[:-len(max(matches, key=len))])
+    prefixes.discard("")
+    return next(iter(prefixes)) if len(prefixes) == 1 else None
+
+
+def _role_label(link: KeyLink) -> str:
+    foreign = next((foreign for foreign, primary in zip(*link, strict=True)
+                    if canonical_identifier_name(foreign) != canonical_identifier_name(primary)), link[0][0])
+    column = re.sub(r"([a-z])([A-Z])", r"\1 \2", foreign)
+    column = re.sub(r"[_\s]+", " ", column).strip()
+    column = re.sub(r"(?i)\s*(?:id|key|code|uuid|guid)$", "", column).strip()
+    return re.sub(r"(?i)^(?:id|key|code|uuid|guid)\s+", "", column) or foreign
+
+
+def _separate_roles(candidates: list[KeyLink], lookup_name: str, declared: bool) -> bool:
+    if len(candidates) < 2:
+        return False
+    foreign = [frozenset(link[0]) for link in candidates]
+    if len(set(foreign)) != len(foreign):
+        return False
+    if declared:
+        return True
+    primary = {frozenset(link[1]) for link in candidates}
+    prefixes = [_role_prefix(link, lookup_name) for link in candidates]
+    return len(primary) == 1 and any(prefixes) and len(set(prefixes)) == len(prefixes)
 
 
 def _relationship(fact: pl.DataFrame, lookup: pl.DataFrame, *, allow_unique: bool = False, lookup_name: str = "") -> KeyLink | None:
@@ -159,6 +208,151 @@ def _inherit_field_origin(
     return result
 
 
+def _parent_rows(combined: pl.DataFrame, foreign: tuple[str, ...], lookup: pl.DataFrame,
+                 primary: tuple[str, ...]) -> list[int | None]:
+    parents = {key: index for index, key in enumerate(_keys(lookup, primary).iter_rows())}
+    return [parents.get(key) if all(value is not None for value in key) else None
+            for key in _keys(combined, foreign).iter_rows()]
+
+
+def _attach_role_lookup(combined, lookup, foreign_columns, primary_columns, table_number, role_label):
+    foreign, primary = _keys(combined, foreign_columns), _keys(lookup, primary_columns)
+    matched = foreign.join(primary, on=primary.columns, how="semi").height
+    unused = primary.join(foreign.drop_nulls().unique(), on=primary.columns, how="anti").height
+    payload = lookup.drop("Source file") if "Source file" in lookup.columns else lookup
+    used = set(combined.columns) | set(payload.columns)
+    renames = {}
+    for column in payload.columns:
+        replacement = f"{role_label} {column}" if role_label else column
+        if replacement in combined.columns:
+            replacement = f"{replacement} related {table_number}"
+        while replacement in used and replacement != column:
+            replacement += "_"
+        if replacement != column:
+            renames[column] = replacement
+            used.add(replacement)
+    key_names = []
+    for part in range(len(primary_columns)):
+        key = f"__relationship_key_{part}"
+        while key in used:
+            key += "_"
+        used.add(key)
+        key_names.append(key)
+    payload = payload.rename(renames).with_columns([primary[name].alias(key)
+        for name, key in zip(primary.columns, key_names, strict=True)])
+    result = combined.with_columns([foreign[name].alias(key)
+        for name, key in zip(foreign.columns, key_names, strict=True)]).join(
+            payload, on=key_names, how="left", validate="m:1", maintain_order="left",
+        ).drop(key_names)
+    if result.height != combined.height:
+        raise ValueError("A lookup relationship changed the main table's record count.")
+    return result, renames, matched, unused
+
+
+def _enrich_role_paths(tables, names, origins, frames, graph, constraints, role_links, declared, root):
+    combined = tables[root]
+    field_origins = {column: _inherit_field_origin({"source_table": names[root], "source_column": column,
+        "kind": "fact", "repeated": False, "entity_key_columns": []}, column, origins[root], {}, combined)
+        for column in combined.columns if column != "Source file"}
+    instances = [{"table": root, "role": (), "labels": (), "path": [], "ancestors": (root,),
+                  "fields": {column: column for column in combined.columns}, "rows": list(range(combined.height))}]
+    resolution = {"status": "enriched", "grain": "One entry per record in the main source table",
+        "fact_files": combined["Source file"].unique(maintain_order=True).to_list() if "Source file" in combined.columns else [],
+        "input_rows": sum(frame.height for frame in frames), "row_count": combined.height, "joins": []}
+
+    def target_role(instance, parent, link):
+        child = instance["table"]
+        label = _role_label(link) if (child, parent) in role_links else ""
+        if label:
+            slug = re.sub(r"[^a-z0-9]+", "_", label.casefold()).strip("_")
+            return (*instance["role"], slug), (*instance["labels"], label)
+        if instance["role"]:
+            return instance["role"], instance["labels"]
+        incoming = [index for index in graph if parent in graph[index]]
+        if len(incoming) > 1 and parent not in graph[root] and child != root:
+            label = Path(names[child]).stem
+            slug = re.sub(r"[^a-z0-9]+", "_", label.casefold()).strip("_")
+            return (slug,), (label,)
+        return (), ()
+
+    def matching_ancestor(instance, parent, rows):
+        return any(node["table"] == parent and node["rows"] == rows
+                   and node["path"] == instance["path"][:len(node["path"])] for node in instances)
+
+    cursor = 0
+    while cursor < len(instances):
+        instance = instances[cursor]
+        cursor += 1
+        child = instance["table"]
+        for parent, selected in graph[child].items():
+            for link in role_links.get((child, parent), [selected]):
+                role, labels = target_role(instance, parent, link)
+                foreign = tuple(instance["fields"][column] for column in link[0])
+                represented_rows = _parent_rows(combined, foreign, tables[parent], link[1])
+                if parent in instance["ancestors"] and matching_ancestor(instance, parent, represented_rows):
+                    continue
+                existing = [node for node in instances if node["table"] == parent and node["role"] == role]
+                if existing:
+                    if any(node["rows"] != represented_rows for node in existing):
+                        return None, {"status": "unresolved", "reason_code": "conflicting_identifiers",
+                            "reason": "The identifier links disagree about which rows belong together. Choose the intended relationship before combining these files."}
+                    continue
+                if parent in instance["ancestors"]:
+                    return None, {"status": "unresolved", "reason_code": "ambiguous_relationship_graph",
+                        "reason": "These lookup paths form a cycle. Choose a main table and separate lookup roles."}
+                path = [*instance["path"], {"from_table": names[child], "from_columns": list(link[0]),
+                    "to_table": names[parent], "to_columns": list(link[1])}]
+                role_label = " / ".join(labels)
+                combined, renames, matched, unused = _attach_role_lookup(
+                    combined, tables[parent], foreign, link[1], parent + 1, role_label)
+                fields = {column: renames.get(column, column) for column in tables[parent].columns if column != "Source file"}
+                entity_keys = [fields[column] for column in link[1]]
+                represented = _keys(combined, tuple(entity_keys)).drop_nulls()
+                repeated = represented.height > represented.n_unique()
+                source_role = "/".join(role) or None
+                for column, output in fields.items():
+                    origin = _inherit_field_origin({"source_table": names[parent], "source_column": column,
+                        "kind": "lookup", "entity_key_columns": entity_keys, "key_basis": "parent_primary",
+                        "repeated": repeated, "matched_entries": matched, "source_rows": tables[parent].height},
+                        column, origins[parent], renames, combined)
+                    inherited_role = origin.get("source_role")
+                    inherited_label = origin.get("source_role_label")
+                    field_origins[output] = {**origin,
+                        "source_role": "/".join(part for part in [source_role, inherited_role] if part) or None,
+                        "source_role_label": " / ".join(part for part in [role_label, inherited_label] if part) or None,
+                        "relationship_path": [*path, *(origin.get("relationship_path") or [])]}
+                instances.append({"table": parent, "role": role, "labels": labels, "path": path,
+                    "ancestors": (*instance["ancestors"], parent), "fields": fields, "rows": represented_rows})
+                files = tables[parent]["Source file"].unique(maintain_order=True).to_list() if "Source file" in tables[parent].columns else [names[parent]]
+                resolution["joins"].append({"foreign_key": foreign[0] if len(foreign) == 1 else list(foreign),
+                    "lookup_key": link[1][0] if len(link[1]) == 1 else list(link[1]),
+                    "foreign_keys": list(foreign), "lookup_keys": list(link[1]), "lookup_files": files,
+                    "lookup_rows": tables[parent].height, "matched_entries": matched,
+                    "unmatched_entries": combined.height - matched, "lookup_only_entries": unused,
+                    "renamed_fields": renames, "declared": (child, parent) in declared,
+                    "source_role": source_role, "source_role_label": role_label or None, "relationship_path": path})
+    for instance in instances:
+        child = instance["table"]
+        for (source, parent), links in constraints.items():
+            if source != child or (child, parent) in role_links:
+                continue
+            for link in links:
+                role, _labels = target_role(instance, parent, link)
+                targets = [node for node in instances if node["table"] == parent and node["role"] == role]
+                foreign = tuple(instance["fields"][column] for column in link[0])
+                rows = _parent_rows(combined, foreign, tables[parent], link[1])
+                if matching_ancestor(instance, parent, rows):
+                    continue
+                if not targets or any(node["rows"] != rows for node in targets):
+                    return None, {"status": "unresolved", "reason_code": "conflicting_identifiers",
+                        "reason": "The identifier links disagree about which rows belong together. Choose the intended relationship before combining these files."}
+    if {node["table"] for node in instances} != set(range(len(tables))):
+        return None, {"status": "unresolved", "reason_code": "ambiguous_relationship_graph",
+            "reason": "Some tables have no verified lookup path from the main table."}
+    resolution["field_origins"] = field_origins
+    return combined, resolution
+
+
 def enrich_related_files(
     frames: list[pl.DataFrame], *, table_names: list[str] | None = None,
     table_ids: list[str] | None = None, declared_relationships: list[dict] | None = None,
@@ -189,6 +383,9 @@ def enrich_related_files(
     names = [values[0] for values in partition_names.values()]
     origins = list(partition_origins.values())
     if len(tables) < 2:
+        if declared_relationships:
+            return None, {"status": "unresolved", "reason_code": "invalid_declared_relationship",
+                "reason": "Choose relationships between different record types. Files with the same fields are parts of one table."}
         field_origins = {column: _inherit_field_origin({"source_table": names[0], "source_column": column,
             "kind": "fact", "repeated": False, "entity_key_columns": []}, column, origins[0], {}, tables[0])
             for column in tables[0].columns if column != "Source file"} if tables else {}
@@ -221,39 +418,50 @@ def enrich_related_files(
                 link = (tuple(foreign), tuple(primary))
                 if not _valid_link(tables[child], tables[parent], link, True):
                     raise ValueError("The parent keys must be unique, filled in and match source records.")
-                if (child, parent) in declared and declared[child, parent] != link:
-                    raise ValueError("Multiple roles for the same lookup need separate, qualified relationships.")
-                declared[child, parent] = link
+                links = declared.setdefault((child, parent), [])
+                if any(existing[0] == link[0] and existing != link for existing in links):
+                    raise ValueError("Different lookup roles need different source key columns.")
+                if link not in links:
+                    links.append(link)
+            declared_graph = {index: {} for index in range(len(tables))}
+            for child, parent in declared:
+                declared_graph[child][parent] = True
+            if any(child in _reachable(declared_graph, parent) for child, parent in declared):
+                raise ValueError("Relationships cannot form a cycle. Choose a main table and its lookup tables.")
         except (KeyError, TypeError, ValueError) as error:
             return None, {"status": "unresolved", "reason_code": "invalid_declared_relationship", "reason": str(error)}
 
     graph = {}
     constraints = {}
+    role_links = {}
     for index, fact in enumerate(tables):
         graph[index] = {}
         for other, lookup in enumerate(tables):
             if other != index:
                 if (index, other) in declared:
-                    candidates = [declared[index, other]]
+                    candidates = declared[index, other]
                 elif (other, index) in declared:
                     continue
                 else:
                     candidates = _candidate_relationships(fact, lookup, allow_unique=True, lookup_name=names[other])
-                if len(candidates) > 1 and _conflicting_identifier_associations(fact, lookup, candidates):
+                separate_roles = _separate_roles(candidates, names[other], (index, other) in declared)
+                if len(candidates) > 1 and not separate_roles and _conflicting_identifier_associations(fact, lookup, candidates):
                     return None, {
                         "status": "unresolved", "reason_code": "conflicting_identifiers",
                         "reason": "The identifier links disagree about which rows belong together. Choose the intended relationship before combining these files.",
                     }
                 if candidates:
                     constraints[index, other] = candidates
-                if len(candidates) == 1:
+                if separate_roles or (len(candidates) == 1 and _role_prefix(candidates[0], names[other])):
+                    role_links[index, other] = candidates
+                if len(candidates) == 1 or separate_roles:
                     graph[index][other] = candidates[0]
     # A repeated foreign key establishes the transaction side. One-to-one
     # lookup links can then extend that known grain without choosing a new one.
     roots = [index for index, fact in enumerate(tables)
              if _reachable(graph, index) == set(range(len(tables)))
-             and (index == declared_root or any(_valid_link(fact, tables[parent], link, False)
-                                               for parent, link in graph[index].items()))]
+             and (index == declared_root or any(_valid_link(fact, tables[parent], candidate, False)
+                 for parent, link in graph[index].items() for candidate in role_links.get((index, parent), [link])))]
     if declared_root is not None:
         roots = [root for root in roots if root == declared_root]
     if len(roots) != 1:
@@ -263,6 +471,10 @@ def enrich_related_files(
         }
 
     index = roots[0]
+    multiple_paths = any(parent not in graph[index] and sum(parent in edges for edges in graph.values()) > 1
+                         for parent in range(len(tables)) if parent != index)
+    if role_links or multiple_paths:
+        return _enrich_role_paths(tables, names, origins, frames, graph, constraints, role_links, declared, index)
     combined = tables[index]
     attached = {index}
     field_names = {(index, column): column for column in combined.columns}

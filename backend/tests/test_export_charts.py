@@ -12,6 +12,7 @@ from openpyxl import load_workbook
 
 from app.services.export_charts import normalise_charts
 from app.services.export_service import build_excel_report, build_pdf_report
+from app.services.report_language import present_chart
 
 
 def _charts() -> list[dict]:
@@ -51,11 +52,11 @@ def test_all_saved_chart_types_export_as_editable_excel_charts():
     assert {"Overview", "Charts", "Chart Data"} <= set(workbook.sheetnames)
     assert len(workbook["Charts"]._charts) == 6
     values = [cell.value for row in workbook["Chart Data"] for cell in row]
-    assert {"Revenue over time", "North", "Closed", "Mar", 40, 9} <= set(values)
+    assert {"Recorded revenue by week", "North", "Closed", "Mar", 40, 9} <= set(values)
     with zipfile.ZipFile(io.BytesIO(workbook_bytes)) as archive:
         chart_names = [name for name in archive.namelist() if name.startswith("xl/charts/chart") and name.endswith(".xml")]
         assert len(chart_names) == 6
-        assert any(b"Sparse readings" in archive.read(name) and b"<a:noFill/>" in archive.read(name)
+        assert any(b"Recorded value by week" in archive.read(name) and b"<a:noFill/>" in archive.read(name)
                    for name in chart_names)
 
 
@@ -77,9 +78,9 @@ def test_pdf_chart_section_adds_vector_visuals_without_dropping_narrative():
         if chart["type"] == "histogram":
             assert not any(chart["title"].encode() in page for page in page_contents)
             continue
-        assert any(chart["title"].encode() in page for page in page_contents)
+        assert any(present_chart(chart)["title"].encode() in page for page in page_contents)
     assert b"Visual Charts" in page_contents[0]
-    assert b"Revenue over time" in page_contents[0]
+    assert b"Recorded revenue by week" in page_contents[0]
 
 
 def test_invalid_or_unpopulated_charts_are_excluded_without_invented_values():

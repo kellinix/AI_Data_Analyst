@@ -86,9 +86,13 @@ def is_additive_flow(name: str) -> bool:
     )
 
 
-def is_observation_date(name: str) -> bool:
+def is_observation_date(name: str, field: dict[str, Any] | None = None) -> bool:
     # Catalogue/lifecycle dates group entities into cohorts, not period flows.
-    words = tokens(name)
+    original = str(((field or {}).get("measure_grain") or {}).get("source_column") or "")
+    words = tokens(re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", f"{name} {original}"))
+    compact = re.sub(r"[^a-z]", "", name.lower())
+    if compact in {"dob", "dateofbirth", "birthdate", "debut"} or re.search(r"(?:open|opened|opening)date$", compact):
+        return False
     # Week/month/period start and end are ordinary reporting boundaries.
     if words & {"period", "week", "month", "quarter", "year"}:
         words -= {"start", "end"}
@@ -97,4 +101,5 @@ def is_observation_date(name: str) -> bool:
         "published", "publication", "created", "updated", "start", "end",
         "started", "ended", "expiry", "expiration", "deadline", "due",
         "creation", "snapshot", "asof",
+        "open", "opened", "opening", "debut", "dob",
     }

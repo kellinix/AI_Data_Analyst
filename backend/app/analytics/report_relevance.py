@@ -22,7 +22,10 @@ def useful_charts(charts: list[dict[str, Any]]) -> list[dict[str, Any]]:
             ) if isinstance(item, dict) and item.get("type") == "category"), None)
             if isinstance(categories, list) and len(categories) == 1 and series:
                 continue
-        if kind == "scatter" and "weak relationship" in str(chart.get("description", "")).lower():
+        reader = (chart.get("echarts_option") or {}).get("_reader") or {}
+        if kind == "scatter" and "weak relationship" in (
+            str(chart.get("description", "")) + " " + str(reader.get("source_description", ""))
+        ).lower():
             continue
         if kind in {"pie", "donut"} and has_measures:
             series = (chart.get("echarts_option") or {}).get("series") or []

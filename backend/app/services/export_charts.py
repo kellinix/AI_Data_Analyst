@@ -14,7 +14,7 @@ from xlsxwriter import Workbook
 
 from app.analytics.histogram_presentation import present_histogram
 from app.analytics.line_presentation import present_time_line
-from app.services.report_language import chart_description
+from app.services.report_language import chart_description, present_chart
 
 PALETTE = ("#7350D8", "#15B8A6", "#F28B6B", "#E5AE3E", "#4F6FE1", "#A7CF32")
 
@@ -61,7 +61,7 @@ def normalise_charts(charts: list[dict[str, Any]] | None) -> list[ExportChart]:
     for raw in charts or []:
         if not isinstance(raw, dict):
             continue
-        raw = present_time_line(present_histogram(raw))
+        raw = present_chart(present_time_line(present_histogram(raw)))
         kind = raw.get("type")
         if kind not in {"line", "bar", "donut", "scatter", "histogram"}:
             continue

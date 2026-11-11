@@ -43,7 +43,7 @@ def test_combining_enriched_workbook_preserves_sheet_measure_grain(tmp_path, rev
     assert combined[origin["entity_key_columns"][0]].to_list() == ["O1", "O1", None]
     assert combined.height == 3 and combined["amount"].sum() == 60
     schema = annotate_measure_grain([{"name": "freight", "is_numeric": True, "analysis_role": "metric"}], context)
-    with pytest.raises(ComparisonUnavailable, match="each source row once"):
+    with pytest.raises(ComparisonUnavailable, match="complete source ID"):
         validate_plan(ComparisonPlan(aggregation="sum", column="freight"), {"schema": schema})
 
 

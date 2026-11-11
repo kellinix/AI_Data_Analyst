@@ -8,6 +8,7 @@ import pytest
 from app.api.v1.endpoints import analyses
 from app.models.export_event import ExportEvent
 from app.services.analysis_engine import AnalysisEngine
+from app.services.report_language import present_chart
 
 
 async def test_successful_analysis_records_completion_time():
@@ -42,7 +43,7 @@ async def test_export_records_only_successful_generation(monkeypatch, format):
     route = getattr(analyses, f"export_{format}")
     response = await route(analysis.id, SimpleNamespace(id=uuid.uuid4()), db)
     assert response.body == b"report"
-    assert builder.call_args.kwargs["charts"] == analysis.charts
+    assert builder.call_args.kwargs["charts"] == [present_chart(chart, analysis.metadata_) for chart in analysis.charts]
     [event] = db.add.call_args.args
     assert isinstance(event, ExportEvent)
     assert event.analysis_id == analysis.id

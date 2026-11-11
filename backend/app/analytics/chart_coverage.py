@@ -14,17 +14,31 @@ def disclose_chart_coverage(chart: dict[str, Any]) -> None:
     if coverage:
         if coverage["missing"]:
             count = coverage["missing"]
-            notes.append(f"{count:,} {'entry' if count == 1 else 'entries'} with a missing coordinate {'is' if count == 1 else 'are'} excluded.")
+            notes.append(f"{count:,} {'entry is' if count == 1 else 'entries are'} missing one of the two figures and {'is' if count == 1 else 'are'} left out.")
         if coverage["eligible"] > coverage["sampled"]:
-            notes.append(f"The plot uses the first {coverage['sampled']:,} complete entries out of {coverage['eligible']:,}; it is not the full dataset.")
+            notes.append(f"The chart shows the first {coverage['sampled']:,} of {coverage['eligible']:,} entries with both figures filled in.")
     excluded = option.get("_excluded_points") or 0
     if excluded:
-        notes.append(f"{excluded:,} {'entry' if excluded == 1 else 'entries'} with zero or negative values on a logarithmic axis {'is' if excluded == 1 else 'are'} excluded from the plot; these are not missing values.")
+        notes.append(f"The scale uses multiplying steps to fit very different sizes. {excluded:,} {'entry has' if excluded == 1 else 'entries have'} supplied values of zero or less and {'is' if excluded == 1 else 'are'} left out of this chart.")
     if "_category_total" in option:
-        notes.append(f"Shares use all {option['_category_total']:,} entries in this view.")
+        notes.append(f"Percentages use all {option['_category_total']:,} entries in this view.")
         missing = option.get("_missing_category_count", 0)
         if missing:
             notes.append(f"{missing:,} entries have no recorded category and are shown separately.")
+    groups = option.get("_group_scope") or {}
+    if groups.get("limit"):
+        measure = {"sum": "totals", "average": "averages", "count": "entry counts", "percent_rate": "percentages"}.get(groups.get("order_by"), "figures")
+        notes.append(f"This chart shows up to {groups['limit']} groups with the highest {measure}.")
+    elif groups.get("category_limit"):
+        notes.append(f"Up to {groups['category_limit']} main groups are chosen using their totals across all colour groups.")
+        notes.append(f"We show up to {groups['series_limit']} named colour groups, sorted by their recorded names.")
+        if groups.get("series_groups", 0) > groups["series_limit"]:
+            notes.append("The bars use only the displayed colour groups.")
+        if groups.get("unreported_series"):
+            notes.append("The supplied 'Not reported' group is also shown.")
+    if groups:
+        notes.append("We use entries with both group labels and figures supplied." if groups.get("requires_value")
+                     else "We count entries with a supplied group label.")
     if notes:
         if description and description[-1] not in ".!?":
             description += "."

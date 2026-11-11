@@ -59,7 +59,8 @@ def test_direct_parent_aggregation_is_explicitly_unavailable(aggregation):
     stats = measured_statistics()
     metadata = {"schema": stats["schema"], "upload_context": relationship_context()}
     plan = ComparisonPlan(aggregation=aggregation, column="freight", **({"weight_column": "quantity"} if aggregation == "weighted_average" else {}))
-    with pytest.raises(ComparisonUnavailable, match="each source row once"):
+    message = "each source row once" if aggregation == "weighted_average" else "complete source ID"
+    with pytest.raises(ComparisonUnavailable, match=message):
         validate_plan(plan, metadata)
 
 

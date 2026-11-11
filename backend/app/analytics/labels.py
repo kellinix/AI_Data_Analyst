@@ -45,7 +45,9 @@ def derive_label(column: str) -> str:
     >>> derive_label("financial_year_baseline_currency_m_including_non_government_costs")
     'Financial Year Baseline (M)'
     """
-    tokens = [token for token in re.split(r"[^A-Za-z0-9]+", str(column).lower()) if token]
+    name = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", str(column))
+    name = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name)
+    tokens = [token for token in re.split(r"[^A-Za-z0-9]+", name.lower()) if token]
     if not tokens:
         return ""
     if tokens[:5] == ["total", "baseline", "whole", "life", "costs"] and "currency" in tokens:
@@ -87,12 +89,46 @@ def sentence_label(label: str) -> str:
 
 def reader_label(column: str) -> str:
     """Use a short field name and explain units that the header supplies."""
+    if column.isalpha() and column.isupper() and len(column) <= 3:
+        return {"USD": "US dollars", "GBP": "British pounds", "EUR": "euros"}.get(column, column)
     name = re.sub(r"\bavg\b", "average", str(column).replace("_", " "), flags=re.I)
+    for meaning, code in (("US dollars", "USD"), ("British pounds", "GBP"), ("euros", "EUR")):
+        name = re.sub(rf"\b{meaning}\b", code, name, flags=re.I)
     text = sentence_label(derive_label(name))
     for code, meaning in (("USD", "US dollars"), ("GBP", "British pounds"), ("EUR", "euros")):
         replacement = meaning if text == code else f"({meaning})"
         text = re.sub(rf"\b{code}\b", replacement, text)
     return text
+
+
+def source_column_label(field: dict) -> str:
+    """Recover word boundaries and source roles from the recorded header."""
+    name = str(field.get("name") or "")
+    origin = field.get("measure_grain") or {}
+    original = str(origin.get("source_column") or name)
+    derived = derive_label(original)
+    saved = str(field.get("display_label") or "")
+    original_key = re.sub(r"[^a-z0-9]", "", original.lower())
+    saved_key = re.sub(r"[^a-z0-9]", "", saved.lower())
+    label = derived if not saved or saved_key == original_key else saved
+    if original_key == "dob" and (field.get("is_date") or field.get("analysis_role") == "temporal_dimension"):
+        return "Date of birth"
+    if original.isalpha() and original.isupper() and len(original) <= 3 and (not saved or saved_key == original_key):
+        label = original
+    if original.lower() in {"name", "country", "city", "state", "code", "type", "active", "alias"}:
+        table = str(origin.get("source_role_label") or origin.get("source_role") or origin.get("source_sheet") or origin.get("source_table") or "")
+        table = re.sub(r"\.(csv|tsv|xlsx?|parquet)$", "", table, flags=re.I)
+        table = re.split(r"[/\\]", table)[-1]
+        table_label = derive_label(table)
+        table_key = re.sub(r"[^a-z0-9]", "", table_label.lower())
+        label_key = re.sub(r"[^a-z0-9]", "", label.lower())
+        if table_label and table_key not in {label_key, label_key + "s"} and not label_key.startswith(table_key.rstrip("s")):
+            if table_label.endswith("ies"):
+                table_label = table_label[:-3] + "y"
+            elif table_label.endswith("s") and not table_label.endswith("ss"):
+                table_label = table_label[:-1]
+            label = f"{table_label} {sentence_label(label)}"
+    return label or derive_label(name)
 
 
 def _extract_unit(tokens: list[str]) -> tuple[list[str], str]:

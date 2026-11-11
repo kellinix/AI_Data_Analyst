@@ -81,7 +81,7 @@ def present_histogram(chart: dict[str, Any], context: dict | None = None) -> dic
     if total:
         largest_indices = [i for i, value in enumerate(counts) if value == largest]
         if len(largest_indices) == 1:
-            result["description"] += f" Most common range: about {labels[largest_indices[0]]}, with {largest:,.0f} of the {total:,.0f} entries shown."
+            result["description"] += f" The range with the most entries is about {labels[largest_indices[0]]}, with {largest:,.0f} of the {total:,.0f} entries shown."
         else:
             result["description"] += f" {len(largest_indices)} ranges share the highest count of {largest:,.0f} entries."
     if total >= 10_000:

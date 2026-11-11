@@ -20,17 +20,18 @@ try {
  option.tooltip={...(option.tooltip||{}),renderMode:'richText',confine:true,backgroundColor:'#261D3F',borderColor:'#6D55A0',textStyle:{color:'#FFFFFF',fontSize:12}};
  option.backgroundColor='#fff';
  option.textStyle={...(option.textStyle||{}),fontFamily:'system-ui',fontSize:11,color:'#5F5874'};
- function numeric(value){return new Intl.NumberFormat(undefined,{notation:'compact',maximumFractionDigits:1,...(currency?{style:'currency',currency}:{} )}).format(value)}
+ function numeric(value,unit){return new Intl.NumberFormat(undefined,{notation:'compact',maximumFractionDigits:1,...(unit?{style:'currency',currency:unit}:{} )}).format(value)}
  ['xAxis','yAxis'].forEach(key=>{
    if(!option[key])return;
    const axes=Array.isArray(option[key])?option[key]:[option[key]];
    axes.forEach(axis=>{
      axis.axisLabel={...(axis.axisLabel||{}),hideOverlap:true,color:'#706985'};
      if(rangeCounts&&axis.type==='category')axis.axisLabel={...axis.axisLabel,hideOverlap:false,interval:0,lineHeight:13,formatter:value=>String(value).length>18?String(value).replace(' to ','\\nto '):String(value)};
-     if(key==='xAxis'&&axis._monthYearLabels){const labels=axis._monthYearLabels;axis.axisLabel.formatter=value=>labels[String(value)]||String(value);axis.name='Month';delete axis._monthYearLabels;}
+     if(key==='xAxis'&&axis._monthYearLabels){const labels=axis._monthYearLabels;axis.axisLabel.formatter=value=>labels[String(value)]||String(value);axis.name=axis.name||'Month';delete axis._monthYearLabels;}
      axis.axisLine={...(axis.axisLine||{}),lineStyle:{color:'#E8E1F1'}};
      if(axis.type==='value')axis.splitLine={show:true,lineStyle:{color:'#ECE7F3',type:'dashed'}};
-     if(axis.type==='value'||axis.type==='log')axis.axisLabel.formatter=axis._percentage?value=>Math.round(value*100)+'%':numeric;
+     const axisCurrency=axis._currency||((option.series||[]).some(series=>series.type==='scatter')?null:currency);
+     if(axis.type==='value'||axis.type==='log')axis.axisLabel.formatter=axis._percentage?value=>Math.round(value*100)+'%':value=>numeric(value,axisCurrency);
    });
  });
  if(rangeCounts)(option.series||[]).forEach(series=>{series.label={...(series.label||{}),formatter:params=>new Intl.NumberFormat().format(params.value)}});
@@ -45,6 +46,36 @@ try {
    series.labelLayout={hideOverlap:true};
  });
  if(groupCounts){option.grid={...(option.grid||{}),left:40,right:110,containLabel:true};(option.series||[]).forEach(series=>{if(series.type==='bar')series.label={show:true,position:'right',fontSize:10,color:'#5F5874',formatter:params=>new Intl.NumberFormat(undefined,{maximumFractionDigits:2}).format(params.value)+(percentageValues?'%':'')+' ('+groupCounts[params.name]+(groupCounts[params.name]===1?' record)':' records)')}});}
+ const horizontalBar=option.yAxis&&option.yAxis.type==='category'&&(option.series||[]).some(series=>series.type==='bar');
+ const pie=(option.series||[]).find(series=>series.type==='pie');
+ let smallScreenOption={};
+ if(horizontalBar){
+   smallScreenOption={
+     grid:{left:8,right:56,top:16,bottom:60,containLabel:true},
+     yAxis:{axisLabel:{width:112,overflow:'break',lineHeight:14,interval:0,margin:8}},
+     series:option.series.map(series=>({...series,label:{...(series.label||{}),fontSize:10,
+       formatter:params=>numeric(params.value,currency)+(percentageValues?'%':'')}}))
+   };
+   if(groupCounts)option.tooltip.formatter=params=>{
+     const first=params[0];
+     if(!first)return '';
+     return String(first.name)+'\\n'+String(first.seriesName)+' '+new Intl.NumberFormat(undefined,{maximumFractionDigits:2,...(currency?{style:'currency',currency}:{})}).format(first.value)+(percentageValues?'%':'')+'\\n'+groupCounts[first.name]+' entries with a supplied value';
+   };
+ } else if(pie){
+   const data=pie.data||[];
+   const total=data.reduce((sum,item)=>sum+Number(item.value||0),0);
+   smallScreenOption={
+     legend:{show:true,selectedMode:false,left:0,right:0,bottom:4,itemWidth:10,itemHeight:10,itemGap:12,
+       textStyle:{color:'#5F5874',fontSize:11,lineHeight:16},
+       formatter:name=>{
+         const item=data.find(value=>value.name===name);
+         const value=Number(item?item.value:0);
+         return String(name)+'\\n'+new Intl.NumberFormat(undefined,{maximumFractionDigits:2}).format(value)+' ('+(total?value/total*100:0).toFixed(1)+'%)';
+       }},
+     series:option.series.map(series=>({...series,center:['50%','32%'],radius:['24%','48%'],label:{show:false},labelLine:{show:false}}))
+   };
+ }
+ option.media=[{query:{maxWidth:480},option:smallScreenOption}];
  if(option.yAxis&&option.yAxis._percentage)option.tooltip.formatter=params=>'Grade average: '+params.value[0]+'\\nRecorded admission chance: '+new Intl.NumberFormat(undefined,{maximumFractionDigits:2}).format(params.value[1]*100)+'%';
  const chart=echarts.init(document.getElementById('chart'));
  chart.setOption(option);

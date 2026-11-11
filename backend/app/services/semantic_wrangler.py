@@ -20,7 +20,7 @@ import polars as pl
 from openai import AsyncOpenAI
 
 from app.analytics.football_context import LABELS as FOOTBALL_LABELS
-from app.analytics.labels import derive_label, sentence_label
+from app.analytics.labels import derive_label, source_column_label
 from app.analytics.plain_language import plain_english
 from app.analytics.text_matching import shorten_label
 from app.core.config import settings
@@ -380,33 +380,15 @@ def apply_display_metadata_to_charts(
     display_metadata: dict[str, Any],
 ) -> list[dict[str, Any]]:
     labels = _column_labels(display_metadata)
-    chart_overrides = {
-        str(item.get("id")): item
-        for item in display_metadata.get("charts", [])
-        if isinstance(item, dict) and item.get("id")
-    }
+    from app.services.report_language import present_chart
+
     updated = []
     for chart in charts:
-        override = chart_overrides.get(str(chart.get("id")), {})
         chart_copy = {
             **chart,
-            "title": override.get("title") or _friendly_chart_title(chart, labels),
-            "description": override.get("description") or chart.get("description"),
+            "title": _friendly_chart_title(chart, labels),
+            "description": chart.get("description"),
         }
-        if labels.get("amount") == "Shipment amount" and "amount" in {
-            chart.get("xAxis"), chart.get("yAxis"), *(chart.get("series") or [])
-        }:
-            chart_copy["description"] = re.sub(
-                r"(?<!shipment )\bamount\b", "shipment amount",
-                str(chart_copy.get("description") or ""), flags=re.I,
-            )
-        if (chart.get("type") == "bar" and chart.get("xAxis") in {"money", "total"}
-                and labels.get(chart.get("xAxis")) == "Sales Amount" and not chart.get("series_by")):
-            action = "Average" if chart.get("aggregation") == "average" else "Total"
-            group = sentence_label(labels.get(chart.get("yAxis"), str(chart.get("yAxis") or "group")))
-            chart_copy["description"] = f"{action} sales amount for each {group}."
-            if chart.get("yAxis") == "cash_type":
-                chart_copy["title"] = _friendly_chart_title(chart, labels)
         opt = dict(chart_copy.get("echarts_option") or {})
         if isinstance(opt.get("xAxis"), dict) and chart.get("xAxis"):
             opt["xAxis"] = {**opt["xAxis"], "name": labels.get(chart["xAxis"], chart["xAxis"])}
@@ -425,10 +407,7 @@ def apply_display_metadata_to_charts(
                 for series in opt["series"]
             ]
         chart_copy["echarts_option"] = opt
-        if (opt.get("_columns") or {}).get("cohort_date"):
-            operation = "Average" if chart.get("aggregation") == "average" else "Total"
-            chart_copy["title"] = f"{operation} {labels.get(chart.get('yAxis'), derive_label(str(chart.get('yAxis') or 'value')))} by {derive_label(str(chart.get('xAxis') or 'date'))}"
-        updated.append(chart_copy)
+        updated.append(present_chart(chart_copy, labels=labels))
     return updated
 
 
@@ -567,7 +546,7 @@ def _fallback_display_metadata(
                 else FOOTBALL_LABELS[str(column.get("name"))]
                 if football and column.get("name") in FOOTBALL_LABELS
                 else "Wait time for attended appointments (minutes)" if clinic_wait and column.get("name") == "wait_minutes"
-                else derive_label(str(column.get("name")))
+                else source_column_label(column)
                 or _humanize_identifier(str(column.get("name")))
             ),
             "description": None,
@@ -597,6 +576,13 @@ def _preferred_label(ai_label: str, derived: str, name: str) -> str:
     a column's entire definition, and that must never reach a title.
     """
     ai_label = ai_label.strip()
+    if re.sub(r"[^a-z0-9]", "", ai_label.lower()) == re.sub(r"[^a-z0-9]", "", derived.lower()):
+        return derived
+    if ai_label.lower() in {"name", "country", "city", "state", "code", "type", "active", "alias"}:
+        return derived
+    currency = r"[$£€]|\b(?:USD|GBP|EUR)\b"
+    if re.search(currency, ai_label) and not re.search(currency, derived):
+        return derived
     if ai_label and len(ai_label) <= 48:
         return ai_label
     return shorten_label(derived or ai_label or name, 64)
@@ -682,72 +668,10 @@ def _sample_values_for_column(name: Any, statistics: dict[str, Any]) -> list[str
     return [str(item.get("value")) for item in cat.get("top_values", [])[:5]]
 
 
-# A stacked title names three columns, so each part is bounded. This was 24
-# when a label could be a column's whole 200-character definition; labels are
-# derived now (analytics/labels.py) and run to about 35, so 24 was cutting
-# perfectly readable names into ellipses.
-_STACKED_TITLE_PART = 36
-
-
-def _short_label(text: str, limit: int = 48) -> str:
-    """Chart-title view of the shared shortener.
-
-    The same trimming is needed in insight sentences, so the implementation
-    lives in `analytics/text_matching.py` rather than in two copies that can
-    drift apart.
-    """
-    return shorten_label(text, limit)
-
-
 def _friendly_chart_title(chart: dict[str, Any], labels: dict[str, str]) -> str:
-    chart_type = chart.get("type")
-    x_axis = chart.get("xAxis")
-    y_axis = chart.get("yAxis")
-    x_label = labels.get(x_axis, _humanize_identifier(str(x_axis))) if x_axis else None
-    y_label = labels.get(y_axis, _humanize_identifier(str(y_axis))) if y_axis else None
-    # Read from the chart's own top-level field, not echarts_option._columns —
-    # chart-data population strips that hint out before this function runs.
-    aggregation = chart.get("aggregation")
+    from app.services.report_language import present_chart
 
-    # A stacked chart reverses the plain bar's convention — category on x, the
-    # measure on y — so "{x} by {y}" would read backwards and lose the split.
-    split_by = chart.get("series_by")
-    if chart_type == "bar" and x_label and y_label and split_by:
-        # Every part is trimmed here, not just the split: this title names three
-        # columns, so one long export-style name still overflows the card even
-        # after the other two are short. Plain bars keep their full labels.
-        split_label = _short_label(
-            labels.get(split_by, _humanize_identifier(str(split_by))), _STACKED_TITLE_PART
-        )
-        measure = _short_label(y_label, _STACKED_TITLE_PART)
-        category = _short_label(x_label, _STACKED_TITLE_PART)
-        measure = f"Avg {measure}" if aggregation == "average" else measure
-        return f"{measure} by {category} and {split_label}"
-    if chart_type == "bar" and x_label and y_label:
-        if aggregation == "percent_rate":
-            return f"{x_label} Rate by {y_label}"
-        if aggregation == "average":
-            return f"Avg {x_label} by {y_label}"
-        return f"{x_label} by {y_label}"
-    if chart_type == "line" and x_label and y_label:
-        if len(chart.get("series", [])) > 1:
-            return "Key Metrics Over Time"
-        if "time" in x_label.lower() or "date" in x_label.lower():
-            return f"Average {y_label} Over Time" if aggregation == "average" else f"{y_label} Over Time"
-        return f"{y_label} by {x_label}"
-    if chart_type == "donut" and chart.get("series"):
-        # "Distribution" is a statistics word on a chart aimed at someone who
-        # does not read statistics. This layer rebuilds every title, so the
-        # plainer wording in chart_selector was being overwritten here.
-        series_label = labels.get(
-            chart["series"][0], _humanize_identifier(str(chart["series"][0]))
-        )
-        return f"{series_label} breakdown"
-    if chart_type == "scatter" and x_label and y_label:
-        return f"{x_label} vs {y_label}"
-    if chart_type == "histogram" and x_label:
-        return f"How {x_label} is spread"
-    return str(chart.get("title") or "Chart")
+    return present_chart(chart, labels=labels)["title"]
 
 
 def _humanize_identifier(value: str) -> str:

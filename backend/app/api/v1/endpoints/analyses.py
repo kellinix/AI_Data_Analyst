@@ -10,8 +10,6 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import selectinload
 
-from app.analytics.histogram_presentation import present_histogram
-from app.analytics.line_presentation import present_time_line
 from app.analytics.live_filter import (
     FilterValidationError,
     build_where_clause,
@@ -19,7 +17,6 @@ from app.analytics.live_filter import (
     requery_chart,
     validate_filters,
 )
-from app.analytics.record_context import record_context
 from app.api.deps import DB, CurrentUser, ensure_analysis_quota, ensure_storage_quota
 from app.core.config import settings
 from app.core.limiter import limiter
@@ -47,7 +44,7 @@ from app.schemas.analysis import (
 from app.services.export_service import build_excel_report, build_pdf_report
 from app.services.file_processor import FileProcessor
 from app.services.investigation import ComparisonPlan, EntryRequest, compare, entries
-from app.services.report_language import present_insight, present_metadata
+from app.services.report_language import present_chart, present_insight, present_metadata
 from app.services.semantic_wrangler import SemanticWrangler
 from app.services.summary_refresh import refresh_saved_summary
 from app.services.usage_events import reserve_analysis
@@ -726,7 +723,7 @@ async def query_analysis(
             if patched is None:
                 chart_patches.append(ChartPatch(id=chart["id"], skipped=True))
             else:
-                patched = present_time_line(present_histogram(patched, record_context(analysis.metadata_ or {})))
+                patched = present_chart(patched, analysis.metadata_)
                 chart_patches.append(ChartPatch(
                     id=chart["id"],
                     echarts_option=patched["echarts_option"],
@@ -964,7 +961,7 @@ async def export_pdf(
         column_count=analysis.column_count,
         summary=summary,
         insights=_insight_dicts(analysis),
-        charts=[present_time_line(present_histogram(c, record_context(analysis.metadata_ or {})))
+        charts=[present_chart(c, analysis.metadata_)
                 for c in analysis.charts or []],
         limitations=((presented_metadata or {}).get("analysis_evidence") or {}).get("limitations"),
     )
@@ -992,7 +989,7 @@ async def export_excel(
         column_count=analysis.column_count,
         summary=summary,
         insights=_insight_dicts(analysis),
-        charts=[present_time_line(present_histogram(c, record_context(analysis.metadata_ or {})))
+        charts=[present_chart(c, analysis.metadata_)
                 for c in analysis.charts or []],
         limitations=((presented_metadata or {}).get("analysis_evidence") or {}).get("limitations"),
     )

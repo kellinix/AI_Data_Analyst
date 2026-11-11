@@ -30,7 +30,7 @@ def generate_forecasts(
     reference_date: date | None = None,
 ) -> list[dict[str, Any]]:
     date_columns = [column["name"] for column in schema
-                    if column.get("is_date") and is_observation_date(column["name"])]
+                    if column.get("is_date") and is_observation_date(column["name"], column)]
     if not date_columns:
         return []
 

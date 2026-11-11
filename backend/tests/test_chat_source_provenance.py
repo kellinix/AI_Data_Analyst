@@ -105,7 +105,7 @@ async def test_lookup_grouping_plan_keeps_saved_field_names_and_average_basis(mo
         prompt = kwargs["messages"][0]["content"]
         assert "arithmetic average of a numeric attribute is supported" in prompt
         assert "numeric flag marked binary_0_1 can also be averaged" in prompt
-        assert "restriction applies to the numeric aggregation operand" in prompt
+        assert "source_record_once grain" in prompt
         return SimpleNamespace(usage=None, choices=[SimpleNamespace(message=SimpleNamespace(
             content=json.dumps({"answer_kind": "calculated", "plan": plan})))])
 

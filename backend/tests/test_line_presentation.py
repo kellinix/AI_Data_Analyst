@@ -17,11 +17,11 @@ def test_start_is_the_first_recorded_amount_not_an_invented_zero():
     shown = ChartConfig(**original)
     option = shown.echarts_option
     assert option['xAxis']['boundaryGap'] is False and option['yAxis']['scale'] is True and 'min' not in option['yAxis']
-    assert option['xAxis']['_monthYearLabels']['2025-02-03'] == 'Feb 2025'
+    assert option['xAxis']['_monthYearLabels'] == {}
     assert option['series'][0]['data'] == original['echarts_option']['series'][0]['data']
     assert 'markPoint' not in option['series'][0]
     assert 'First recorded point' not in shown.description
-    assert 'Total revenue for each week' in shown.description
+    assert 'Each point shows total revenue for one week' in shown.description
     assert original == before and ChartConfig(**shown.model_dump()) == shown
 
 

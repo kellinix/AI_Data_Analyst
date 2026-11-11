@@ -461,6 +461,37 @@ function ChartCard({ chart, index, palette }: ChartCardProps) {
   }
 
   const chartColors = CHART_PALETTES[palette]
+  const visibleSeries = dimmedSeries ?? asArray(chartOption.series)
+  const pieData = asArray(asObject(asArray(visibleSeries)[0]).data)
+  const pieTotal = pieData.reduce<number>((total, item) => total + Number(asObject(item).value ?? 0), 0)
+  const smallScreenOption = horizontalBar ? {
+    grid: { left: 8, right: 56, top: 16, bottom: 60, containLabel: true },
+    yAxis: { axisLabel: { width: 112, overflow: "break", lineHeight: 14, interval: 0, margin: 8 } },
+    series: asArray(visibleSeries).map((item) => ({
+      ...asObject(item),
+      label: {
+        ...asObject(asObject(item).label),
+        fontSize: 10,
+        formatter: (params: { value: unknown }) => `${compactNumber(params.value, currency)}${chartOption._percentageValues ? "%" : ""}`,
+      },
+    })),
+  } : chart.type === "donut" ? {
+    legend: {
+      show: true, selectedMode: false, left: 0, right: 0, bottom: 4,
+      itemWidth: 10, itemHeight: 10, itemGap: 12,
+      textStyle: { color: axisText, fontSize: 11, lineHeight: 16 },
+      formatter: (name: string) => {
+        const item = pieData.find((value) => asObject(value).name === name)
+        const value = Number(asObject(item).value ?? 0)
+        const percentage = pieTotal ? value / pieTotal * 100 : 0
+        return `${name}\n${fullNumber(value, currency)} (${percentage.toFixed(1)}%)`
+      },
+    },
+    series: asArray(visibleSeries).map((item) => ({
+      ...asObject(item), center: ["50%", "32%"], radius: ["24%", "48%"],
+      label: { show: false }, labelLine: { show: false },
+    })),
+  } : {}
   const option = {
     ...chartOption,
     color: [...chartColors.slice(index % chartColors.length), ...chartColors.slice(0, index % chartColors.length)],
@@ -489,6 +520,14 @@ function ChartCard({ chart, index, palette }: ChartCardProps) {
       padding: 12,
       textStyle: { color: "#fff", fontSize: 12 },
       ...tooltip,
+      renderMode: "richText",
+      confine: true,
+      ...(horizontalBar && chartOption._group_counts ? { formatter: (params: { name: string; seriesName: string; value: unknown }[]) => {
+        const first = params[0]
+        if (!first) return ""
+        const count = asObject(chartOption._group_counts)[first.name]
+        return `${first.name}\n${first.seriesName} ${fullNumber(first.value, currency)}${chartOption._percentageValues ? "%" : ""}\n${count} entries with a supplied value`
+      } } : {}),
       ...(yAxis._percentage ? { formatter: (params: { value: unknown }) => {
         const point = asArray(params.value)
         return `Grade average: ${fullNumber(point[0])}<br/>Recorded admission chance: ${fullNumber(Number(point[1]) * 100)}%`
@@ -501,7 +540,7 @@ function ChartCard({ chart, index, palette }: ChartCardProps) {
     xAxis: chartOption.xAxis
       ? {
           ...xAxis,
-          name: xAxis._monthYearLabels ? "Month" : xAxis.name,
+          name: xAxis.name || (xAxis._monthYearLabels ? "Month" : undefined),
           nameLocation: "middle",
           nameGap: horizontalBar ? 44 : 48,
           nameTextStyle: {
@@ -515,7 +554,7 @@ function ChartCard({ chart, index, palette }: ChartCardProps) {
             show: !hideXAxisTicks,
             color: axisText,
             hideOverlap: true,
-            formatter: (value: unknown) => compactNumber(value, currency),
+            formatter: (value: unknown) => compactNumber(value, typeof xAxis._currency === "string" ? xAxis._currency : chart.type === "scatter" ? null : currency),
             margin: 10,
             ...xAxisLabel,
             ...(xAxis._monthYearLabels ? { formatter: (value: unknown) => asObject(xAxis._monthYearLabels)[String(value)] ?? String(value) } : {}),
@@ -540,7 +579,7 @@ function ChartCard({ chart, index, palette }: ChartCardProps) {
             show: !hideYAxisTicks,
             color: axisText,
             hideOverlap: true,
-            formatter: horizontalBar ? undefined : (value: unknown) => compactNumber(value, currency),
+            formatter: horizontalBar ? undefined : (value: unknown) => compactNumber(value, typeof yAxis._currency === "string" ? yAxis._currency : chart.type === "scatter" ? null : currency),
             width: horizontalBar ? 230 : undefined,
             overflow: horizontalBar ? "truncate" : undefined,
             margin: horizontalBar ? 10 : 8,
@@ -553,6 +592,7 @@ function ChartCard({ chart, index, palette }: ChartCardProps) {
         }
       : undefined,
     series: dimmedSeries ?? chartOption.series,
+    media: [{ query: { maxWidth: 480 }, option: smallScreenOption }],
   }
 
   return (
@@ -577,7 +617,7 @@ function ChartCard({ chart, index, palette }: ChartCardProps) {
       </div>
       <EChartsReact
         option={option}
-        style={{ height: chart.type === "histogram" ? Math.max(340, asArray(yAxis.data).length * 34 + 100) : horizontalBar ? 340 : 320 }}
+        style={{ height: horizontalBar ? Math.max(340, asArray(yAxis.data).length * 34 + 80) : 320 }}
         opts={{ renderer: "svg" }}
         onEvents={{ click: handleChartClick }}
         lazyUpdate

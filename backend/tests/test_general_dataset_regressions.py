@@ -130,8 +130,8 @@ def test_scatter_separates_sampling_missing_and_nonpositive_exclusions():
         chart = {"type": "scatter", "echarts_option": {"_columns": {"x": "x", "y": "y"},
                  "series": [{"data": []}], "xAxis": {}, "yAxis": {}}}
         populate_chart_option(conn, chart)
-        assert "1 entry with a missing coordinate" in chart["description"]
-        assert "500 complete entries out of 501" in chart["description"]
+        assert "1 entry is missing one of the two figures" in chart["description"]
+        assert "first 500 of 501 entries with both figures filled in" in chart["description"]
         assert "nothing recorded" not in chart["description"]
 
 
@@ -148,7 +148,8 @@ def test_year_axis_cannot_be_relabelled_as_month_by_display_metadata():
     charts = apply_display_metadata_to_charts([chart], {"columns": [{"name": "published_year", "label": "Month"}]})
     result = present_time_line(charts[0])
     assert "month" not in result["echarts_option"]["xAxis"]["name"].lower()
-    assert "each year" in result["description"]
+    assert "their published year" in result["description"]
+    assert "month" not in result["description"]
 
 
 def test_logarithmic_scatter_exports_preserve_scale_and_source_values():

@@ -14,7 +14,7 @@ import duckdb
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.analytics.category_values import category_expression, category_filter_value, category_label
-from app.analytics.labels import reader_label
+from app.analytics.labels import reader_label, source_column_label
 from app.analytics.live_filter import build_where_clause, validate_filters
 from app.analytics.measure_grain import (
     annotate_measure_grain,
@@ -92,6 +92,11 @@ def label(column: Any) -> str:
     return reader_label(str(column or "entries"))
 
 
+def _field_label(column: str | None, schema: dict[str, dict]) -> str:
+    field = schema.get(column or "")
+    return reader_label(source_column_label(field)) if field else label(column)
+
+
 def _display_number(value: int | float, scale: str | None = None) -> str:
     return f"{value:,.6g}" if scale == "unconfirmed" else _format(value)
 
@@ -152,6 +157,36 @@ def _decimal_aggregate(values: list[str | None] | None, operation: str) -> float
         return float(total / count if operation == "average" else total)
 
 
+def _source_measure_basis(plan: ComparisonPlan, schema: dict[str, dict]) -> dict | None:
+    """Resolve a repeated measure's recorded source identity without guessing."""
+    measure = schema.get(plan.column or "") or {}
+    if not is_repeated_lookup(measure):
+        return None
+    if plan.aggregation not in {"sum", "average"}:
+        raise ComparisonUnavailable(lookup_aggregation_message(measure))
+    origin = measure.get("measure_grain") or {}
+    keys = origin.get("entity_key_columns")
+    source = {name: origin.get(name) for name in ("source_table", "source_sheet", "source_role", "relationship_path")}
+    valid = (origin.get("key_basis") == "parent_primary" and isinstance(source["source_table"], str) and source["source_table"].strip()
+             and isinstance(origin.get("source_column"), str) and origin["source_column"].strip()
+             and isinstance(keys, list) and keys and all(isinstance(key, str) and key for key in keys)
+             and len(keys) == len(set(keys)))
+    if valid:
+        for key in keys:
+            key_origin = (schema.get(key) or {}).get("measure_grain") or {}
+            if (key not in schema or key_origin.get("key_basis") != "parent_primary"
+                    or key_origin.get("entity_key_columns") != keys
+                    or any(key_origin.get(name) != value for name, value in source.items())):
+                valid = False
+                break
+    if not valid:
+        raise ComparisonUnavailable(
+            "This number is copied from another table. The saved report does not contain its complete source ID. "
+            "Analyse the original related tables again so each source record can be counted once."
+        )
+    return {"kind": "source_entities", **source, "entity_key_columns": list(keys)}
+
+
 def validate_plan(plan: ComparisonPlan, metadata: dict) -> tuple[str, str | None, list[dict]]:
     schema = _schema(metadata)
     if plan.aggregation == "retention":
@@ -190,8 +225,7 @@ def validate_plan(plan: ComparisonPlan, metadata: dict) -> tuple[str, str | None
             column = _identifier_expression(plan.column) if measure.get("analysis_role") == "identifier" else quote(plan.column)
             expression = f"COUNT(DISTINCT CASE WHEN TRIM(CAST({column} AS VARCHAR)) <> '' AND LOWER(TRIM(CAST({column} AS VARCHAR))) <> 'unknown' THEN {column} END)"
         else:
-            if is_repeated_lookup(measure):
-                raise ComparisonUnavailable(lookup_aggregation_message(measure))
+            _source_measure_basis(plan, schema)
             if plan.aggregation == "average" and measure.get("is_numeric") and measure.get("analysis_role") == "flag" and not _verified_binary_flag(plan.column, metadata):
                 raise ComparisonUnavailable("An average requires saved measurements that verify every supplied flag is 0 or 1.")
             descriptive_average = plan.aggregation == "average" and measure.get("analysis_role") in {"flag", "attribute"}
@@ -379,8 +413,8 @@ def _scope(analysis: Any, rows: int, truncated: bool) -> str:
     return text
 
 
-def _filter_description(selected: dict) -> str:
-    name, values = label(selected["column"]), selected["values"]
+def _filter_description(selected: dict, schema: dict[str, dict] | None = None) -> str:
+    name, values = _field_label(selected["column"], schema or {}), selected["values"]
     if selected["op"] == "date_between":
         start, end = (date.fromisoformat(str(value)).strftime("%d %b %Y").lstrip("0") for value in values)
         return f"{name} was from {start} to {end}"
@@ -391,23 +425,64 @@ def _filter_description(selected: dict) -> str:
     return f"{name} was " + " or ".join(str(value) for value in values)
 
 
+def _source_aggregation_relation(
+    conn: duckdb.DuckDBPyConnection, plan: ComparisonPlan, schema: dict[str, dict],
+    basis: dict, group: str | None, where: str, params: list[Any],
+) -> tuple[str, str | None, str]:
+    """Return one value per source key and retain the number of supporting rows."""
+    keys = [_identifier_expression(name) for name in basis["entity_key_columns"]]
+    complete = " AND ".join(f"({key} IS NOT NULL AND LOWER({key}) <> 'unknown')" for key in keys)
+    missing = f"{quote(plan.column)} IS NOT NULL AND NOT ({complete})"
+    missing_where = f"({where}) AND ({missing})" if where else missing
+    if conn.execute(f"SELECT EXISTS(SELECT 1 FROM data WHERE {missing_where})", params).fetchone()[0]:
+        raise ComparisonUnavailable("Some matching numbers have no complete source ID. Repair those IDs before adding or averaging them.")
+
+    prefix = "__vesquiri_source"
+    while any(name.casefold().startswith(prefix.casefold()) for name in schema):
+        prefix += "_"
+    aliases = [f"{prefix}_key_{index}" for index in range(len(keys))]
+    selected_keys = ", ".join(f"{key} AS {quote(alias)}" for key, alias in zip(keys, aliases, strict=True))
+    selected_where = f"({where}) AND ({complete})" if where else complete
+    chosen = f"WITH chosen AS (SELECT DISTINCT {selected_keys} FROM data WHERE {selected_where}) "
+    joining = " AND ".join(f"{key} = chosen.{quote(alias)}" for key, alias in zip(keys, aliases, strict=True))
+    column = quote(plan.column)
+    # Check all copies of each selected source record, including copies hidden
+    # by a fact-row filter. A filter cannot conceal conflicting source values.
+    different_values = f"COUNT(DISTINCT {column}) + CASE WHEN COUNT(*) FILTER (WHERE {column} IS NULL) > 0 THEN 1 ELSE 0 END"
+    conflict = chosen + f"SELECT EXISTS(SELECT 1 FROM data JOIN chosen ON {joining} GROUP BY {', '.join(keys)} HAVING {different_values} > 1)"
+    if conn.execute(conflict, params).fetchone()[0]:
+        raise ComparisonUnavailable("Copies of the same source record have different numbers. Repair those source values before adding or averaging them.")
+    if group:
+        different_groups = f"COUNT(DISTINCT {group}) + CASE WHEN COUNT(*) FILTER (WHERE {group} IS NULL) > 0 THEN 1 ELSE 0 END"
+        conflict = f"SELECT EXISTS(SELECT 1 FROM data WHERE {selected_where} GROUP BY {', '.join(keys)} HAVING {different_groups} > 1)"
+        if conn.execute(conflict, params).fetchone()[0]:
+            raise ComparisonUnavailable("The same source record belongs to several selected groups. Choose a source-level grouping so its whole value is counted once.")
+    support = quote(f"{prefix}_entries")
+    group_alias = quote(f"{prefix}_group")
+    selected_group = f", FIRST({group}) AS {group_alias}" if group else ""
+    relation = (f"(SELECT FIRST({column}) AS {column}{selected_group}, COUNT(*) AS {support} "
+                f"FROM data WHERE {selected_where} GROUP BY {', '.join(keys)})")
+    return relation, group_alias if group else None, support
+
+
 async def compare(analysis: Any, plan: ComparisonPlan, *, resolve_categories: bool = False) -> dict[str, Any]:
     expression, group, filters = validate_plan(plan, analysis.metadata_ or {})
+    schema = _schema(analysis.metadata_ or {})
     from app.analytics.admission_context import is_admission
     from app.analytics.survey_context import survey_fields
-    survey = survey_fields(list(_schema(analysis.metadata_ or {}).values()))
-    percentage = plan.column == "chance_of_admit" and plan.aggregation in {"average", "weighted_average"} and is_admission(list(_schema(analysis.metadata_ or {}).values()))
+    survey = survey_fields(list(schema.values()))
+    percentage = plan.column == "chance_of_admit" and plan.aggregation in {"average", "weighted_average"} and is_admission(list(schema.values()))
     if percentage:
         expression = f"100.0 * ROUND(({expression}), 12)"
     conn, rows, truncated = await _load(analysis)
     try:
         _check_relationship_fields(conn, analysis.metadata_ or {}, plan)
         if resolve_categories:
-            plan = _resolve_category_filters(conn, plan, _schema(analysis.metadata_ or {}))
+            plan = _resolve_category_filters(conn, plan, schema)
             _expression, _group, filters = validate_plan(plan, analysis.metadata_ or {})
         if plan.aggregation == "retention":
             return _retention_result(conn, analysis, plan, expression, filters, rows, truncated)
-        where, params = _comparison_where(filters, _schema(analysis.metadata_ or {}))
+        where, params = _comparison_where(filters, schema)
         if survey and plan.column == survey["percentage"]:
             exclude_average = f"LOWER(CAST({quote(survey['country'])} AS VARCHAR)) <> 'average'"
             where = f"({where}) AND {exclude_average}" if where else exclude_average
@@ -420,29 +495,42 @@ async def compare(analysis: Any, plan: ComparisonPlan, *, resolve_categories: bo
             if conn.execute(f"SELECT EXISTS(SELECT 1 FROM data WHERE {invalid_where})", params).fetchone()[0]:
                 raise ValueError("Some values in this measure cannot be used as numbers. Check the file before comparing it.")
         matched = conn.execute("SELECT COUNT(*) FROM data" + clause, params).fetchone()[0]
+        basis = _source_measure_basis(plan, schema) if plan.aggregation in {"sum", "average"} else None
+        relation, query_group, support = "data" + clause, group, None
+        if basis:
+            relation, query_group, support = _source_aggregation_relation(
+                conn, plan, schema, basis, group, where, params)
+        entry_count = f"COALESCE(SUM({support}), 0)" if support else "COUNT(*)"
         supplied = "COUNT(*)" if plan.column is None else f"COUNT({quote(plan.column)})"
         if plan.aggregation == "weighted_average":
             supplied = f"COUNT(CASE WHEN {quote(plan.column)} IS NOT NULL AND {quote(plan.weight_column)} > 0 THEN 1 END)"
         if group:
-            sql = f"SELECT {group} AS group_name, {expression} AS result, COUNT(*) AS entries, {supplied} AS supplied FROM data{clause} GROUP BY 1"
+            sql = f"SELECT {query_group} AS group_name, {expression} AS result, {entry_count} AS entries, {supplied} AS supplied, COUNT(*) AS entities FROM {relation} GROUP BY 1"
             group_count = conn.execute(f"SELECT COUNT(*) FROM ({sql})", params).fetchone()[0]
-            result = conn.execute(f"SELECT *, COUNT(*) OVER (PARTITION BY result) AS tied FROM ({sql}) ranked"
+            result = conn.execute(f"SELECT group_name, result, entries, supplied, COUNT(*) OVER (PARTITION BY result) AS tied, entities FROM ({sql}) ranked"
                                   + f" ORDER BY result {plan.order.upper()} NULLS LAST, group_name NULLS LAST LIMIT ?",
                                   [*params, max(plan.limit, 2)]).fetchall()
         else:
             group_count = 1
-            result = [(None, *conn.execute(f"SELECT {expression}, COUNT(*), {supplied} FROM data{clause}", params).fetchone())]
+            result = [(None, *conn.execute(f"SELECT {expression}, {entry_count}, {supplied}, COUNT(*) FROM {relation}", params).fetchone())]
         if any(isinstance(row[1], float) and not math.isfinite(row[1]) for row in result):
             raise ValueError("Some values in this measure cannot be used as numbers. Check the file before comparing it.")
         groups = [{"group": _display_group(plan.group_by, r[0], plan.date_bucket) if plan.group_by else None,
                    "group_value": str(r[0]) if r[0] is not None else None,
                    "value": _cell(r[1]), "entries": int(r[2]), "supplied_values": int(r[3])} for r in result[:plan.limit]]
+        if basis:
+            for row, raw in zip(groups, result, strict=False):
+                row["aggregation_entities"] = int(raw[-1])
+            entities, supplied_entities, supporting = conn.execute(
+                f"SELECT COUNT(*), {supplied}, {entry_count} FROM {relation}", params).fetchone()
+            basis = {**basis, "entities": entities, "supplied_entities": supplied_entities,
+                     "supporting_entries": supporting, "entries_without_source_id": matched - supporting}
         research_labels = {"0": "No research experience", "1": "Research experience recorded"} if percentage and plan.group_by == "research" else {}
         for row in groups:
             row["group"] = research_labels.get(row["group_value"], row["group"])
         operation = {"sum": "Total", "average": "Average", "count": "Entry count", "distinct_count": "Different values for", "weighted_average": "Average"}[plan.aggregation]
-        measure_label = label(plan.column) if plan.column else ""
-        scale = (_schema(analysis.metadata_ or {}).get(plan.column or "") or {}).get("percentage_scale")
+        measure_label = _field_label(plan.column, schema) if plan.column else ""
+        scale = (schema.get(plan.column or "") or {}).get("percentage_scale")
         if scale == "unconfirmed":
             measure_label = raw_percentage_label(plan.column)
         if percentage:
@@ -455,27 +543,33 @@ async def compare(analysis: Any, plan: ComparisonPlan, *, resolve_categories: bo
             lines.append(prefix + (f"{title} is {_display_number(value, scale)}." if value is not None else f"No {measure_label or 'matching entries'} value is available."))
         if not matched:
             lines = ["No entries match this comparison."]
-        note = _scope(analysis, rows, truncated) + _identifier_note(plan, _schema(analysis.metadata_ or {}))
+        note = _scope(analysis, rows, truncated) + _identifier_note(plan, schema)
+        if basis:
+            note += (f" We used each matching record from {basis['source_table']} once. "
+                     f"This calculation uses {basis['entities']:,} source records linked to {basis['supporting_entries']:,} report entries. "
+                     "Records with the same number are still counted separately when their IDs differ.")
+            if basis["entries_without_source_id"]:
+                note += f" {basis['entries_without_source_id']:,} entries had no matching source record and were left out."
         if scale == "unconfirmed":
             note += " " + SCALE_WARNING
         if survey and plan.column == survey["percentage"]:
             note += " Supplied Average rows are excluded; these are country percentages, not an overall population estimate."
         if filters:
             note += f" Your choices selected {matched:,} entries."
-            note += " We used entries where " + ", and ".join(_filter_description(f) for f in filters) + "."
+            note += " We used entries where " + ", and ".join(_filter_description(f, schema) for f in filters) + "."
         if group_count > len(groups):
             note += f" Showing {len(groups)} of {group_count} groups, ordered by the result."
         if plan.aggregation == "weighted_average":
-            note += f" Entries with a larger {label(plan.weight_column)} have more say in this average. Only weights above zero are used."
+            note += f" Entries with a larger {_field_label(plan.weight_column, schema)} have more say in this average. Only weights above zero are used."
         if plan.aggregation == "distinct_count":
             note += " We counted each different value once. We have not checked who or what each value belongs to."
         if plan.aggregation == "sum":
-            note += f" We added the filled-in numbers for {label(plan.column)}. Blank values are left out of the calculation."
+            note += f" We added the filled-in numbers for {measure_label}. Blank values are left out of the calculation."
         if plan.aggregation == "average":
-            note += f" We added the filled-in numbers for {label(plan.column)}. Then we divided by how many numbers there were. Blank values are left out of the calculation."
+            note += f" We added the filled-in numbers for {measure_label}. Then we divided by how many numbers there were. Blank values are left out of the calculation."
         answer = "\n\n".join(lines)
         if group:
-            title += f" by {label(plan.group_by)}"
+            title += f" by {_field_label(plan.group_by, schema)}"
             answer = title + ":\n\n" + answer
         ranking = {"tied": int(result[0][4]),
                    "runner_up": {"group": _display_group(plan.group_by, result[1][0], plan.date_bucket),
@@ -487,8 +581,12 @@ async def compare(analysis: Any, plan: ComparisonPlan, *, resolve_categories: bo
                 "evidence_revision": evidence_revision(analysis.id, analysis.row_count, analysis.metadata_ or {}),
                 "matched_entries": matched, "group_count": group_count, "plan": plan.model_dump(),
                 "record_context": record_context(analysis.metadata_ or {}),
-                "measure_label": measure_label, "percentage_scale": scale,
+                "measure_label": measure_label, "group_label": _field_label(plan.group_by, schema) if group else None,
+                "weight_label": _field_label(plan.weight_column, schema) if plan.weight_column else None,
+                "percentage_scale": scale,
                 "calculation": expression, "source": "analysed_file", "sample_truncated": truncated, "value_unit": "%" if percentage else None}
+        if basis:
+            response["aggregation_basis"] = basis
         response["answer"] = comparison_answer(response)
         return response
     finally:
@@ -523,7 +621,7 @@ def _resolve_category_filters(conn: duckdb.DuckDBPyConnection, plan: ComparisonP
                     if not conn.execute(f"SELECT EXISTS(SELECT 1 FROM data WHERE {predicate})", params).fetchone()[0]:
                         kind = "code" if schema[column].get("analysis_role") == "identifier" else "value"
                         choice = "the exact code shown" if kind == "code" else "a recorded value"
-                        raise ComparisonUnavailable(f"The requested {label(column)} {kind} {str(value)!r} was not found. Choose {choice} in this report.")
+                        raise ComparisonUnavailable(f"The requested {_field_label(column, schema)} {kind} {str(value)!r} was not found. Choose {choice} in this report.")
                     values.append(value)
                     continue
                 exact = category_filter_value(column, value)
@@ -535,7 +633,7 @@ def _resolve_category_filters(conn: duckdb.DuckDBPyConnection, plan: ComparisonP
                     [exact]).fetchall()
                 if len(matches) != 1:
                     reason = "matches multiple recorded categories" if matches else "does not match a recorded category"
-                    raise ComparisonUnavailable(f"The requested {label(column)} value {str(value)!r} {reason}. Choose the exact category shown in this report.")
+                    raise ComparisonUnavailable(f"The requested {_field_label(column, schema)} value {str(value)!r} {reason}. Choose the exact category shown in this report.")
                 values.append(matches[0][0])
             selected["values"] = values
     return ComparisonPlan.model_validate(resolved)
@@ -587,7 +685,8 @@ def _retention_result(conn: duckdb.DuckDBPyConnection, analysis: Any, plan: Comp
         f"SELECT COUNT(*), COUNT(CASE WHEN {valid} THEN 1 END) FROM data WHERE {baseline_where}",
         baseline_params).fetchone()
     value = 100.0 * numerator / denominator if denominator else None
-    items = f"{label(plan.column)}s" if label(plan.column).endswith(" ID") else f"different {label(plan.column)} values"
+    entity_label = _field_label(plan.column, schema)
+    items = f"{entity_label}s" if entity_label.endswith(" ID") else f"different {entity_label} values"
     first = _cohort_label(plan.cohort_filters, "the first group")
     second = _cohort_label(plan.return_filters, "the second group")
     title = f"How many {items} appear in both groups"
@@ -597,13 +696,13 @@ def _retention_result(conn: duckdb.DuckDBPyConnection, analysis: Any, plan: Comp
     if value is not None and 1 <= value <= 99:
         answer += f" That is about {value:.0f} out of every 100."
     scope = _scope(analysis, rows, truncated) + _identifier_note(plan, schema)
-    scope += f" We counted each different {label(plan.column)} once in each group. Blank values and values marked 'unknown' were left out."
+    scope += f" We counted each different {entity_label} once in each group. Blank values and values marked 'unknown' were left out."
     if re.search(r"(?:^|[\s_])(id|key|code)$", str(plan.column), re.I):
         scope += " An ID is a code in your file. We have not checked who or what each code belongs to."
     if denominator:
         scope += f" We divided {numerator:,} by {denominator:,} and multiplied by 100 to get the percentage."
     for description, selected in (("first", baseline_filters), ("second", return_filters)):
-        scope += f" In the {description} group, " + ", and ".join(_filter_description(f) for f in selected) + "."
+        scope += f" In the {description} group, " + ", and ".join(_filter_description(f, schema) for f in selected) + "."
     return {
         "title": title, "answer": answer, "scope": scope,
         "groups": [{"group": None, "group_value": None, "value": value,
@@ -637,8 +736,10 @@ def comparison_answer(result: dict) -> str:
     scale = result.get("percentage_scale")
     context = result.get("record_context") or {}
     singular, plural = context.get("singular", "entry"), context.get("plural", "entries")
+    if result.get("aggregation_basis", {}).get("kind") == "source_entities":
+        singular = "source record"
     metric = {"sum": f"total {measure}", "average": f"average {measure} per {singular}",
-              "weighted_average": f"{measure}, weighted by {label(plan.get('weight_column'))}",
+              "weighted_average": f"{measure}, weighted by {result.get('weight_label') or label(plan.get('weight_column'))}",
               "count": f"number of {plural}", "distinct_count": f"number of different {measure} values"}.get(operation)
     if metric is None:
         return result.get("answer", "")
@@ -648,9 +749,9 @@ def comparison_answer(result: dict) -> str:
     rank = "lowest" if plan.get("order") == "asc" else "highest"
     def group_label(value: Any) -> str:
         if value is None:
-            return f"Entries without {label(plan['group_by'])}"
+            return f"Entries without {result.get('group_label') or label(plan['group_by'])}"
         text = _display_group(plan["group_by"], value, plan.get("date_bucket"))
-        name = label(plan["group_by"])
+        name = result.get("group_label") or label(plan["group_by"])
         return f"{name[:1].upper() + name[1:]} {text}" if not plan.get("date_bucket") and re.fullmatch(r"-?\d+(?:\.\d+)?", text) else text
 
     subject = group_label(first.get("group"))
@@ -837,6 +938,13 @@ async def entries(analysis: Any, request: EntryRequest) -> dict[str, Any]:
     try:
         if request.comparison:
             _check_relationship_fields(conn, metadata, request.comparison)
+        basis = _source_measure_basis(request.comparison, schema) if request.comparison and request.comparison.aggregation in {"sum", "average"} else None
+        if basis:
+            source_where, source_params = _comparison_where(filters, schema)
+            _source_aggregation_relation(conn, request.comparison, schema, basis, group, source_where, source_params)
+            keys = [_identifier_expression(name) for name in basis["entity_key_columns"]]
+            complete = " AND ".join(f"({key} IS NOT NULL AND LOWER({key}) <> 'unknown')" for key in keys)
+            predicate = f"({predicate}) AND ({complete})" if predicate else complete
         columns = list(schema)
         # Entry numbers describe positions in the analysed copy, never Excel
         # row numbers. Exact-repeat numbering excludes the first copy.
@@ -846,6 +954,9 @@ async def entries(analysis: Any, request: EntryRequest) -> dict[str, Any]:
         cte = f"WITH indexed AS (SELECT *, row_number() OVER () AS {quote(entry_name)} FROM data), numbered AS (SELECT *, row_number() OVER (PARTITION BY {partition} ORDER BY {quote(entry_name)}) AS {quote(repeat_name)} FROM indexed) "
         where = f" WHERE {predicate}" if predicate else ""
         matched = conn.execute(cte + "SELECT COUNT(*) FROM numbered" + where, params).fetchone()[0]
+        if basis:
+            entity_count = conn.execute(cte + f"SELECT COUNT(*) FROM (SELECT DISTINCT {', '.join(keys)} FROM numbered{where})", params).fetchone()[0]
+            basis = {**basis, "entities": entity_count, "supporting_entries": matched}
         if expected is not None and matched != expected:
             raise ValueError("The file no longer matches this saved check. Analyse it again before reviewing these entries.")
         if request.kind == "insight" and not matched:
@@ -853,7 +964,8 @@ async def entries(analysis: Any, request: EntryRequest) -> dict[str, Any]:
         priority = [c for role in ("identifier", "temporal_dimension", "dimension") for c in columns if schema[c].get("analysis_role") == role]
         measure = request.comparison.column if request.comparison else (spec.get("issue") or spec.get("anomaly") or spec).get("column")
         context = record_context(metadata)
-        shown = list(dict.fromkeys([*([measure] if measure else []), *identifying_columns(schema, context), *priority, *columns]))[:20]
+        source_keys = basis["entity_key_columns"] if basis else []
+        shown = list(dict.fromkeys([*([measure] if measure else []), *source_keys, *identifying_columns(schema, context), *priority, *columns]))[:20]
         selected = ", ".join(quote(c) for c in shown)
         found = conn.execute(cte + f"SELECT {quote(entry_name)}, {selected} FROM numbered{where} ORDER BY {quote(entry_name)} LIMIT ? OFFSET ?", [*params, request.limit, request.offset]).fetchall()
         records = []
@@ -865,11 +977,15 @@ async def entries(analysis: Any, request: EntryRequest) -> dict[str, Any]:
             scope += _identifier_note(request.comparison, schema)
         if request.comparison and request.comparison.aggregation == "retention":
             scope += " Shows entries from the first group with a filled-in ID. One ID can appear on several entries. We count it only once when working out the percentage."
+        if basis:
+            scope += (f" These {matched:,} supporting entries link to {basis['entities']:,} records from {basis['source_table']}. "
+                      "Each source record was counted once in the calculation. Its number can appear on several supporting entries.")
         if context:
             scope = scope.replace("entry numbers", "record positions").replace("entries", context["plural"])
         return {"matched_entries": matched, "offset": request.offset, "limit": request.limit,
+                **({"aggregation_basis": basis} if basis else {}),
                 "record_context": context,
-                "columns": [{"name": c, "label": label(c), "is_date": bool(schema[c].get("is_date"))} for c in shown],
+                "columns": [{"name": c, "label": _field_label(c, schema), "is_date": bool(schema[c].get("is_date"))} for c in shown],
                 "entries": records,
                 "scope": scope + (f" Showing {len(shown)} of {len(columns)} fields, with identifying details first." if len(shown) < len(columns) else ""), "sample_truncated": truncated,
                 "has_more": request.offset + len(found) < matched}

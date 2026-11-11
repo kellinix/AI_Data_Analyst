@@ -17,10 +17,24 @@ def annotate_measure_grain(
         parser.get("relationship_resolution"),
         (report.get("parser") or {}).get("relationship_resolution"),
     ]
+    def merge_origins(previous, supplied):
+        previous = previous if isinstance(previous, dict) else {}
+        supplied = supplied if isinstance(supplied, dict) else {}
+        merged = {**previous, **supplied}
+        identity = ["source_table", "source_column", "source_sheet", "source_role", "relationship_path", "entity_key_columns"]
+        if any(key in previous and key in supplied and previous[key] != supplied[key] for key in identity):
+            merged.update(key_basis="conflicting_sources", entity_key_columns=[])
+        if previous.get("kind") == "lookup" or supplied.get("kind") == "lookup":
+            merged["kind"] = "lookup"
+        if previous.get("repeated") is True or supplied.get("repeated") is True:
+            merged["repeated"] = True
+        return merged
+
     origins = {}
     for resolution in candidates:
         if isinstance(resolution, dict):
-            origins.update(resolution.get("field_origins") or {})
+            for name, origin in (resolution.get("field_origins") or {}).items():
+                origins[name] = merge_origins(origins.get(name), origin)
     renames = report.get("renamed_columns") or {}
     names = {field["name"] for field in schema}
     canonical = {}
@@ -34,19 +48,24 @@ def annotate_measure_grain(
             mapped = matches[0] if len(matches) == 1 else None
         return mapped
 
+    def mapped_origin(origin):
+        mapped = dict(origin) if isinstance(origin, dict) else {}
+        if "entity_key_columns" in mapped:
+            entity_keys = []
+            for original_key in origin.get("entity_key_columns", []):
+                cleaned_key = mapped_column(original_key)
+                entity_keys.append(cleaned_key if cleaned_key is not None else original_key)
+            mapped["entity_key_columns"] = entity_keys
+        return mapped
+
     selected = {}
     for name, origin in origins.items():
         mapped = mapped_column(name)
         if mapped and isinstance(origin, dict):
-            entity_keys = []
-            for original_key in origin.get("entity_key_columns", []):
-                cleaned_key = mapped_column(original_key)
-                if cleaned_key is not None:
-                    entity_keys.append(cleaned_key)
-            selected[mapped] = {**origin, "entity_key_columns": entity_keys}
+            selected[mapped] = mapped_origin(origin)
     annotated = []
     for field in schema:
-        origin = selected.get(field["name"])
+        origin = merge_origins(mapped_origin(field.get("measure_grain")), selected.get(field["name"]))
         annotated.append({**field, "measure_grain": origin} if origin else dict(field))
     return annotated
 

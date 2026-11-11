@@ -117,6 +117,29 @@ async def test_two_matching_source_fields_remain_ambiguous(monkeypatch):
     assert "source_bindings" not in metadata
 
 
+async def test_explicit_lookup_role_selects_the_matching_copied_attribute(monkeypatch):
+    source = dimension("source_country", "Airports.csv", "Country")
+    destination = dimension("destination_country", "Airports.csv", "Country")
+    source["measure_grain"]["source_role"] = "source_airport"
+    destination["measure_grain"]["source_role"] = "destination_airport"
+    schema = [fields()[0], source, destination]
+    _, actual, metadata = await captured_plan(monkeypatch, schema,
+        "Which source airport country has the highest total units?", group_by="destination_country")
+    assert actual["group_by"] == "source_country"
+    assert metadata["source_bindings"][0]["source_role"] == "source_airport"
+
+
+async def test_unspecified_lookup_role_does_not_guess_between_copied_attributes(monkeypatch):
+    source = dimension("source_country", "Airports.csv", "Country")
+    destination = dimension("destination_country", "Airports.csv", "Country")
+    source["measure_grain"]["source_role"] = "source_airport"
+    destination["measure_grain"]["source_role"] = "destination_airport"
+    _, actual, metadata = await captured_plan(monkeypatch, [fields()[0], source, destination],
+        "Which airport country has the highest total units?", group_by="destination_country")
+    assert actual["group_by"] == "destination_country"
+    assert "source_bindings" not in metadata
+
+
 @pytest.mark.parametrize("difference", ["semantic_type", "analysis_role"])
 async def test_semantic_and_role_differences_do_not_rebind(monkeypatch, difference):
     schema = fields()

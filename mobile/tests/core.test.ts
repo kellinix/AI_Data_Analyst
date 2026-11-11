@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { randomFillSync, webcrypto } from 'node:crypto';
+import { runInNewContext } from 'node:vm';
 import { createClient } from '@supabase/supabase-js';
 import { ApiError, createApi, errorDetail } from '../src/lib/api-core';
 import { chunkedStorage, type KeyValueStore } from '../src/lib/secure-storage';
@@ -158,6 +159,60 @@ test('chart text cannot escape the serialized script into executable HTML', () =
   assert.ok(html.includes('\\u003c/script>'));
   assert.ok(html.includes("connect-src 'none'"));
   assert.ok(!html.includes('eval('));
+});
+
+function renderedChartOption(option: Record<string, unknown>, currency?: string) {
+  let captured: Record<string, unknown> = {};
+  const html = chartDocument('/* test runtime */', option, currency);
+  const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)];
+  runInNewContext(scripts[scripts.length - 1][1], {
+    document: { getElementById: () => ({ textContent: '' }) },
+    echarts: { init: () => ({ setOption: (value: Record<string, unknown>) => { captured = value; }, resize: () => {} }) },
+    window: { addEventListener: () => {} },
+    Intl,
+  });
+  return captured;
+}
+
+test('narrow bar charts wrap full names and keep exact figures and counts in the tooltip', () => {
+  const name = 'PlayDoh Kitchen Creations';
+  const option = renderedChartOption({ _group_counts: { [name]: 50 },
+    xAxis: { type: 'value' }, yAxis: { type: 'category', data: [name] },
+    series: [{ type: 'bar', name: 'Total stock on hand', data: [2738] }],
+  });
+  const media = option.media as { option: { grid: { right: number }; yAxis: { axisLabel: { width: number; overflow: string } };
+    series: { data: number[]; label: { formatter: (item: { value: number }) => string } }[] } }[];
+  const narrow = media[0].option;
+  assert.equal(narrow.yAxis.axisLabel.overflow, 'break');
+  assert.equal(narrow.yAxis.axisLabel.width, 112);
+  assert.equal(narrow.grid.right, 56);
+  assert.deepEqual(Array.from(narrow.series[0].data), [2738]);
+  assert.ok(!narrow.series[0].label.formatter({ value: 2738 }).includes('records'));
+  const tooltip = option.tooltip as { formatter: (items: { name: string; value: number; seriesName: string }[]) => string };
+  const text = tooltip.formatter([{ name, value: 2738, seriesName: 'Total stock on hand' }]);
+  assert.ok(text.includes(name) && text.includes('50 entries with a supplied value'));
+});
+
+test('narrow pie charts retain full category names and exact values in an informational legend', () => {
+  const option = renderedChartOption({ series: [{ type: 'pie', data: [
+    { name: 'Sports & Outdoors', value: 323 }, { name: 'Art & Crafts', value: 397 },
+  ] }] });
+  const media = option.media as { option: { legend: { selectedMode: boolean; formatter: (name: string) => string };
+    series: { label: { show: boolean }; data: { name: string; value: number }[] }[] } }[];
+  const narrow = media[0].option;
+  assert.equal(narrow.legend.selectedMode, false);
+  assert.equal(narrow.series[0].label.show, false);
+  assert.ok(narrow.legend.formatter('Sports & Outdoors').includes('Sports & Outdoors\n323'));
+  assert.equal(narrow.series[0].data[1].value, 397);
+});
+
+test('a money scatter chart keeps quantity and money axis units separate', () => {
+  const option = renderedChartOption({ xAxis: { type: 'value', _currency: null },
+    yAxis: { type: 'value', _currency: 'GBP' }, series: [{ type: 'scatter', data: [[2, 3]] }] }, 'GBP');
+  const xAxis = option.xAxis as { axisLabel: { formatter: (value: number) => string } };
+  const yAxis = option.yAxis as { axisLabel: { formatter: (value: number) => string } };
+  assert.ok(!xAxis.axisLabel.formatter(2).includes('£'));
+  assert.ok(yAxis.axisLabel.formatter(3).includes('£'));
 });
 
 test('metric formatting preserves percentages, negative values, and unknown currency', () => {

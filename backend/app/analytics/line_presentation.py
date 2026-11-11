@@ -46,7 +46,7 @@ def present_time_line(chart: dict[str, Any]) -> dict[str, Any]:
     axis.update({"boundaryGap": False, "nameLocation": "middle", "nameGap": 32,
                  "axisLabel": {**(axis.get("axisLabel") or {}), "fontSize": 10, "showMinLabel": True, "showMaxLabel": True}})
     month_labels = {}
-    for date in dates:
+    for date in dates if period == "month" else []:
         try:
             month_labels[str(date)] = datetime.fromisoformat(str(date)).strftime("%b %Y")
         except ValueError:

@@ -211,7 +211,7 @@ async def test_survey_average_with_required_context_preserves_plain_probe_scope(
     prompt = " ".join(captured[0].split())
     assert "plain numeric checks without grouping or filters" in prompt
     assert "Apply those requirements to the complete plan" in prompt
-    assert "repeated-lookup operand restrictions apply in every scope" in prompt
+    assert "recorded source-identity requirements apply in every scope" in prompt
     fake_client(monkeypatch, {"answer_kind": "calculated", "plan": {"aggregation": "average", "column": "percentage"}}, [])
     rejected = await AIService().chat(item, [], "What is the overall average percentage?")
     assert rejected["metadata"]["status"] == "unsupported"

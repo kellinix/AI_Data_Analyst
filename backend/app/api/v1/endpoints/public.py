@@ -10,13 +10,11 @@ from fastapi import APIRouter, HTTPException, Request
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from app.analytics.histogram_presentation import present_histogram
-from app.analytics.record_context import record_context
 from app.api.deps import DB
 from app.core.limiter import limiter
 from app.models.analysis import Analysis
 from app.schemas.analysis import ChartConfig, InsightResponse, SharedAnalysisResponse
-from app.services.report_language import present_insight, present_metadata
+from app.services.report_language import present_chart, present_insight, present_metadata
 
 router = APIRouter()
 
@@ -35,7 +33,7 @@ async def get_shared_analysis(request: Request, share_token: str, db: DB):
 
     insights = [InsightResponse.model_validate(present_insight(InsightResponse.model_validate(i).model_dump(), analysis.metadata_))
                 for i in analysis.insights]
-    charts = [ChartConfig(**present_histogram(c, record_context(analysis.metadata_ or {}))) for c in (analysis.charts or [])]
+    charts = [ChartConfig(**present_chart(c, analysis.metadata_)) for c in (analysis.charts or [])]
 
     return SharedAnalysisResponse(
         name=analysis.name,

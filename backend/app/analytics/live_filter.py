@@ -246,6 +246,7 @@ def _populate_bar(
     values = [round(float(r[1]), 2) for r in rows]
     counts = [int(r[2]) for r in rows]
     opt["_group_counts"] = dict(zip(labels, counts, strict=True))
+    opt["_group_scope"] = {"limit": 15, "order_by": cols.get("aggregation", "sum"), "requires_value": True}
     if cols.get("orientation") == "horizontal":
         opt["yAxis"]["data"] = labels[::-1]
         opt["series"][0]["data"] = values[::-1]
@@ -292,7 +293,6 @@ def _populate_stacked_bar(
           AND {series_identifier} IS NOT NULL
           AND {y_identifier} IS NOT NULL{_extra_and(filter_sql)}
         GROUP BY category, series
-        LIMIT 200
         """,
         filter_params,
     ).fetchall()
@@ -320,7 +320,8 @@ def _populate_stacked_bar(
         return sums.get(key, 0.0) / count if count else 0.0
 
     categories = [name for name, _ in sorted(totals.items(), key=lambda item: item[1], reverse=True)][:12]
-    reported = sorted({label for _, label in sums if label != _UNREPORTED_SERIES})[:8]
+    reported_names = sorted({label for _, label in sums if label != _UNREPORTED_SERIES})
+    reported = reported_names[:8]
     # The catch-all sorts last so the real states keep a stable colour order.
     series_names = reported + (
         [_UNREPORTED_SERIES] if any(label == _UNREPORTED_SERIES for _, label in sums) else []
@@ -339,6 +340,10 @@ def _populate_stacked_bar(
         for name in series_names
     ]
     opt["legend"] = {"show": True, "bottom": 0}
+    opt["_group_scope"] = {"category_limit": 12, "series_limit": 8,
+                           "category_order_by": "sum", "requires_value": True,
+                           "series_order_by": "name", "series_groups": len(reported_names),
+                           "unreported_series": _UNREPORTED_SERIES in series_names}
     return True
 
 
@@ -391,6 +396,7 @@ def _populate_record_count(conn, opt, cols, filter_sql, filter_params) -> bool:
     ).fetchall()
     opt["yAxis"]["data"] = [category_label(column, row[0]) for row in reversed(rows)]
     opt["series"][0]["data"] = [int(row[1]) for row in reversed(rows)]
+    opt["_group_scope"] = {"limit": 15, "order_by": "count", "requires_value": False}
     return True
 
 

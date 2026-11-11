@@ -7,13 +7,13 @@ from copy import deepcopy
 from datetime import datetime
 from typing import Any
 
-from app.analytics.labels import derive_label, sentence_label
+from app.analytics.labels import derive_label, reader_label, sentence_label, source_column_label
 from app.analytics.plain_language import plain_english
 from app.analytics.record_context import record_context
 from app.analytics.summary_evidence import _finite, _format
 from app.services.chat_evidence import _friendly_fact, explain_fact
 
-VERSION = "plain_reader_v8"
+VERSION = "plain_reader_v9"
 
 
 def business_text(text: Any) -> str:
@@ -53,7 +53,7 @@ def business_text(text: Any) -> str:
 
 
 def _label(column: Any) -> str:
-    return sentence_label(business_text(str(column or "figure").replace("_", " ")))
+    return reader_label(business_text(str(column or "figure")))
 
 
 def _field_label(column: Any, metadata: dict[str, Any]) -> str:
@@ -69,7 +69,7 @@ def _field_label(column: Any, metadata: dict[str, Any]) -> str:
             return sentence_label(LABELS[str(normalized).lower()])
     for field in metadata.get("schema") or []:
         if field.get("name") == normalized:
-            return sentence_label(business_text(str(field.get("display_label") or derive_label(normalized))))
+            return reader_label(source_column_label(field))
     return sentence_label(business_text(derive_label(normalized)))
 
 
@@ -78,6 +78,220 @@ def chart_description(text: str | None) -> str | None:
     if text is None:
         return None
     return re.sub(r"^How many (?:fall|falls) into each\b", "Number of entries in each", text, flags=re.I)
+
+
+def present_chart(
+    chart: dict[str, Any], metadata: dict[str, Any] | None = None,
+    labels: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Explain the saved chart's calculation without changing its data or query."""
+    from app.analytics.chart_coverage import disclose_chart_coverage
+    from app.analytics.chart_specs import build_visual_spec
+    from app.analytics.histogram_presentation import present_histogram
+    from app.analytics.line_presentation import present_time_line
+    from app.analytics.measure_semantics import is_observation_date
+
+    result = deepcopy(chart)
+    context = record_context(metadata or {})
+    option = result.get("echarts_option") or {}
+    columns = option.get("_columns") or {}
+    saved = option.get("_reader") or {}
+    field_labels = {**saved.get("labels", {}), **(labels or {})}
+    fields = {field["name"]: field for field in (metadata or {}).get("schema", []) if field.get("name")}
+    field_labels.update({field["name"]: source_column_label(field)
+                         for field in (metadata or {}).get("schema", []) if field.get("name")})
+    aggregation = result.get("aggregation") or columns.get("aggregation") or saved.get("aggregation")
+    split = result.get("series_by") or columns.get("series_by") or saved.get("series_by")
+    current_description = str(result.get("description") or "")
+    source_description = (saved.get("source_description", current_description)
+                          if current_description == saved.get("description") else current_description)
+    kind = result.get("type")
+    records = (context or {}).get("plural", "entries")
+
+    def heading(text: str) -> str:
+        return text[:1].upper() + text[1:]
+
+    def label(name: Any, axis: str | None = None) -> str:
+        axis_name = (option.get(axis) or {}).get("name") if axis else None
+        text = field_labels.get(str(name)) or axis_name or derive_label(str(name or "value"))
+        currency = result.get("currency")
+        if currency and fields.get(str(name), {}).get("semantic_type") == "currency" and not re.search(r"[$£€]|\b(?:USD|GBP|EUR)\b", str(text)):
+            text = f"{text} ({currency})"
+            field_labels[str(name)] = text
+        return reader_label(str(text))
+
+    def measure(name: Any) -> str:
+        text = label(name)
+        if aggregation == "sum":
+            return text if text.lower().startswith("total ") or text.lower() == "total" else f"total {text}"
+        if aggregation == "average":
+            return f"average of {text}" if text.lower().startswith("average ") else f"average {text}"
+        return f"recorded {text}"
+
+    x, y = result.get("xAxis"), result.get("yAxis")
+    series = option.get("series") or []
+    title, description = str(result.get("title") or "Chart"), source_description
+    if kind == "bar":
+        horizontal = ((option.get("yAxis") or {}).get("type") == "category"
+                      or (option.get("xAxis") or {}).get("type") != "category" and not split)
+        category, value = (y, x) if horizontal else (x, y)
+        group = label(category, "yAxis" if horizontal else "xAxis")
+        if columns.get("survey_fields"):
+            wording = "published percentage (%)"
+            description = "Each bar shows one country's published percentage. Percent means out of 100."
+        elif aggregation == "count":
+            wording = f"number of {records}"
+            description = f"Each bar shows how many {records} have the same {group}."
+            description += " The same name or ID can appear in several entries."
+        elif aggregation == "percent_rate":
+            if value == "chance_of_admit":
+                wording = "average recorded admission chance (%)"
+                description = f"Each bar shows the average supplied admission chance in one {group} group."
+                description += " Actual admission decisions require separate records."
+            else:
+                wording = f"percentage marked 1 for {label(value)}"
+                description = f"Each bar shows the percentage marked 1 for {label(value)} in one {group} group."
+                description += " The percentage uses entries with a supplied value."
+        else:
+            wording = measure(value)
+            description = f"Each bar shows {wording} for one {group} group."
+            if aggregation == "average":
+                description += " We add the supplied numbers and divide by how many there are."
+            elif aggregation == "sum":
+                description += " We add the supplied numbers in each group."
+            else:
+                description += " Calculation details are unavailable for this older chart."
+        title = f"{heading(wording)} by {group}"
+        if split:
+            title += f" and {label(split)}"
+            if aggregation == "average":
+                description = f"Each bar shows {wording} for one {group} and one {label(split)}."
+                description += f" Colours show {label(split)} groups side by side."
+                description += " We add the supplied numbers and divide by how many there are."
+            else:
+                description = f"Each coloured part shows {wording} for one {group} and one {label(split)}."
+                description += " We add the supplied numbers with the same two labels."
+        count_axis = "xAxis" if horizontal else "yAxis"
+        if isinstance(option.get(count_axis), dict):
+            option[count_axis]["name"] = heading(wording)
+        group_axis = "yAxis" if horizontal else "xAxis"
+        if isinstance(option.get(group_axis), dict):
+            option[group_axis]["name"] = heading(group)
+        if not split:
+            for item in series:
+                item["name"] = heading(wording)
+    elif kind == "line":
+        result = present_time_line(result)
+        option = result.get("echarts_option") or {}
+        series = option.get("series") or []
+        period = columns.get("time_grain") or ("week" if "week" in str(x).lower().split("_") else "date")
+        date_label = label(x, "xAxis")
+        lifecycle = (bool(columns.get("cohort_date")) or not is_observation_date(str(x or ""))
+                     or not is_observation_date(date_label))
+        if lifecycle or period == "year":
+            date_field = fields.get(str(x), {})
+            original_date = (date_field.get("measure_grain") or {}).get("source_column") or str(x or "date")
+            original_label = source_column_label({**date_field, "name": original_date, "display_label": None})
+            if not date_field and not is_observation_date(date_label):
+                original_label = field_labels.get(str(x)) or original_label
+            date_label = reader_label(original_label)
+            field_labels[str(x)] = original_label
+        value_columns = columns.get("ys") or result.get("series") or [y]
+        operations = columns.get("aggregations") or [aggregation] * len(value_columns)
+        measures = []
+        for index, name in enumerate(value_columns):
+            operation = operations[index] if index < len(operations) else aggregation
+            action = "total" if operation == "sum" else "average" if operation == "average" else "recorded"
+            measures.append(f"{action} {label(name)}")
+        title = f"{heading(' and '.join(measures))} by {date_label if lifecycle else period}"
+        lifecycle_period = f"their {date_label}"
+        if period in {"month", "year"} and not date_label.endswith(period):
+            lifecycle_period = f"the {period} of their {date_label}"
+        description = (f"Each point groups {records} by {lifecycle_period}. It compares different groups of {records}."
+                       if lifecycle else f"Each point shows {' and '.join(measures)} for one {period}.")
+        if columns.get("partial_last_month"):
+            description += " The final month has fewer recorded dates and may be incomplete."
+        if series and (series[0].get("lineStyle") or {}).get("opacity") == 0:
+            description += " Gaps have no supplied value."
+        if isinstance(option.get("xAxis"), dict):
+            option["xAxis"]["name"] = heading(date_label) if lifecycle else heading(period)
+        if isinstance(option.get("yAxis"), dict):
+            option["yAxis"]["name"] = heading(measures[0]) if len(measures) == 1 else "Recorded value"
+        for index, item in enumerate(series):
+            if index < len(measures):
+                item["name"] = heading(measures[index])
+    elif kind == "donut":
+        old_title = re.fullmatch(r"(.+) breakdown", title, flags=re.I)
+        fallback = old_title[1] if old_title else "group"
+        category = (result.get("series") or [columns.get("category") or saved.get("category") or x or fallback])[0]
+        group = label(category)
+        title = f"Number of {records} by {group}"
+        description = f"Each slice shows how many {records} have the same {group}. A bigger slice means more {records}."
+        description += " One entry is one line in the report."
+    elif kind == "scatter":
+        title = f"How {label(x, 'xAxis')} and {label(y, 'yAxis')} compare"
+        description = f"Each dot is one entry. Its position shows {label(x, 'xAxis')} across and {label(y, 'yAxis')} up the chart."
+        description += " A pattern shows how the two figures vary together. Other factors may also affect them."
+        for axis, name in (("xAxis", x), ("yAxis", y)):
+            if isinstance(option.get(axis), dict):
+                option[axis]["name"] = heading(label(name, axis))
+        for item in series:
+            item["name"] = f"{label(x)} and {label(y)}"
+    elif kind == "histogram":
+        original = columns.get("x") or saved.get("histogram_column") or x
+        if not option.get("_range_count_presentation") and isinstance(option.get("xAxis"), dict):
+            option["xAxis"]["name"] = heading(label(original))
+        result = present_histogram(result, context)
+        option = result.get("echarts_option") or {}
+        range_measure = result.get("yAxis") if option.get("_range_count_presentation") else label(original)
+        title = f"Number of {records} by {reader_label(str(range_measure))} range"
+        description = str(result.get("description") or description)
+    else:
+        return result
+
+    generic = re.match(r"^(?:Shows|Compares|Splits|Number of entries|Counts records|The share|A (?:strong|moderate|weak) relationship)\b", source_description)
+    if kind != "histogram" and source_description and not generic:
+        description += " " + source_description
+    warnings = list(option.get("_display_warnings") or [])
+    for name in [x, y, *(result.get("series") or [])]:
+        warning = fields.get(str(name), {}).get("display_warning")
+        if warning:
+            warnings.append(str(warning))
+    for warning in dict.fromkeys(warnings):
+        if warning not in description:
+            description += " " + warning
+    bound = re.search(r"up to (\d+) largest\b", source_description)
+    if kind == "bar" and aggregation == "count" and bound and not option.get("_group_scope"):
+        description += f" This chart shows up to {bound[1]} largest groups with a supplied label."
+    measured_fields = []
+    if kind == "scatter":
+        measured_fields = [x, y]
+    elif kind == "line":
+        measured_fields = columns.get("ys") or [y]
+    elif kind == "bar" and aggregation != "count":
+        measured_fields = [y if split else x]
+    for name in measured_fields:
+        text = field_labels.get(str(name)) or derive_label(str(name or ""))
+        if re.fullmatch(r"[A-Z]{1,2}", text) and text not in {"ID", "UK", "US", "EU"}:
+            description += f" The file calls this figure {text}. Its source guide is needed to explain the code."
+    used_fields = {str(name) for name in [x, y, split, *(result.get("series") or []), *(columns.get("ys") or [])] if name}
+    option["_reader"] = {"version": VERSION, "aggregation": aggregation, "series_by": split,
+                         "labels": {name: value for name, value in field_labels.items() if name in used_fields},
+                         "source_description": source_description}
+    if kind == "histogram":
+        option["_reader"]["histogram_column"] = original
+    if kind == "donut":
+        option["_reader"]["category"] = category
+    if kind == "scatter":
+        for axis, name in (("xAxis", x), ("yAxis", y)):
+            if isinstance(option.get(axis), dict) and name in fields:
+                unit = result.get("currency") if fields[name].get("semantic_type") == "currency" else None
+                option[axis]["_currency"] = unit
+    result.update({"title": title, "description": description, "echarts_option": option})
+    disclose_chart_coverage(result)
+    option["_reader"]["description"] = result["description"]
+    result["visual_spec"] = build_visual_spec(result)
+    return result
 
 
 def _name_records(text: str, context: dict[str, Any] | None) -> str:
@@ -98,6 +312,13 @@ def _name_records(text: str, context: dict[str, Any] | None) -> str:
 
 
 def forecast_wording(data: dict[str, Any]) -> tuple[str, str] | None:
+    from app.analytics.measure_semantics import is_observation_date
+
+    if data.get("date_column") and not is_observation_date(str(data["date_column"])):
+        return (
+            "Use activity dates before making a forecast",
+            f"These groups use {reader_label(data['date_column'])}. A forecast needs dates showing when the measured activity happened.",
+        )
     interval = (data.get("predictions") or {}).get("next_month") or {}
     value = _finite(interval.get("value"))
     if not data.get("metric") or value is None:
@@ -188,6 +409,16 @@ def present_insight(insight: dict[str, Any], metadata: dict[str, Any] | None = N
         result["description"] = business_text(result.get("description"))
     if kind == "summary" and data.get("column"):
         result["title"] = re.sub(r"^Average\s+Average\b", "Average", result["title"], flags=re.I)
+        if metadata is not None and data["column"] != "chance_of_admit":
+            field = _field_label(data["column"], metadata)
+            if data.get("is_percent") and data.get("kpi_type") in {None, "outcome_rate"}:
+                result["title"] = f"Percentage with {field} marked 1"
+            elif data.get("weighted_by"):
+                result["title"] = f"Weighted average {field}"
+            elif data.get("is_total", True) and not data.get("is_percent"):
+                result["title"] = field[:1].upper() + field[1:] if field == "total" or field.startswith("total ") else f"Total {field}"
+            else:
+                result["title"] = f"Average of {field}" if field.startswith("average ") else f"Average {field}"
         if data.get("weighted_by"):
             result["description"] = f"Entries with higher {_label(data['weighted_by'])} count more toward this average."
         elif data.get("column") == "chance_of_admit":
@@ -424,13 +655,31 @@ def present_metadata(metadata: dict[str, Any] | None, summary: str | None) -> tu
                 str(fact.get("id", "")).startswith("identity_")
                 and (fact.get("values") or {}).get("repeated_records") == 0
             )]
-            sentences = [_name_records(_friendly_fact(fact), context) for fact in visible_facts]
+            readable_facts = []
+            for fact in visible_facts:
+                values = fact.get("values") or {}
+                if not values.get("column"):
+                    readable_facts.append(fact)
+                    continue
+                display = values.get("display_label")
+                raw_key = re.sub(r"[^a-z0-9]", "", str(values["column"]).lower())
+                display_key = re.sub(r"[^a-z0-9]", "", str(display or "").lower())
+                if not display or display_key == raw_key:
+                    display = _field_label(values["column"], result)
+                readable_facts.append({**fact, "values": {**values, "display_label": display}})
+            sentences = [_name_records(_friendly_fact(fact), context) for fact in readable_facts]
         except (KeyError, TypeError, ValueError):
             sentences = []
         if sentences:
-            for fact, sentence in zip(visible_facts, sentences, strict=True):
+            seen_sentences = set()
+            unique_facts = []
+            unique_sentences = []
+            for fact, readable, sentence in zip(visible_facts, readable_facts, sentences, strict=True):
+                if sentence in seen_sentences:
+                    continue
+                seen_sentences.add(sentence)
                 fact["text"] = sentence
-                fact["explanation"] = _name_records(explain_fact(fact), context)
+                fact["explanation"] = _name_records(explain_fact(readable), context)
                 fact["scope_explanation"] = (
                     "We used only the part of the file read for this report."
                     if fact.get("scope") == "analysed sample"
@@ -438,8 +687,10 @@ def present_metadata(metadata: dict[str, Any] | None, summary: str | None) -> tu
                     if fact.get("scope") == "analysed file"
                     else business_text(fact.get("scope"))
                 )
-            checks["facts"] = visible_facts
-            summary = "\n".join(sentences)
+                unique_facts.append(fact)
+                unique_sentences.append(sentence)
+            checks["facts"] = unique_facts
+            summary = "\n".join(unique_sentences)
     evidence = result.get("analysis_evidence") or {}
     context = record_context(result)
     evidence["limitations"] = [_name_records(business_text(note), context)

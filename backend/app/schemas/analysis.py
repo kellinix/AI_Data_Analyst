@@ -11,7 +11,12 @@ from app.analytics.line_presentation import present_time_line
 from app.analytics.record_context import record_context
 from app.analytics.report_relevance import useful_charts, useful_insights
 from app.services.investigation import evidence_revision, evidence_spec, supporting_figures
-from app.services.report_language import chart_description, present_insight, present_metadata
+from app.services.report_language import (
+    chart_description,
+    present_chart,
+    present_insight,
+    present_metadata,
+)
 
 
 class ColumnInfo(BaseModel):
@@ -58,6 +63,11 @@ class RenameAnalysisRequest(BaseModel):
 
 
 class ChartConfig(BaseModel):
+    @model_validator(mode="before")
+    @classmethod
+    def readable_chart(cls, value: Any) -> Any:
+        return present_chart(value) if isinstance(value, dict) else value
+
     @model_validator(mode="after")
     def clarify_count_description(self) -> ChartConfig:
         self.description = chart_description(self.description)
@@ -201,7 +211,7 @@ class AnalysisDetailResponse(AnalysisListResponse):
             priority = {"chance_of_admit": 0, "cgpa": 1, "gre_score": 2, "toefl_score": 3, "university_rating": 4}
             self.insights.sort(key=lambda i: priority.get((i.data or {}).get("column"), 100))
         for chart in self.charts:
-            presented_chart = present_histogram(chart.model_dump(), context)
+            presented_chart = present_chart(chart.model_dump(), raw_metadata)
             for key in ("title", "description", "xAxis", "yAxis", "echarts_option", "visual_spec"):
                 setattr(chart, key, presented_chart.get(key))
         revision = evidence_revision(self.id, self.row_count, raw_metadata)

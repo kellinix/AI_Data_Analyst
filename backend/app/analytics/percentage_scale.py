@@ -48,6 +48,8 @@ def clarify_percentage_display(statistics: dict, display: dict, charts: list[dic
         references = json.dumps([chart.get("xAxis"), chart.get("yAxis"), chart.get("series"), (chart.get("echarts_option") or {}).get("_columns")])
         if any(json.dumps(name) in references for name in names):
             chart_warnings.add(chart.get("id"))
+            option = chart.setdefault("echarts_option", {})
+            option["_display_warnings"] = list(dict.fromkeys([*(option.get("_display_warnings") or []), SCALE_WARNING]))
     for item in display.get("charts", []):
         if item.get("id") not in chart_warnings:
             continue

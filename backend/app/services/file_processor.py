@@ -954,7 +954,7 @@ class FileProcessor:
 
             enriched, resolution = enrich_related_files(frames, table_names=names)
             report["relationship_resolution"] = {**resolution, "sheet_names": names}
-            if resolution.get("reason_code") == "conflicting_identifiers":
+            if resolution.get("reason_code") in {"conflicting_identifiers", "ambiguous_relationship_graph"}:
                 raise ValueError("These worksheets could not be matched safely. Their IDs disagree about which records belong together. Check the IDs or upload the worksheets separately.")
             if enriched is not None:
                 return enriched
@@ -992,7 +992,7 @@ class FileProcessor:
 
             enriched, resolution = enrich_related_files(frames, table_names=names)
             report["relationship_resolution"] = {**resolution, "sheet_names": names}
-            if resolution.get("reason_code") == "conflicting_identifiers":
+            if resolution.get("reason_code") in {"conflicting_identifiers", "ambiguous_relationship_graph"}:
                 raise ValueError("These worksheets could not be matched safely. Their IDs disagree about which records belong together. Check the IDs or upload the worksheets separately.")
             if enriched is not None:
                 return enriched
@@ -1363,7 +1363,7 @@ class FileProcessor:
         if enriched is not None:
             relationship_context["combine_strategy"] = "relational"
             return enriched
-        if resolution.get("reason_code") in {"conflicting_identifiers", "invalid_declared_relationship"}:
+        if resolution.get("reason_code") in {"conflicting_identifiers", "invalid_declared_relationship", "ambiguous_relationship_graph"}:
             relationship_context["combine_strategy"] = "portfolio"
             return pl.concat(frames, how="diagonal_relaxed")
         combine_strategy = relationship_context.get("combine_strategy", "portfolio")

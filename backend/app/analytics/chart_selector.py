@@ -202,7 +202,9 @@ def select_charts(
         charts.append(_histogram_chart(numeric_cols[0], numeric_stats.get(numeric_cols[0], {})))
 
     for chart in charts:
-        if chart.get("type") == "line" and not is_observation_date(str(chart.get("xAxis") or "")):
+        if chart.get("type") == "line" and not is_observation_date(
+            str(chart.get("xAxis") or ""), fields.get(str(chart.get("xAxis")))
+        ):
             columns = chart["echarts_option"].get("_columns", {})
             columns["cohort_date"] = True
             operation = "Average" if chart.get("aggregation") == "average" else "Total"

@@ -107,8 +107,8 @@ def test_semantic_display_metadata_adds_friendly_column_and_chart_labels() -> No
     updated_charts = apply_display_metadata_to_charts(charts, display)
 
     assert updated_stats["schema"][0]["display_label"] == "Customer Transaction Count (Q1)"
-    assert updated_charts[0]["title"] == "Customer Transactions in Q1"
-    assert updated_charts[0]["echarts_option"]["xAxis"]["name"] == "Customer Transaction Count (Q1)"
+    assert updated_charts[0]["title"] == "Number of entries by customer transaction count Q1 range"
+    assert updated_charts[0]["echarts_option"]["xAxis"]["name"] == "Customer transaction count Q1"
 
 
 STACKED_LABELS = {
@@ -166,12 +166,12 @@ def test_stacked_chart_title_names_the_split_dimension():
     backwards, and indistinguishable from the plain bar beside it."""
     summed = stacked_title_chart()
     assert _friendly_chart_title(summed, STACKED_LABELS) == (
-        "Whole Life Cost by Department and Delivery Confidence"
+        "Total whole life cost by department and delivery confidence"
     )
 
     averaged = {**summed, "aggregation": "average"}
     assert _friendly_chart_title(averaged, STACKED_LABELS) == (
-        "Avg Whole Life Cost by Department and Delivery Confidence"
+        "Average whole life cost by department and delivery confidence"
     )
 
 
@@ -188,8 +188,8 @@ def test_a_paragraph_long_column_name_is_trimmed_in_the_title():
 
     title = _friendly_chart_title(chart, STACKED_LABELS)
 
-    assert title.startswith("Whole Life Cost by Department and ")
-    assert title.endswith("…")
+    assert title.startswith("Total whole life cost by department and ")
+    assert title.endswith("IPA delivery confidence assessment")
     # Has to fit one line of a chart card, not merely be shorter than before.
     assert len(title) < 80
 
@@ -202,13 +202,13 @@ def test_friendly_bar_title_keeps_aggregation_distinct():
     labels = {"chol": "Chol", "cp": "Cp", "target": "Target"}
 
     averaged = {"type": "bar", "xAxis": "chol", "yAxis": "cp", "aggregation": "average"}
-    assert _friendly_chart_title(averaged, labels) == "Avg Chol by Cp"
+    assert _friendly_chart_title(averaged, labels) == "Average chol by cp"
 
     summed = {"type": "bar", "xAxis": "chol", "yAxis": "cp", "aggregation": "sum"}
-    assert _friendly_chart_title(summed, labels) == "Chol by Cp"
+    assert _friendly_chart_title(summed, labels) == "Total chol by cp"
 
     rate = {"type": "bar", "xAxis": "target", "yAxis": "cp", "aggregation": "percent_rate"}
-    assert _friendly_chart_title(rate, labels) == "Target Rate by Cp"
+    assert _friendly_chart_title(rate, labels) == "Percentage marked 1 for target by cp"
 
 
 def test_bar_chart_titles_survive_full_display_metadata_round_trip():
@@ -232,8 +232,8 @@ def test_bar_chart_titles_survive_full_display_metadata_round_trip():
 
     updated_bar = next(c for c in updated if c["id"] == bar["id"])
     updated_rate = next(c for c in updated if c["id"] == rate["id"])
-    assert updated_bar["title"] == "Avg Chol by Cp"
-    assert updated_rate["title"] == "Target Rate by Cp"
+    assert updated_bar["title"] == "Average chol by cp"
+    assert updated_rate["title"] == "Percentage marked 1 for target by cp"
 
 
 def test_sales_amount_bar_caption_uses_its_display_label():
@@ -243,7 +243,7 @@ def test_sales_amount_bar_caption_uses_its_display_label():
     display = {"columns": [{"name": "total", "label": "Sales Amount"},
                            {"name": "branch", "label": "Branch"}], "charts": []}
     shown = apply_display_metadata_to_charts([chart], display)[0]
-    assert shown["description"] == "Total sales amount for each branch."
+    assert shown["description"] == "Each bar shows total sales amount for one branch group. We add the supplied numbers in each group."
 
 
 def test_sales_payment_method_label_overrides_raw_cash_type_title():
@@ -253,5 +253,5 @@ def test_sales_payment_method_label_overrides_raw_cash_type_title():
                            {"name": "cash_type", "label": "Payment Method"}],
                "charts": [{"id": "payment", "title": "Money by Cash Type"}]}
     shown = apply_display_metadata_to_charts([chart], display)[0]
-    assert shown["title"] == "Sales Amount by Payment Method"
-    assert shown["description"] == "Total sales amount for each payment method."
+    assert shown["title"] == "Total sales amount by payment method"
+    assert shown["description"] == "Each bar shows total sales amount for one payment method group. We add the supplied numbers in each group."

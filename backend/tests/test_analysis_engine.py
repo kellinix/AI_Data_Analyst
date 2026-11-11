@@ -39,8 +39,7 @@ def test_points_a_log_scale_cannot_plot_are_disclosed():
     disclose_excluded_points(charts)
 
     assert charts[0]["description"].endswith(
-        "6 entries with zero or negative values on a logarithmic axis are excluded "
-        "from the plot; these are not missing values."
+        "6 entries have supplied values of zero or less and are left out of this chart."
     )
     # The original description survives in front of the note.
     assert charts[0]["description"].startswith("Scatter plot comparing")
@@ -56,12 +55,12 @@ def test_the_note_does_not_run_into_the_description():
 
     disclose_excluded_points(charts)
 
-    assert "rise together. 6 entries" in charts[0]["description"]
+    assert "rise together. The scale uses multiplying steps" in charts[0]["description"]
 
     # Idempotent: a re-run analyses the same chart objects, and the note was
     # appended a second time.
     disclose_excluded_points(charts)
-    assert charts[0]["description"].count("are excluded from the plot") == 1
+    assert charts[0]["description"].count("are left out of this chart") == 1
 
 
 def test_nothing_is_said_when_every_record_is_plotted():
