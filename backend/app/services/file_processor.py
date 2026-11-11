@@ -981,7 +981,7 @@ class FileProcessor:
 
     def _normalize_report_table(self, df: pl.DataFrame, sheet: str | None = None) -> pl.DataFrame:
         """Promote a detected table header row and remove report title rows."""
-        if df.is_empty() or df.height < 2:
+        if df.is_empty() or (df.height < 2 and df.width != 1):
             return df
 
         header_index = self._detect_header_row(df)
@@ -1178,6 +1178,18 @@ class FileProcessor:
     def _detect_header_row(self, df: pl.DataFrame) -> int | None:
         first = [_clean_cell(value) for value in df.row(0)]
         filled = [value for value in first if value]
+        if df.width == 1:
+            name = first[0]
+            if not name or len(name) > 80 or _is_numeric_text(name) or _looks_like_date_value(name):
+                return None
+            sample = [_clean_cell(value) for value in df.to_series().slice(1, 20).to_list()]
+            sample = [value for value in sample if value]
+            if _looks_like_header(name) or sample and (
+                all(_is_numeric_text(value) for value in sample)
+                or all(_looks_like_date_value(value) for value in sample)
+            ):
+                return 0
+            return None
         # A credible existing schema must not lose to a denser data row later
         # in the file (for example, a long survey question and optional notes).
         if (len(filled) >= 2 and len(set(filled)) == len(filled)

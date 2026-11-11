@@ -36,6 +36,7 @@ export async function uploadDocument(asset: DocumentPickerAsset, onProgress: (pr
     const result = await FileSystem.createUploadTask(url, asset.uri, {
       httpMethod: 'POST', uploadType: FileSystem.FileSystemUploadType.MULTIPART,
       fieldName: 'file', mimeType: asset.mimeType ?? 'application/octet-stream',
+      parameters: { original_filename: asset.name },
       headers: { Authorization: `Bearer ${token}` },
     }, ({ totalBytesSent, totalBytesExpectedToSend }) => {
       if (totalBytesExpectedToSend > 0) onProgress(Math.min(99, Math.round(totalBytesSent / totalBytesExpectedToSend * 100)));

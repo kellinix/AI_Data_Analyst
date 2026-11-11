@@ -1,10 +1,12 @@
 import hashlib
 import mimetypes
+import unicodedata
 import uuid
 from pathlib import Path
+from typing import Annotated
 
 import aiofiles
-from fastapi import APIRouter, File, HTTPException, Request, UploadFile, status
+from fastapi import APIRouter, File, Form, HTTPException, Request, UploadFile, status
 
 from app.api.deps import DB, CurrentUser, ensure_storage_quota
 from app.core.config import settings
@@ -37,12 +39,31 @@ async def upload_file(
     current_user: CurrentUser,
     db: DB,
     file: UploadFile = File(...),
+    original_filename: Annotated[str | None, Form(max_length=512)] = None,
 ):
     """Upload a data file for analysis."""
     if not file.filename:
         raise HTTPException(status_code=400, detail="No filename provided")
 
-    ext = _validate_extension(file.filename)
+    # Native upload libraries may put a cache UUID in the multipart filename.
+    # Read the cached form to distinguish an explicitly empty name from omission.
+    supplied_name = original_filename
+    if supplied_name is None:
+        supplied_name = (await request.form()).get("original_filename")
+    filename = file.filename
+    if supplied_name is not None:
+        if (
+            not isinstance(supplied_name, str)
+            or not supplied_name.strip()
+            or len(supplied_name) > 512
+            or "/" in supplied_name
+            or "\\" in supplied_name
+            or any(unicodedata.category(character) == "Cc" for character in supplied_name)
+        ):
+            raise HTTPException(status_code=400, detail="Use an original file name without folders or control characters.")
+        filename = supplied_name
+
+    ext = _validate_extension(filename)
 
     # Check file size before reading
     if file.size and file.size > settings.max_upload_size_bytes:
@@ -82,11 +103,11 @@ async def upload_file(
         profile = {"row_count": None, "column_count": None, "columns": None}
 
     # Store in DB
-    mime_type = mimetypes.guess_type(file.filename)[0] or "application/octet-stream"
+    mime_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
     uploaded_file = UploadedFile(
         user_id=current_user.id,
         filename=unique_name,
-        original_filename=file.filename,
+        original_filename=filename,
         file_size=len(content),
         mime_type=mime_type,
         storage_path=str(file_path),

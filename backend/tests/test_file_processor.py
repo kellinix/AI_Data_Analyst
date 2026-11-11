@@ -1,8 +1,33 @@
 from datetime import date, datetime
 
 import polars as pl
+import pytest
 
 from app.services.file_processor import FileProcessor
+
+
+@pytest.mark.parametrize("extension", [".csv", ".tsv"])
+@pytest.mark.parametrize("content,column,values", [
+    ("amount\n2\n3\n", "amount", [2, 3]),
+    ("Category\nToys\nGames\n", "Category", ["Toys", "Games"]),
+    ("Invoice_Date\n2025-01-01\n2025-02-01\n", "Invoice_Date", [date(2025, 1, 1), date(2025, 2, 1)]),
+    ("Temperature\n2\n3\n", "Temperature", [2, 3]),
+    ("Product_ID\n001\n002\n", "Product_ID", ["001", "002"]),
+    ("2\n3\n", "column_1", [2, 3]),
+    ("North\nSouth\n", "column_1", ["North", "South"]),
+    ("2025-01-01\n2025-02-01\n", "column_1", [date(2025, 1, 1), date(2025, 2, 1)]),
+    ("amount\n", "amount", []),
+    ("North\n", "column_1", ["North"]),
+    ("2\n", "column_1", [2]),
+])
+def test_single_column_headers_and_headerless_lists(tmp_path, extension, content, column, values):
+    path = tmp_path / f"single{extension}"
+    path.write_text(content, encoding="utf-8")
+
+    frame = FileProcessor()._read_file(str(path), extension)
+
+    assert frame.columns == [column]
+    assert frame[column].to_list() == values
 
 
 def test_promotes_excel_header_below_report_title():
