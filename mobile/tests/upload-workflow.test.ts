@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import type { DocumentPickerAsset } from 'expo-document-picker';
 import type { UploadedFile } from '../src/generated/contracts';
 import { generateRelationshipSuggestions } from '../src/generated/upload-relationships';
+import { parseDataGuide, readDataGuide } from '../src/generated/data-guide';
 import { addUploadAssets, analysisUploadRequest, profileUploadQueue } from '../src/lib/upload-workflow';
 import { createApi } from '../src/lib/api-core';
 
@@ -24,6 +25,9 @@ test('mobile uses the canonical website relationship detector', async () => {
   const source = await readFile(new URL('../../frontend/src/lib/upload-relationships.ts', import.meta.url), 'utf8');
   const generated = await readFile(new URL('../src/generated/upload-relationships.ts', import.meta.url), 'utf8');
   assert.equal(generated, '// Generated from frontend/src/lib/upload-relationships.ts.\n' + source.replace('from "@/types"', 'from "./contracts"'));
+  const guideSource = await readFile(new URL('../../frontend/src/lib/data-guide.ts', import.meta.url), 'utf8');
+  const guideGenerated = await readFile(new URL('../src/generated/data-guide.ts', import.meta.url), 'utf8');
+  assert.equal(guideGenerated, '// Generated from frontend/src/lib/data-guide.ts.\n' + guideSource);
 });
 
 test('the mobile build archive includes its canonical relationship source', async () => {
@@ -31,6 +35,7 @@ test('the mobile build archive includes its canonical relationship source', asyn
   const patterns = ignore.split(/\r?\n/);
   assert.ok(patterns.includes('!/frontend/src/lib'));
   assert.ok(patterns.includes('!/frontend/src/lib/upload-relationships.ts'));
+  assert.ok(patterns.includes('!/frontend/src/lib/data-guide.ts'));
 });
 
 test('multiple selections append in order and deduplicate within and across selections', () => {
@@ -131,4 +136,27 @@ test('a single upload retains its original endpoint and empty selections cannot 
   assert.equal(request.body.relationship_context?.current_file_name, 'sales.csv');
   assert.deepEqual(request.body.cleaning, { mode: 'clean' });
   assert.throws(() => analysisUploadRequest([], '', '', '', true), /Upload and review/);
+});
+
+test('single and combined analyses carry a separate validated guide without adding it as a data file', () => {
+  const guide = parseDataGuide(JSON.stringify({ version: 1, fields: [{ source_table: 'donors.csv',
+    source_column: 'segment', label: 'Donor group', values: [{ value: 'H', label: 'High value' }] }] }));
+  const donor = profile('donors.csv', ['donor_id', 'segment']);
+  const gift = profile('gifts.csv', ['donor_id', 'amount']);
+  for (const files of [[donor], [donor, gift]]) {
+    const request = analysisUploadRequest(files, '', '', '', true, guide);
+    assert.deepEqual(request.body.relationship_context?.data_dictionary, guide);
+    const contextualFiles = request.body.relationship_context?.files;
+    assert.ok(Array.isArray(contextualFiles));
+    assert.equal(contextualFiles.length, files.length);
+    assert.deepEqual('file_ids' in request.body ? request.body.file_ids : [request.body.file_id], files.map(file => file.id));
+  }
+});
+
+test('an invalid guide is rejected separately from the profiled data queue', async () => {
+  const queue = addUploadAssets([], [asset('donors.csv'), asset('gifts.csv')]);
+  await assert.rejects(readDataGuide({ name: 'guide.json', text: async () => '{bad' }), /valid JSON guide/);
+  const uploaded: string[] = [];
+  await profileUploadQueue(queue, async file => { uploaded.push(file.name); return profile(file.name, ['donor_id']); }, () => {}, () => {});
+  assert.deepEqual(uploaded, ['donors.csv', 'gifts.csv']);
 });

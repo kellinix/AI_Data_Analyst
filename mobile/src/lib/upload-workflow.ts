@@ -1,6 +1,7 @@
 import type { DocumentPickerAsset } from 'expo-document-picker';
 import type { CreateAnalysisRequest, CreateCombinedAnalysisRequest, UploadedFile } from '../generated/contracts';
 import { generateRelationshipSuggestions, getColumnNames } from '../generated/upload-relationships';
+import type { DataGuide } from '../generated/data-guide';
 
 export const supportedFile = /\.(csv|xlsx?|json|parquet|tsv)$/i;
 const maximumFileBytes = 512 * 1024 * 1024;
@@ -43,7 +44,7 @@ export async function profileUploadQueue(
   }
 }
 
-export function analysisUploadRequest(files: UploadedFile[], name: string, context: string, instructions: string, clean: boolean): {
+export function analysisUploadRequest(files: UploadedFile[], name: string, context: string, instructions: string, clean: boolean, dataGuide?: DataGuide | null): {
   path: string;
   body: CreateAnalysisRequest | CreateCombinedAnalysisRequest;
 } {
@@ -55,6 +56,7 @@ export function analysisUploadRequest(files: UploadedFile[], name: string, conte
     suggestions: generateRelationshipSuggestions(files),
     data_description: context.trim() || null,
     instructions: instructions.trim() || null,
+    ...(dataGuide ? { data_dictionary: dataGuide } : {}),
     analysis_mode: combined ? 'combined' : 'single',
     ...(combined ? { combine_strategy: 'portfolio' } : { current_file_id: files[0].id, current_file_name: files[0].original_filename }),
   };

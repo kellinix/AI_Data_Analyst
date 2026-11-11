@@ -11,6 +11,7 @@
 !/frontend/src/lib
 /frontend/src/lib/*
 !/frontend/src/lib/upload-relationships.ts
+!/frontend/src/lib/data-guide.ts
 
 node_modules/
 .env

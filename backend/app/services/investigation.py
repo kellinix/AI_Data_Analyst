@@ -14,6 +14,7 @@ import duckdb
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.analytics.category_values import category_expression, category_filter_value, category_label
+from app.analytics.data_dictionary import value_aliases, value_display_label
 from app.analytics.labels import reader_label, source_column_label
 from app.analytics.live_filter import build_where_clause, validate_filters
 from app.analytics.measure_grain import (
@@ -94,7 +95,7 @@ def label(column: Any) -> str:
 
 def _field_label(column: str | None, schema: dict[str, dict]) -> str:
     field = schema.get(column or "")
-    return reader_label(source_column_label(field)) if field else label(column)
+    return reader_label(source_column_label(field), field) if field else label(column)
 
 
 def _display_number(value: int | float, scale: str | None = None) -> str:
@@ -260,7 +261,9 @@ def validate_plan(plan: ComparisonPlan, metadata: dict) -> tuple[str, str | None
     group = None
     if plan.group_by:
         field = schema.get(plan.group_by)
-        numeric_group = field and field.get("is_numeric") and field.get("analysis_role") == "metric"
+        relative_day = (field and field.get("analysis_role") == "attribute" and field.get("semantic_type") == "relative_day"
+                        and ((field.get("data_definition") or {}).get("time_basis") or {}).get("kind") == "relative_day")
+        numeric_group = field and field.get("is_numeric") and (field.get("analysis_role") == "metric" or relative_day)
         if not field or (field.get("analysis_role") not in {"identifier", "dimension", "flag", "temporal_dimension"} and not numeric_group):
             raise ValueError("Choose a grouping field, such as region or category.")
         if plan.date_bucket:
@@ -268,7 +271,8 @@ def validate_plan(plan: ComparisonPlan, metadata: dict) -> tuple[str, str | None
                 raise ValueError("Date grouping needs a recognised date field.")
             group = f"CAST(date_trunc('{plan.date_bucket}', {quote(plan.group_by)}) AS VARCHAR)"
         else:
-            group = _identifier_expression(plan.group_by) if field.get("analysis_role") == "identifier" else category_expression(plan.group_by)
+            coded = bool((field.get("data_definition") or {}).get("value_labels"))
+            group = _identifier_expression(plan.group_by) if field.get("analysis_role") == "identifier" and not coded else category_expression(plan.group_by, field)
     elif plan.date_bucket:
         raise ValueError("Choose a date field before grouping dates.")
     filters = _comparison_filters([f.model_dump() for f in plan.filters], schema)
@@ -327,7 +331,7 @@ def _comparison_where(filters: list[dict], schema: dict[str, dict]) -> tuple[str
             operator = _NUMERIC_COMPARISONS[selected["op"]][0]
             clauses.append(f"{quote(selected['column'])} {operator} ?")
             params.append(selected["values"][0])
-        elif selected["op"] == "in" and (field.get("analysis_role") == "identifier" or _numeric_filter_field(field)):
+        elif selected["op"] == "in" and not (field.get("data_definition") or {}).get("value_labels") and (field.get("analysis_role") == "identifier" or _numeric_filter_field(field)):
             placeholders = ", ".join("?" for _ in selected["values"])
             if _numeric_filter_field(field):
                 clauses.append(f"{quote(selected['column'])} IN ({placeholders})")
@@ -337,7 +341,7 @@ def _comparison_where(filters: list[dict], schema: dict[str, dict]) -> tuple[str
                 clauses.append(f"{_identifier_expression(selected['column'])} IN ({placeholders})")
                 params.extend(str(value).strip(_IDENTIFIER_WHITESPACE) for value in selected["values"])
         else:
-            clause, values = build_where_clause([selected])
+            clause, values = build_where_clause([selected], schema)
             clauses.append(clause)
             params.extend(values)
     return " AND ".join(clauses), params
@@ -354,7 +358,7 @@ def _identifier_note(plan: ComparisonPlan, schema: dict[str, dict]) -> str:
     return ""
 
 
-def _display_group(column: str, value: Any, bucket: str | None = None) -> str | None:
+def _display_group(column: str, value: Any, bucket: str | None = None, field: dict | None = None) -> str | None:
     if value is None:
         return None
     if bucket:
@@ -363,7 +367,7 @@ def _display_group(column: str, value: Any, bucket: str | None = None) -> str | 
             return moment.strftime({"year": "%Y", "month": "%b %Y", "day": "%d %b %Y"}[bucket]).lstrip("0")
         except ValueError:
             pass
-    return category_label(column, value)
+    return category_label(column, value, field)
 
 
 async def _load(analysis: Any) -> tuple[duckdb.DuckDBPyConnection, int, bool]:
@@ -372,7 +376,11 @@ async def _load(analysis: Any) -> tuple[duckdb.DuckDBPyConnection, int, bool]:
         conn.create_function("vesquiri_decimal_aggregate", _decimal_aggregate,
                              ["VARCHAR[]", "VARCHAR"], "DOUBLE", null_handling="special")
         path = analysis.file.storage_path
-        rows, truncated = await FileProcessor().read_to_duckdb_ex(conn, path, Path(path).suffix.lower())
+        metadata = analysis.metadata_ or {}
+        profile = metadata.get("data_profile") or {}
+        processor = FileProcessor(data_dictionary_context=metadata.get("upload_context"),
+                                  source_name=getattr(analysis.file, "original_filename", None) or (profile.get("dataset") or {}).get("name"))
+        rows, truncated = await processor.read_to_duckdb_ex(conn, path, Path(path).suffix.lower())
         actual = {r[0] for r in conn.execute("DESCRIBE data").fetchall()}
         if not _schema(analysis.metadata_ or {}):
             raise ValueError("This older report has no saved field definitions. Analyse it again before reviewing entries.")
@@ -422,7 +430,31 @@ def _filter_description(selected: dict, schema: dict[str, dict] | None = None) -
         return f"{name} was between {values[0]} and {values[1]}"
     if selected["op"] in _NUMERIC_COMPARISONS:
         return f"{name} was {_NUMERIC_COMPARISONS[selected['op']][1]} {values[0]:,}"
-    return f"{name} was " + " or ".join(str(value) for value in values)
+    field = (schema or {}).get(selected["column"], {})
+    return f"{name} was " + " or ".join(value_display_label(field, value) or str(value) for value in values)
+
+
+def _numeric_definition_filters(plan: ComparisonPlan, schema: dict[str, dict]) -> ComparisonPlan:
+    """Resolve supplied meanings that cannot be literal numeric/Boolean codes."""
+    payload = plan.model_dump()
+    for collection in ("filters", "cohort_filters", "return_filters"):
+        for selected in payload[collection]:
+            field = schema.get(selected["column"], {})
+            typed_code = (field.get("is_numeric") or str(field.get("dtype") or "").upper() in {"BOOL", "BOOLEAN"})
+            if selected["op"] != "in" or not typed_code:
+                continue
+            values = []
+            for value in selected["values"]:
+                try:
+                    _comparison_filters([{**selected, "values": [value]}], schema)
+                except ValueError:
+                    aliases = value_aliases(field, value)
+                    if len(aliases) == 1 and aliases[0] is not None:
+                        _comparison_filters([{**selected, "values": aliases}], schema)
+                        value = aliases[0]
+                values.append(value)
+            selected["values"] = values
+    return ComparisonPlan.model_validate(payload)
 
 
 def _source_aggregation_relation(
@@ -466,8 +498,9 @@ def _source_aggregation_relation(
 
 
 async def compare(analysis: Any, plan: ComparisonPlan, *, resolve_categories: bool = False) -> dict[str, Any]:
-    expression, group, filters = validate_plan(plan, analysis.metadata_ or {})
     schema = _schema(analysis.metadata_ or {})
+    plan = _numeric_definition_filters(plan, schema)
+    expression, group, filters = validate_plan(plan, analysis.metadata_ or {})
     from app.analytics.admission_context import is_admission
     from app.analytics.survey_context import survey_fields
     survey = survey_fields(list(schema.values()))
@@ -477,8 +510,9 @@ async def compare(analysis: Any, plan: ComparisonPlan, *, resolve_categories: bo
     conn, rows, truncated = await _load(analysis)
     try:
         _check_relationship_fields(conn, analysis.metadata_ or {}, plan)
-        if resolve_categories:
-            plan = _resolve_category_filters(conn, plan, schema)
+        selected_fields = [item.column for item in [*plan.filters, *plan.cohort_filters, *plan.return_filters]]
+        if resolve_categories or any((schema.get(name, {}).get("data_definition") or {}).get("value_labels") for name in selected_fields):
+            plan = _resolve_category_filters(conn, plan, schema, resolve_case=resolve_categories)
             _expression, _group, filters = validate_plan(plan, analysis.metadata_ or {})
         if plan.aggregation == "retention":
             return _retention_result(conn, analysis, plan, expression, filters, rows, truncated)
@@ -515,7 +549,7 @@ async def compare(analysis: Any, plan: ComparisonPlan, *, resolve_categories: bo
             result = [(None, *conn.execute(f"SELECT {expression}, {entry_count}, {supplied}, COUNT(*) FROM {relation}", params).fetchone())]
         if any(isinstance(row[1], float) and not math.isfinite(row[1]) for row in result):
             raise ValueError("Some values in this measure cannot be used as numbers. Check the file before comparing it.")
-        groups = [{"group": _display_group(plan.group_by, r[0], plan.date_bucket) if plan.group_by else None,
+        groups = [{"group": _display_group(plan.group_by, r[0], plan.date_bucket, schema[plan.group_by]) if plan.group_by else None,
                    "group_value": str(r[0]) if r[0] is not None else None,
                    "value": _cell(r[1]), "entries": int(r[2]), "supplied_values": int(r[3])} for r in result[:plan.limit]]
         if basis:
@@ -525,6 +559,11 @@ async def compare(analysis: Any, plan: ComparisonPlan, *, resolve_categories: bo
                 f"SELECT COUNT(*), {supplied}, {entry_count} FROM {relation}", params).fetchone()
             basis = {**basis, "entities": entities, "supplied_entities": supplied_entities,
                      "supporting_entries": supporting, "entries_without_source_id": matched - supporting}
+        if plan.group_by:
+            for row in groups:
+                display = value_display_label(schema[plan.group_by], row["group_value"])
+                if display is not None:
+                    row["display_label"] = display
         research_labels = {"0": "No research experience", "1": "Research experience recorded"} if percentage and plan.group_by == "research" else {}
         for row in groups:
             row["group"] = research_labels.get(row["group_value"], row["group"])
@@ -572,16 +611,20 @@ async def compare(analysis: Any, plan: ComparisonPlan, *, resolve_categories: bo
             title += f" by {_field_label(plan.group_by, schema)}"
             answer = title + ":\n\n" + answer
         ranking = {"tied": int(result[0][4]),
-                   "runner_up": {"group": _display_group(plan.group_by, result[1][0], plan.date_bucket),
+                   "runner_up": {"group": _display_group(plan.group_by, result[1][0], plan.date_bucket, schema[plan.group_by]),
                                  "value": _cell(result[1][1])} if len(result) > 1 else None} if group and result else None
         if ranking and ranking.get("runner_up"):
             runner = ranking["runner_up"]
             runner["group"] = research_labels.get(str(runner["group"]), runner["group"])
+            display = value_display_label(schema[plan.group_by], result[1][0])
+            if display is not None:
+                runner["display_label"] = display
         response = {"title": title, "answer": answer, "scope": note, "groups": groups, "ranking": ranking,
                 "evidence_revision": evidence_revision(analysis.id, analysis.row_count, analysis.metadata_ or {}),
                 "matched_entries": matched, "group_count": group_count, "plan": plan.model_dump(),
                 "record_context": record_context(analysis.metadata_ or {}),
                 "measure_label": measure_label, "group_label": _field_label(plan.group_by, schema) if group else None,
+                "group_codes_exact": bool((schema.get(plan.group_by or "", {}).get("data_definition") or {}).get("value_labels")),
                 "weight_label": _field_label(plan.weight_column, schema) if plan.weight_column else None,
                 "percentage_scale": scale,
                 "calculation": expression, "source": "analysed_file", "sample_truncated": truncated, "value_unit": "%" if percentage else None}
@@ -601,7 +644,9 @@ class RelationshipUnavailable(ComparisonUnavailable):
     """Fields on disconnected record types cannot establish a zero result."""
 
 
-def _resolve_category_filters(conn: duckdb.DuckDBPyConnection, plan: ComparisonPlan, schema: dict[str, dict]) -> ComparisonPlan:
+def _resolve_category_filters(
+    conn: duckdb.DuckDBPyConnection, plan: ComparisonPlan, schema: dict[str, dict], *, resolve_case: bool = True,
+) -> ComparisonPlan:
     """Resolve model label casing only when the recorded category is unique.
 
     Dashboard slicers retain exact matching. Model-authored filters are checked
@@ -613,24 +658,41 @@ def _resolve_category_filters(conn: duckdb.DuckDBPyConnection, plan: ComparisonP
             if selected["op"] != "in":
                 continue
             column = selected["column"]
-            expression = category_expression(column)
+            expression = category_expression(column, schema[column])
             values = []
             for value in selected["values"]:
+                aliases = value_aliases(schema[column], value)
                 if schema[column].get("analysis_role") == "identifier" or _numeric_filter_field(schema[column]):
                     predicate, params = _comparison_where([{**selected, "values": [value]}], schema)
-                    if not conn.execute(f"SELECT EXISTS(SELECT 1 FROM data WHERE {predicate})", params).fetchone()[0]:
+                    found = conn.execute(f"SELECT EXISTS(SELECT 1 FROM data WHERE {predicate})", params).fetchone()[0]
+                    if not found and len(aliases) == 1 and aliases[0] is not None:
+                        value = aliases[0]
+                        predicate, params = _comparison_where([{**selected, "values": [value]}], schema)
+                        found = conn.execute(f"SELECT EXISTS(SELECT 1 FROM data WHERE {predicate})", params).fetchone()[0]
+                    if not found and resolve_case:
                         kind = "code" if schema[column].get("analysis_role") == "identifier" else "value"
                         choice = "the exact code shown" if kind == "code" else "a recorded value"
                         raise ComparisonUnavailable(f"The requested {_field_label(column, schema)} {kind} {str(value)!r} was not found. Choose {choice} in this report.")
                     values.append(value)
                     continue
-                exact = category_filter_value(column, value)
-                if conn.execute(f"SELECT EXISTS(SELECT 1 FROM data WHERE {expression} = ?)", [exact]).fetchone()[0]:
+                predicate, params = _comparison_where([{**selected, "values": [value]}], schema)
+                if conn.execute(f"SELECT EXISTS(SELECT 1 FROM data WHERE {predicate})", params).fetchone()[0]:
                     values.append(value)
                     continue
+                if len(aliases) == 1 and aliases[0] is not None:
+                    raw = aliases[0]
+                    predicate, params = _comparison_where([{**selected, "values": [raw]}], schema)
+                    if conn.execute(f"SELECT EXISTS(SELECT 1 FROM data WHERE {predicate})", params).fetchone()[0]:
+                        values.append(raw)
+                        continue
+                if not resolve_case:
+                    values.append(value)
+                    continue
+                if (schema[column].get("data_definition") or {}).get("value_labels"):
+                    raise ComparisonUnavailable(f"The requested {_field_label(column, schema)} code or supplied meaning {str(value)!r} was not found. Choose the exact recorded code or its supplied label.")
                 matches = conn.execute(
                     f"SELECT DISTINCT {expression} FROM data WHERE LOWER(TRIM({expression})) = LOWER(TRIM(?)) LIMIT 2",
-                    [exact]).fetchall()
+                    [category_filter_value(column, value, schema[column])]).fetchall()
                 if len(matches) != 1:
                     reason = "matches multiple recorded categories" if matches else "does not match a recorded category"
                     raise ComparisonUnavailable(f"The requested {_field_label(column, schema)} value {str(value)!r} {reason}. Choose the exact category shown in this report.")
@@ -747,14 +809,16 @@ def comparison_answer(result: dict) -> str:
     if suffix == "%":
         metric = "average recorded admission chance"
     rank = "lowest" if plan.get("order") == "asc" else "highest"
-    def group_label(value: Any) -> str:
+    def group_label(value: Any, display_label: str | None = None) -> str:
+        if display_label:
+            return display_label
         if value is None:
             return f"Entries without {result.get('group_label') or label(plan['group_by'])}"
-        text = _display_group(plan["group_by"], value, plan.get("date_bucket"))
+        text = str(value) if result.get("group_codes_exact") else _display_group(plan["group_by"], value, plan.get("date_bucket"))
         name = result.get("group_label") or label(plan["group_by"])
         return f"{name[:1].upper() + name[1:]} {text}" if not plan.get("date_bucket") and re.fullmatch(r"-?\d+(?:\.\d+)?", text) else text
 
-    subject = group_label(first.get("group"))
+    subject = group_label(first.get("group"), first.get("display_label"))
     tied = ranking.get("tied", 1)
     if tied > 1:
         lead = f"{tied:,} groups tie for the {rank} {metric} at {_display_number(value, scale)}{suffix} each."
@@ -769,13 +833,13 @@ def comparison_answer(result: dict) -> str:
         runner = ranking.get("runner_up") or {}
         runner_value = _finite(runner.get("value"))
         if runner_value is not None:
-            other = group_label(runner.get("group"))
+            other = group_label(runner.get("group"), runner.get("display_label"))
             difference = abs(value - runner_value)
             # Avoid a rounded zero gap between distinct measurements.
             if difference >= .005:
                 lead += f" That is {_display_number(difference, scale)}{' percentage points' if suffix == '%' else ''} {'less' if rank == 'lowest' else 'more'} than {other}."
     if len(groups) > 1:
-        figures = "\n".join(f"{group_label(row.get('group'))}: {_display_number(row['value'], scale) + suffix if _finite(row.get('value')) is not None else 'Not available'}"
+        figures = "\n".join(f"{group_label(row.get('group'), row.get('display_label'))}: {_display_number(row['value'], scale) + suffix if _finite(row.get('value')) is not None else 'Not available'}"
                             for row in groups)
         lead += "\n\n" + figures
     return lead
@@ -924,15 +988,8 @@ async def entries(analysis: Any, request: EntryRequest) -> dict[str, Any]:
     if request.kind == "comparison":
         if not request.comparison:
             raise ValueError("Choose a comparison first.")
+        request = request.model_copy(update={"comparison": _numeric_definition_filters(request.comparison, schema)})
         _expression, group, filters = validate_plan(request.comparison, metadata)
-        predicate, params = _comparison_where(filters, schema)
-        if request.comparison.aggregation == "retention":
-            predicate = f"({predicate}) AND {_expression} IS NOT NULL AND LOWER({_expression}) <> 'unknown'"
-        if group and request.group_value is not None:
-            predicate = (predicate + " AND " if predicate else "") + f"{group} = ?"
-            params.append(request.group_value)
-        elif group:
-            predicate = (predicate + " AND " if predicate else "") + f"{group} IS NULL"
     else:
         insight = next((i for i in analysis.insights if str(i.id) == request.insight_id), None) if request.kind == "insight" else None
         spec = evidence_spec(metadata, {"type": insight.type, "data": insight.data} if insight else None,
@@ -943,9 +1000,22 @@ async def entries(analysis: Any, request: EntryRequest) -> dict[str, Any]:
         expected = spec.get("expected")
     conn, rows, truncated = await _load(analysis)
     try:
-        if request.comparison:
+        if request.kind == "comparison" and request.comparison:
             _check_relationship_fields(conn, metadata, request.comparison)
-        basis = _source_measure_basis(request.comparison, schema) if request.comparison and request.comparison.aggregation in {"sum", "average"} else None
+            selected_fields = [item.column for item in [*request.comparison.filters, *request.comparison.cohort_filters, *request.comparison.return_filters]]
+            if any((schema.get(name, {}).get("data_definition") or {}).get("value_labels") for name in selected_fields):
+                plan = _resolve_category_filters(conn, request.comparison, schema, resolve_case=False)
+                request = request.model_copy(update={"comparison": plan})
+                _expression, group, filters = validate_plan(plan, metadata)
+            predicate, params = _comparison_where(filters, schema)
+            if request.comparison.aggregation == "retention":
+                predicate = f"({predicate}) AND {_expression} IS NOT NULL AND LOWER({_expression}) <> 'unknown'"
+            if group and request.group_value is not None:
+                predicate = (predicate + " AND " if predicate else "") + f"{group} = ?"
+                params.append(request.group_value)
+            elif group:
+                predicate = (predicate + " AND " if predicate else "") + f"{group} IS NULL"
+        basis = _source_measure_basis(request.comparison, schema) if request.kind == "comparison" and request.comparison and request.comparison.aggregation in {"sum", "average"} else None
         if basis:
             source_where, source_params = _comparison_where(filters, schema)
             _source_aggregation_relation(conn, request.comparison, schema, basis, group, source_where, source_params)
@@ -978,7 +1048,10 @@ async def entries(analysis: Any, request: EntryRequest) -> dict[str, Any]:
         records = []
         for row in found:
             values = {c: _cell(v) for c, v in zip(shown, row[1:], strict=True)}
-            records.append({"entry_number": row[0], "record_label": record_label(values, schema, context, row[0]), "values": values})
+            displays = {name: display for name, value in values.items()
+                        if (display := value_display_label(schema[name], value)) is not None}
+            records.append({"entry_number": row[0], "record_label": record_label(values, schema, context, row[0]), "values": values,
+                            **({"display_values": displays} if displays else {})})
         scope = _scope(analysis, rows, truncated)
         if request.comparison:
             scope += _identifier_note(request.comparison, schema)

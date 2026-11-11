@@ -14,7 +14,12 @@ from typing import Any
 import duckdb
 import numpy as np
 
-from app.analytics.measure_semantics import is_additive_flow, is_observation_date
+from app.analytics.measure_semantics import (
+    is_additive_flow,
+    is_observation_date,
+    is_power_reading,
+    is_rate_or_average,
+)
 from app.analytics.sql_utils import quote_identifier as _quote_identifier
 from app.analytics.time_series import is_dense_monthly_series
 
@@ -39,6 +44,8 @@ def generate_forecasts(
         if column.get("is_numeric")
         and column.get("analysis_role") in {None, "metric"}
         and is_additive_flow(column["name"])
+        and not (((column.get("data_definition") or {}).get("unit") or (column.get("data_definition") or {}).get("label"))
+                 and (is_power_reading(column["name"], column) or is_rate_or_average(column["name"], column)))
     }
     metric_columns = list(dict.fromkeys(
         [kpi["column"] for kpi in kpis if kpi["column"] in eligible]

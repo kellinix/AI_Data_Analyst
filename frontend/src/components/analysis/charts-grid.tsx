@@ -8,6 +8,7 @@ import { useFilterContext } from "@/contexts/filter-context"
 import type { ChartConfig, DashboardPalette } from "@/types"
 import { useDashboardContext } from "@/contexts/dashboard-context"
 import { Button } from "@/components/ui/button"
+import { chartReaderDefinitions, chartReaderValueLabels, readerLabel } from "@/lib/data-guide"
 
 const EChartsReact = dynamic(() => import("echarts-for-react"), { ssr: false })
 
@@ -282,7 +283,8 @@ function seriesWithReadableLabels(
   option: Record<string, unknown>,
   horizontalBar: boolean,
   isDark: boolean,
-  currency?: string | null
+  currency?: string | null,
+  pieLabels: Record<string, string> = {}
 ): unknown[] | undefined {
   const seriesItems = asArray(option.series)
   if (seriesItems.length === 0) return undefined
@@ -323,7 +325,7 @@ function seriesWithReadableLabels(
           color: isDark ? "#e6def3" : "#615875",
           fontSize: 11,
           position: "outside",
-          formatter: (params: { name: string; value: unknown; percent: number }) => `${params.name}\n${fullNumber(params.value, currency)} (${params.percent.toFixed(1)}%)`,
+          formatter: (params: { name: string; value: unknown; percent: number }) => `${readerLabel(pieLabels, params.name)}\n${fullNumber(params.value, currency)} (${params.percent.toFixed(1)}%)`,
         },
         labelLine: {
           show: true,
@@ -431,6 +433,8 @@ function ChartCard({ chart, index, palette }: ChartCardProps) {
   // Reconstructing a plot from that preview can drop periods or whole series.
   const chartOption = visualOption && plottedPointCount(visualOption) >= plottedPointCount(savedOption)
     ? visualOption : savedOption
+  const readerLabels = chartReaderValueLabels({ ...chartOption, _reader_value_maps: savedOption._reader_value_maps })
+  const definitions = chartReaderDefinitions(savedOption)
   const grid = asObject(chartOption.grid)
   const tooltip = asObject(chartOption.tooltip)
   const xAxis = asObject(chartOption.xAxis)
@@ -441,7 +445,7 @@ function ChartCard({ chart, index, palette }: ChartCardProps) {
   const xAxisLabel = asObject(xAxis.axisLabel)
   const yAxisLabel = asObject(yAxis.axisLabel)
   const currency = effectiveChart.currency ?? null
-  const labelledSeries = seriesWithReadableLabels(chart, chartOption, horizontalBar, isDark, currency)
+  const labelledSeries = seriesWithReadableLabels(chart, chartOption, horizontalBar, isDark, currency, readerLabels.pie)
   // Each bar already shows its exact value via the data label added above —
   // the value axis's tick labels (0, 5, 10, ...) are redundant next to that,
   // not the category axis's labels, which are still the only way to tell
@@ -466,14 +470,32 @@ function ChartCard({ chart, index, palette }: ChartCardProps) {
     : labelledSeries
 
   function handleChartClick(params: { name?: string }) {
-    if (!filterColumn || !params?.name) return
+    if (!filterColumn || params?.name == null) return
     toggleValue(filterColumn, params.name)
   }
 
   const chartColors = CHART_PALETTES[palette]
+  const rotatedColors = [...chartColors.slice(index % chartColors.length), ...chartColors.slice(0, index % chartColors.length)]
   const visibleSeries = dimmedSeries ?? asArray(chartOption.series)
   const pieData = asArray(asObject(asArray(visibleSeries)[0]).data)
   const pieTotal = pieData.reduce<number>((total, item) => total + Number(asObject(item).value ?? 0), 0)
+  // ECharts omits an empty-name legend item, even when that code has a meaning.
+  const externalPieLegend = chart.type === "donut" && pieData.some((item) => asObject(item).name === "")
+  const hasValueLabels = Object.values(readerLabels).some((labels) => Object.keys(labels).length > 0)
+  type TooltipPoint = { name: string; seriesName?: string; value: unknown; percent?: number }
+  function guideTooltip(parameters: TooltipPoint | TooltipPoint[]): string {
+    const items = Array.isArray(parameters) ? parameters : [parameters]
+    const first = items[0]
+    if (!first) return ""
+    if (chart.type === "donut") {
+      return `${readerLabel(readerLabels.pie, first.name)}\n${fullNumber(first.value, currency)} (${Number(first.percent ?? 0).toFixed(1)}%)`
+    }
+    const categories = horizontalBar ? readerLabels.yAxis : readerLabels.xAxis
+    const rows = items.map((item) => `${readerLabel(readerLabels.series, item.seriesName)} ${fullNumber(item.value, currency)}${chartOption._percentageValues ? "%" : ""}`.trim())
+    const count = asObject(chartOption._group_counts)[first.name]
+    if (count !== undefined) rows.push(`${count} entries with a supplied value`)
+    return [readerLabel(categories, first.name), ...rows].join("\n")
+  }
   const smallScreenOption = horizontalBar ? {
     grid: { left: 8, right: 56, top: 16, bottom: 60, containLabel: true },
     yAxis: { axisLabel: { width: 112, overflow: "break", lineHeight: 14, interval: 0, margin: 8 } },
@@ -487,24 +509,25 @@ function ChartCard({ chart, index, palette }: ChartCardProps) {
     })),
   } : chart.type === "donut" ? {
     legend: {
-      show: true, selectedMode: false, left: 0, right: 0, bottom: 4,
+      show: !externalPieLegend, selectedMode: false, left: 0, right: 0, bottom: 4,
       itemWidth: 10, itemHeight: 10, itemGap: 12,
       textStyle: { color: axisText, fontSize: 11, lineHeight: 16 },
       formatter: (name: string) => {
         const item = pieData.find((value) => asObject(value).name === name)
         const value = Number(asObject(item).value ?? 0)
         const percentage = pieTotal ? value / pieTotal * 100 : 0
-        return `${name}\n${fullNumber(value, currency)} (${percentage.toFixed(1)}%)`
+        return `${readerLabel(readerLabels.pie, name)}\n${fullNumber(value, currency)} (${percentage.toFixed(1)}%)`
       },
     },
     series: asArray(visibleSeries).map((item) => ({
-      ...asObject(item), center: ["50%", "32%"], radius: ["24%", "48%"],
+      ...asObject(item), center: externalPieLegend ? ["50%", "50%"] : ["50%", "32%"],
+      radius: externalPieLegend ? ["28%", "55%"] : ["24%", "48%"],
       label: { show: false }, labelLine: { show: false },
     })),
   } : {}
   const option = {
     ...chartOption,
-    color: [...chartColors.slice(index % chartColors.length), ...chartColors.slice(0, index % chartColors.length)],
+    color: rotatedColors,
     backgroundColor: "transparent",
     textStyle: {
       fontFamily: "Inter, system-ui, sans-serif",
@@ -542,10 +565,12 @@ function ChartCard({ chart, index, palette }: ChartCardProps) {
         const point = asArray(params.value)
         return `Grade average: ${fullNumber(point[0])}<br/>Recorded admission chance: ${fullNumber(Number(point[1]) * 100)}%`
       } } : {}),
+      ...(hasValueLabels ? { formatter: guideTooltip } : {}),
     },
-    legend: chartOption.legend ? {
+    legend: externalPieLegend ? { show: false } : chartOption.legend ? {
       ...asObject(chartOption.legend),
       textStyle: { ...asObject(asObject(chartOption.legend).textStyle), color: axisText },
+      ...(Object.keys(readerLabels.series).length ? { formatter: (name: string) => readerLabel(readerLabels.series, name) } : {}),
     } : undefined,
     xAxis: chartOption.xAxis
       ? {
@@ -568,6 +593,7 @@ function ChartCard({ chart, index, palette }: ChartCardProps) {
             margin: 10,
             ...xAxisLabel,
             ...(xAxis._monthYearLabels ? { formatter: (value: unknown) => asObject(xAxis._monthYearLabels)[String(value)] ?? String(value) } : {}),
+            ...(Object.keys(readerLabels.xAxis).length ? { formatter: (value: unknown) => readerLabel(readerLabels.xAxis, value) } : {}),
           },
           splitLine: { show: false },
         }
@@ -595,13 +621,16 @@ function ChartCard({ chart, index, palette }: ChartCardProps) {
             margin: horizontalBar ? 10 : 8,
             ...yAxisLabel,
             ...(yAxis._percentage ? { formatter: (value: number) => `${Math.round(value * 100)}%` } : {}),
+            ...(Object.keys(readerLabels.yAxis).length ? { formatter: (value: unknown) => readerLabel(readerLabels.yAxis, value) } : {}),
           },
           // The stacked bars carry their own segment boundaries; gridlines
           // behind them read as extra divisions that aren't in the data.
           splitLine: { show: !stackedBar, lineStyle: { color: gridLine, type: "dashed" } },
         }
       : undefined,
-    series: dimmedSeries ?? chartOption.series,
+    series: externalPieLegend ? asArray(visibleSeries).map((item) => ({ ...asObject(item),
+      center: ["50%", "50%"], radius: ["28%", "55%"], label: { show: false }, labelLine: { show: false },
+    })) : dimmedSeries ?? chartOption.series,
     media: [{ query: { maxWidth: 480 }, option: smallScreenOption }],
   }
 
@@ -624,14 +653,39 @@ function ChartCard({ chart, index, palette }: ChartCardProps) {
         {effectiveChart.description && (
           <p className="mt-1 text-sm text-zinc-500">{effectiveChart.description}</p>
         )}
+        {definitions.length > 0 && <details className="mt-2 text-sm text-zinc-500">
+          <summary className="cursor-pointer">What these names mean</summary>
+          <p className="mt-2 text-xs">From the data guide supplied with this analysis.</p>
+          <dl className="mt-2 space-y-3">{definitions.map((definition) => <div key={definition.field}>
+            <dt className="font-medium text-zinc-700 dark:text-zinc-200">{definition.label}</dt>
+            {definition.description && <dd>{definition.description}</dd>}
+            {definition.unit && <dd>Measured in {definition.unit}.</dd>}
+            {definition.origin && <dd>Days are counted from {definition.origin}.</dd>}
+          </div>)}</dl>
+        </details>}
       </div>
       <EChartsReact
         option={option}
-        style={{ height: horizontalBar ? Math.max(340, asArray(yAxis.data).length * 34 + 80) : 320 }}
+        style={{ height: externalPieLegend ? 240 : horizontalBar ? Math.max(340, asArray(yAxis.data).length * 34 + 80) : 320 }}
         opts={{ renderer: "svg" }}
         onEvents={{ click: handleChartClick }}
         lazyUpdate
       />
+      {externalPieLegend && <ul className="flex flex-wrap gap-x-4 gap-y-2 text-xs text-zinc-500" aria-label="Chart categories">
+        {pieData.map((item, itemIndex) => {
+          const value = asObject(item)
+          const name = String(value.name ?? "")
+          const amount = Number(value.value ?? 0)
+          const color = asObject(value.itemStyle).color
+          return <li key={`${name}-${itemIndex}`} className="flex max-w-full min-w-0 items-start gap-2">
+            <span aria-hidden className="mt-1 h-2.5 w-2.5 shrink-0 rounded-sm" style={{
+              backgroundColor: typeof color === "string" ? color : rotatedColors[itemIndex % rotatedColors.length],
+            }} />
+            <span className="min-w-0 break-words">{readerLabel(readerLabels.pie, name) || "Blank value"}<br />
+              {fullNumber(amount, currency)} ({(pieTotal ? amount / pieTotal * 100 : 0).toFixed(1)}%)</span>
+          </li>
+        })}
+      </ul>}
     </motion.div>
   )
 }

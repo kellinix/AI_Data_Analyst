@@ -3,7 +3,9 @@ from __future__ import annotations
 import asyncio
 import codecs
 import csv
+import math
 import re
+from decimal import Decimal
 from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Any
@@ -48,6 +50,51 @@ class FileProcessor:
 
     SAMPLE_ROWS = 200_000
     HEADER_SCAN_ROWS = 25
+
+    def __init__(self, *, data_dictionary_context: dict[str, Any] | None = None, source_name: str | None = None):
+        from app.schemas.data_dictionary import DataDictionary
+
+        self.dictionary_context = data_dictionary_context or {}
+        self.source_name = source_name
+        self.dictionary = DataDictionary.model_validate(self.dictionary_context["data_dictionary"]) if "data_dictionary" in self.dictionary_context else None
+
+    def _source_definitions(self, sheet: str | None = None):
+        if self.dictionary is None:
+            return []
+        return [field for field in self.dictionary.fields
+                if field.source_table == self.source_name and (field.source_sheet is None or field.source_sheet == sheet)]
+
+    def _read_protection(self, df: pl.DataFrame, sheet: str | None = None) -> tuple[set[str], set[str], set[str]]:
+        definitions = self._source_definitions(sheet)
+        codes = {field.source_column for field in definitions if field.values and field.source_column in df.columns}
+        relative = {field.source_column for field in definitions if field.time_basis and field.source_column in df.columns}
+        def lossless_numeric_code(value: str) -> bool:
+            if not re.fullmatch(r"-?(?:0|[1-9]\d*)(?:\.\d+)?", value):
+                return False
+            number = float(value)
+            if not math.isfinite(number) or Decimal(str(number)) != Decimal(value):
+                return False
+            return not number.is_integer() or -(2 ** 63) <= number < 2 ** 63
+
+        literal = set()
+        for column in codes:
+            if df[column].dtype == pl.String and any(
+                not lossless_numeric_code(value) for value in df[column].drop_nulls().to_list()
+            ):
+                literal.add(column)
+        return codes, relative, literal
+
+    def _cleaning_protection(self, df: pl.DataFrame, parser: dict | None = None) -> set[str]:
+        if self.dictionary is None:
+            return set()
+        from app.analytics.data_dictionary import apply_data_dictionary
+        from app.analytics.measure_grain import annotate_measure_grain
+
+        schema = [{"name": name, "is_numeric": df[name].dtype.is_numeric()} for name in df.columns]
+        schema = annotate_measure_grain(schema, self.dictionary_context, parser)
+        schema = apply_data_dictionary(schema, self.dictionary_context, file_name=self.source_name, parser=parser)
+        return {field["name"] for field in schema if (field.get("data_definition") or {}).get("value_labels")
+                or (field.get("data_definition") or {}).get("time_basis")}
     DATE_FORMATS = (
         "%Y-%m-%d",
         "%d/%m/%Y",
@@ -159,6 +206,18 @@ class FileProcessor:
         df = pl.DataFrame(
             {f"column_{index + 1}": [row[index] for row in padded_rows] for index in range(width)}
         )
+        if self.dictionary:
+            header = self._detect_header_row(df)
+            names = self._make_column_names(df.row(header)) if header is not None else df.columns
+            code_fields = {field.source_column: field for field in self._source_definitions() if field.values}
+            for index, name in enumerate(names):
+                if name in code_fields:
+                    blank_codes = {value.value for value in code_fields[name].values if isinstance(value.value, str) and not value.value.strip()}
+                    values = []
+                    for row in rows:
+                        value = row[index] if index < len(row) else None
+                        values.append(value if value is not None and (value.strip() or value in blank_codes) else None)
+                    df = df.with_columns(pl.Series(df.columns[index], values, dtype=pl.String))
         return self._cap_dataframe(self._normalize_report_table(df))
 
     def _parser_metadata(self, file_path: str, extension: str) -> dict[str, Any]:
@@ -328,8 +387,9 @@ class FileProcessor:
         options: dict[str, Any],
     ) -> dict[str, Any]:
         df = self._read_file(input_path, extension)
-        cleaned, report = self.clean_dataframe(df, options)
-        report["parser"] = self._parser_metadata(input_path, extension)
+        parser = self._parser_metadata(input_path, extension)
+        cleaned, report = self.clean_dataframe(df, options, source_parser=parser)
+        report["parser"] = parser
 
         parquet_path = Path(parquet_output_path)
         csv_path = Path(csv_output_path)
@@ -349,8 +409,10 @@ class FileProcessor:
         self,
         df: pl.DataFrame,
         options: dict[str, Any] | None = None,
+        *, source_parser: dict[str, Any] | None = None,
     ) -> tuple[pl.DataFrame, dict[str, Any]]:
         options = _cleaning_options(options or {})
+        protected = self._cleaning_protection(df, source_parser)
         report: dict[str, Any] = {
             "enabled": True,
             "options": options,
@@ -415,22 +477,25 @@ class FileProcessor:
             }
             if report["renamed_columns"]:
                 report["steps"].append("standardized_column_names")
+            protected = {report["renamed_columns"].get(column, column) for column in protected}
+        if protected:
+            report["preserved_guide_columns"] = sorted(protected)
 
         if options["clean_text"]:
-            cleaned = self._trim_text_values(cleaned)
+            cleaned = self._trim_text_values(cleaned, protected)
             report["steps"].append("trimmed_text_values")
 
         if options["drop_empty"]:
             before_rows = cleaned.height
             before_columns = len(cleaned.columns)
-            cleaned = self._drop_empty_rows_and_columns(cleaned)
+            cleaned = self._drop_empty_rows_and_columns(cleaned, protected)
             report["dropped_empty_rows"] = before_rows - cleaned.height
             report["dropped_empty_columns"] = before_columns - len(cleaned.columns)
             if report["dropped_empty_rows"] or report["dropped_empty_columns"]:
                 report["steps"].append("dropped_empty_rows_columns")
 
         if options["normalize_dates"]:
-            cleaned, converted_dates, date_report = self._normalize_date_columns(cleaned)
+            cleaned, converted_dates, date_report = self._normalize_date_columns(cleaned, preserve_columns=protected)
             report["converted_date_columns"] = converted_dates
             report["date_normalization"] = date_report
             if converted_dates:
@@ -449,7 +514,7 @@ class FileProcessor:
 
         withheld_columns: set[str] = set()
         if options["parse_currency_percent"]:
-            cleaned, converted_numeric = self._parse_numeric_text_columns(cleaned)
+            cleaned, converted_numeric = self._parse_numeric_text_columns(cleaned, protected)
             report["converted_numeric_columns"] = converted_numeric
             # Columns where some values were withheld rather than absent. Those
             # cells must stay empty: imputing a redacted cost invents public
@@ -475,7 +540,7 @@ class FileProcessor:
 
         if options["missing_data_strategy"] == "smart":
             before_rows = cleaned.height
-            cleaned, missing_report = self._handle_missing_values(cleaned, withheld_columns)
+            cleaned, missing_report = self._handle_missing_values(cleaned, withheld_columns | protected)
             report["missing_values"] = missing_report
             report["dropped_rows_missing_critical_metrics"] = before_rows - cleaned.height
             if missing_report.get("steps"):
@@ -490,7 +555,7 @@ class FileProcessor:
 
         if options["fuzzy_deduplicate"]:
             before_rows = cleaned.height
-            cleaned, fuzzy_report = self._remove_fuzzy_duplicate_rows(cleaned)
+            cleaned, fuzzy_report = self._remove_fuzzy_duplicate_rows(cleaned, protected)
             report["fuzzy_duplicates"] = fuzzy_report
             report["removed_fuzzy_duplicate_rows"] = before_rows - cleaned.height
             if report["removed_fuzzy_duplicate_rows"]:
@@ -499,7 +564,7 @@ class FileProcessor:
             report["removed_fuzzy_duplicate_rows"] = 0
 
         if options["outlier_policy"] == "cap":
-            cleaned, cap_report = self._cap_outlier_values(cleaned)
+            cleaned, cap_report = self._cap_outlier_values(cleaned, protected)
             report["outlier_capping"] = cap_report
             report["capped_outlier_values"] = cap_report.get("capped_values", 0)
             report["excluded_outlier_rows"] = 0
@@ -507,7 +572,7 @@ class FileProcessor:
                 report["steps"].append("capped_outlier_values")
         elif options["outlier_policy"] == "exclude":
             before_rows = cleaned.height
-            cleaned = self._exclude_outlier_rows(cleaned)
+            cleaned = self._exclude_outlier_rows(cleaned, protected)
             report["excluded_outlier_rows"] = before_rows - cleaned.height
             report["capped_outlier_values"] = 0
             if report["excluded_outlier_rows"]:
@@ -520,10 +585,10 @@ class FileProcessor:
         report["output_columns"] = len(cleaned.columns)
         return cleaned, report
 
-    def _trim_text_values(self, df: pl.DataFrame) -> pl.DataFrame:
+    def _trim_text_values(self, df: pl.DataFrame, preserve_columns: set[str] | None = None) -> pl.DataFrame:
         expressions = []
         for column in df.columns:
-            if df[column].dtype != pl.String:
+            if df[column].dtype != pl.String or column in (preserve_columns or set()):
                 continue
             stripped = (
                 pl.col(column)
@@ -538,22 +603,22 @@ class FileProcessor:
             )
         return df.with_columns(expressions) if expressions else df
 
-    def _drop_empty_rows_and_columns(self, df: pl.DataFrame) -> pl.DataFrame:
+    def _drop_empty_rows_and_columns(self, df: pl.DataFrame, preserve_columns: set[str] | None = None) -> pl.DataFrame:
         if df.is_empty():
             return df
 
-        keep_columns = [column for column in df.columns if df[column].null_count() < df.height]
+        keep_columns = [column for column in df.columns if column in (preserve_columns or set()) or df[column].null_count() < df.height]
         if len(keep_columns) != len(df.columns):
             df = df.select(keep_columns)
         if not df.columns:
             return df
         return df.filter(pl.any_horizontal([pl.col(column).is_not_null() for column in df.columns]))
 
-    def _parse_numeric_text_columns(self, df: pl.DataFrame) -> tuple[pl.DataFrame, list[dict[str, Any]]]:
+    def _parse_numeric_text_columns(self, df: pl.DataFrame, preserve_columns: set[str] | None = None) -> tuple[pl.DataFrame, list[dict[str, Any]]]:
         expressions = []
         converted: list[dict[str, Any]] = []
         for column in df.columns:
-            if df[column].dtype != pl.String:
+            if df[column].dtype != pl.String or column in (preserve_columns or set()):
                 continue
             if _looks_like_identifier_column(column):
                 continue
@@ -716,7 +781,7 @@ class FileProcessor:
             report["steps"].append("imputed_missing_values")
         return df, report
 
-    def _remove_fuzzy_duplicate_rows(self, df: pl.DataFrame) -> tuple[pl.DataFrame, dict[str, Any]]:
+    def _remove_fuzzy_duplicate_rows(self, df: pl.DataFrame, preserve_columns: set[str] | None = None) -> tuple[pl.DataFrame, dict[str, Any]]:
         report: dict[str, Any] = {
             "enabled": True,
             "method": "normalized_text_signature_similarity",
@@ -735,6 +800,7 @@ class FileProcessor:
             for column in df.columns
             if df[column].dtype == pl.String
             and not _looks_like_identifier_column(column)
+            and column not in (preserve_columns or set())
         ][:8]
         if not text_columns:
             return df, report
@@ -757,6 +823,8 @@ class FileProcessor:
             duplicate_of: int | None = None
             for kept_position, kept_signature in enumerate(signatures):
                 if not kept_signature[1] or exact_signature != kept_signature[0]:
+                    continue
+                if any(row[column] != rows[kept_indexes[kept_position]][column] for column in preserve_columns or set()):
                     continue
                 if SequenceMatcher(None, text_signature, kept_signature[1]).ratio() >= 0.94:
                     duplicate_of = kept_indexes[kept_position]
@@ -787,13 +855,13 @@ class FileProcessor:
     def _normalize_date_columns(
         self,
         df: pl.DataFrame,
-        *, lossless_only: bool = False,
+        *, lossless_only: bool = False, preserve_columns: set[str] | None = None,
     ) -> tuple[pl.DataFrame, list[str], dict[str, Any]]:
         expressions = []
         converted: list[str] = []
         report: dict[str, Any] = {"columns": []}
         for column in df.columns:
-            if df[column].dtype != pl.String:
+            if df[column].dtype != pl.String or column in (preserve_columns or set()):
                 continue
             normalized_name = _standardize_column_name(column)
             if not _looks_like_date_column(normalized_name, df[column]):
@@ -814,8 +882,8 @@ class FileProcessor:
             df = df.with_columns(expressions)
         return df, converted, report
 
-    def _exclude_outlier_rows(self, df: pl.DataFrame) -> pl.DataFrame:
-        numeric_columns = _outlier_candidate_columns(df)
+    def _exclude_outlier_rows(self, df: pl.DataFrame, preserve_columns: set[str] | None = None) -> pl.DataFrame:
+        numeric_columns = [column for column in _outlier_candidate_columns(df) if column not in (preserve_columns or set())]
         if not numeric_columns or df.is_empty():
             return df
 
@@ -841,7 +909,7 @@ class FileProcessor:
             return df
         return df.filter(pl.all_horizontal(predicates))
 
-    def _cap_outlier_values(self, df: pl.DataFrame) -> tuple[pl.DataFrame, dict[str, Any]]:
+    def _cap_outlier_values(self, df: pl.DataFrame, preserve_columns: set[str] | None = None) -> tuple[pl.DataFrame, dict[str, Any]]:
         report: dict[str, Any] = {
             "enabled": True,
             "method": "iqr_winsorization",
@@ -852,6 +920,8 @@ class FileProcessor:
         }
         expressions = []
         for column in _outlier_candidate_columns(df):
+            if column in (preserve_columns or set()):
+                continue
             series = df[column].drop_nulls()
             if series.len() < 8:
                 continue
@@ -909,15 +979,16 @@ class FileProcessor:
             df = df.with_columns(expressions)
         return df, report
 
-    def _normalize_report_table(self, df: pl.DataFrame) -> pl.DataFrame:
+    def _normalize_report_table(self, df: pl.DataFrame, sheet: str | None = None) -> pl.DataFrame:
         """Promote a detected table header row and remove report title rows."""
         if df.is_empty() or df.height < 2:
             return df
 
         header_index = self._detect_header_row(df)
         if header_index is None:
-            normalized = self._cast_numeric_like_columns(df)
-            return self._normalize_date_columns(normalized, lossless_only=True)[0]
+            codes, relative, literal = self._read_protection(df, sheet)
+            normalized = self._cast_numeric_like_columns(df, literal, relative)
+            return self._normalize_date_columns(normalized, lossless_only=True, preserve_columns=codes | relative)[0]
 
         header_values = df.row(header_index)
         names = self._make_column_names(header_values)
@@ -926,8 +997,9 @@ class FileProcessor:
         normalized = normalized.filter(
             pl.any_horizontal([pl.col(col).is_not_null() for col in normalized.columns])
         )
-        normalized = self._cast_numeric_like_columns(normalized)
-        return self._normalize_date_columns(normalized, lossless_only=True)[0]
+        codes, relative, literal = self._read_protection(normalized, sheet)
+        normalized = self._cast_numeric_like_columns(normalized, literal, relative)
+        return self._normalize_date_columns(normalized, lossless_only=True, preserve_columns=codes | relative)[0]
 
     def _normalize_excel_sheets(
         self, sheets: pl.DataFrame | dict[str, pl.DataFrame], parser_report: dict[str, Any] | None = None
@@ -940,7 +1012,7 @@ class FileProcessor:
         frames: list[pl.DataFrame] = []
         names: list[str] = []
         for sheet_name, raw_sheet in sheets.items():
-            normalized = self._normalize_report_table(raw_sheet)
+            normalized = self._normalize_report_table(raw_sheet, sheet_name)
             if normalized.is_empty():
                 continue
             frames.append(normalized)
@@ -1181,16 +1253,20 @@ class FileProcessor:
             names.append(base if count == 0 else f"{base}_{count + 1}")
         return names
 
-    def _cast_numeric_like_columns(self, df: pl.DataFrame) -> pl.DataFrame:
+    def _cast_numeric_like_columns(
+        self, df: pl.DataFrame, preserve_columns: set[str] | None = None, relative_columns: set[str] | None = None,
+    ) -> pl.DataFrame:
         expressions = []
         for column in df.columns:
+            if column in (preserve_columns or set()):
+                continue
             series = df[column]
             if series.dtype != pl.String:
                 continue
             if _looks_like_identifier_column(column):
                 continue
 
-            if _looks_like_date_column(_standardize_column_name(column), series):
+            if column not in (relative_columns or set()) and _looks_like_date_column(_standardize_column_name(column), series):
                 continue
             cleaned = series.str.replace_all(",", "").str.strip_chars()
             numeric = cleaned.cast(pl.Float64, strict=False)
@@ -1305,8 +1381,9 @@ class FileProcessor:
         source_samples = []
         table_sources = []
         for uploaded_file in uploaded_files:
+            reader = FileProcessor(data_dictionary_context=relationship_context, source_name=uploaded_file.original_filename) if "data_dictionary" in relationship_context else self
             extension = Path(uploaded_file.storage_path).suffix.lower()
-            frame, truncated = self._read_file_ex(uploaded_file.storage_path, extension)
+            frame, truncated = reader._read_file_ex(uploaded_file.storage_path, extension)
             source_samples.append({"name": uploaded_file.original_filename,
                                    "row_count": len(frame), "truncated": truncated})
             if frame.is_empty():
@@ -1317,7 +1394,7 @@ class FileProcessor:
             frames.append(frame)
             source_id = getattr(uploaded_file, "id", None)
             reference = str(source_id) if source_id is not None else str(len(table_sources))
-            parser = self._parser_metadata(uploaded_file.storage_path, extension) if extension in {".xlsx", ".xls"} else {}
+            parser = reader._parser_metadata(uploaded_file.storage_path, extension) if extension in {".xlsx", ".xls"} else {}
             origins = (parser.get("relationship_resolution") or {}).get("field_origins") or {}
             table_sources.append({"id": reference, "name": uploaded_file.original_filename,
                 "field_origins": {column: {**origin, "source_file": uploaded_file.original_filename,

@@ -4,12 +4,13 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.analytics.histogram_presentation import present_histogram
 from app.analytics.line_presentation import present_time_line
 from app.analytics.record_context import record_context
 from app.analytics.report_relevance import useful_charts, useful_insights
+from app.schemas.data_dictionary import validate_dictionary_context
 from app.services.investigation import evidence_revision, evidence_spec, supporting_figures
 from app.services.report_language import (
     chart_description,
@@ -50,12 +51,16 @@ class CreateAnalysisRequest(BaseModel):
     relationship_context: dict[str, Any] | None = None
     cleaning: dict[str, Any] | None = None
 
+    _dictionary_context = field_validator("relationship_context")(validate_dictionary_context)
+
 
 class CreateCombinedAnalysisRequest(BaseModel):
     file_ids: list[uuid.UUID] = Field(..., min_length=1)
     name: str | None = None
     relationship_context: dict[str, Any] | None = None
     cleaning: dict[str, Any] | None = None
+
+    _dictionary_context = field_validator("relationship_context")(validate_dictionary_context)
 
 
 class RenameAnalysisRequest(BaseModel):

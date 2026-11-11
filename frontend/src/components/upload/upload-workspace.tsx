@@ -25,6 +25,7 @@ import {
 import { uploadsApi } from "@/lib/api/uploads"
 import { cn, formatBytes } from "@/lib/utils"
 import type { CleaningOptions, UploadedFile } from "@/types"
+import { readDataGuide, type DataGuide } from "@/lib/data-guide"
 import {
   generateRelationshipSuggestions,
   getColumnNames,
@@ -60,6 +61,11 @@ function getErrorMessage(error: unknown): string {
   ) {
     const data = error.response.data as { detail?: unknown; error?: unknown }
     if (typeof data.detail === "string") return data.detail
+    if (Array.isArray(data.detail)) {
+      const messages = data.detail.flatMap((item) =>
+        item && typeof item === "object" && "msg" in item && typeof item.msg === "string" ? [item.msg] : [])
+      if (messages.length) return messages.slice(0, 3).join(". ")
+    }
     if (typeof data.error === "string") return data.error
   }
 
@@ -81,6 +87,8 @@ export function UploadWorkspace() {
   const [queuedFiles, setQueuedFiles] = useState<QueuedFile[]>([])
   const [dataDescription, setDataDescription] = useState("")
   const [instructions, setInstructions] = useState("")
+  const [guide, setGuide] = useState<{ name: string; data?: DataGuide; error?: string } | null>(null)
+  const [guideLoading, setGuideLoading] = useState(false)
   const [cleaningMode, setCleaningMode] = useState<CleaningOptions["mode"]>("clean")
   const [outlierPolicy, setOutlierPolicy] =
     useState<NonNullable<CleaningOptions["outlier_policy"]>>("keep")
@@ -95,6 +103,19 @@ export function UploadWorkspace() {
   const hasUploadedProfiles =
     queuedFiles.length > 0 && queuedFiles.every((queued) => queued.uploaded)
   const relationshipSuggestions = generateRelationshipSuggestions(uploadedFiles)
+
+  async function chooseGuide(file: File | undefined) {
+    if (!file) return
+    setGuideLoading(true)
+    setGuide({ name: file.name })
+    try {
+      setGuide({ name: file.name, data: await readDataGuide(file) })
+    } catch (error) {
+      setGuide({ name: file.name, error: getErrorMessage(error) })
+    } finally {
+      setGuideLoading(false)
+    }
+  }
 
   const handleFilesAccepted = useCallback((files: File[]) => {
     setQueuedFiles((current) => {
@@ -164,7 +185,7 @@ export function UploadWorkspace() {
 
   const startAnalyses = useCallback(
     async () => {
-      if (queuedFiles.length === 0) return
+      if (queuedFiles.length === 0 || guideLoading || guide?.error) return
       if (!hasUploadedProfiles) {
         await prepareFiles()
         return
@@ -183,6 +204,7 @@ export function UploadWorkspace() {
           suggestions: relationshipSuggestions,
           data_description: dataDescription.trim() || null,
           instructions: instructions.trim() || null,
+          ...(guide?.data ? { data_dictionary: guide.data } : {}),
         }
         const cleaning: CleaningOptions = {
           mode: cleaningMode,
@@ -291,6 +313,8 @@ export function UploadWorkspace() {
       semanticCleanup,
       hasUploadedProfiles,
       instructions,
+      guide,
+      guideLoading,
       prepareFiles,
       queuedFiles,
       relationshipSuggestions,
@@ -314,6 +338,23 @@ export function UploadWorkspace() {
         isUploading={state === "uploading"}
       />
 
+      <div className="space-y-2 rounded-lg border border-zinc-200 bg-white p-4 dark:border-zinc-800 dark:bg-zinc-950">
+        <label htmlFor="data-guide-file" className="block text-sm font-semibold text-zinc-900 dark:text-white">Data guide (optional)</label>
+        <p className="text-xs text-zinc-500">Choose the JSON guide supplied with your data to explain column names and codes. Up to 1 MB.</p>
+        <input id="data-guide-file" type="file" accept=".json,application/json" disabled={state !== "idle" || guideLoading}
+          className="block max-w-full text-sm" onChange={(event) => {
+            const file = event.currentTarget.files?.[0]
+            event.currentTarget.value = ""
+            void chooseGuide(file)
+          }} />
+        {guideLoading && <p className="text-sm text-zinc-500">Reading data guide…</p>}
+        {guide && <div className="flex flex-wrap items-center gap-3 text-sm">
+          <span className="break-all">{guide.name}{guide.data ? ` · ${guide.data.fields.length} field definition${guide.data.fields.length === 1 ? "" : "s"}` : ""}</span>
+          <Button type="button" variant="ghost" disabled={state !== "idle" || guideLoading} onClick={() => setGuide(null)}>Remove data guide</Button>
+        </div>}
+        {guide?.error && <p role="alert" className="text-sm text-red-600">{guide.error}</p>}
+      </div>
+
       {queuedFiles.length > 0 && (
         <div className="rounded-lg border border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950">
           <div className="flex items-center justify-between gap-4 border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
@@ -328,7 +369,7 @@ export function UploadWorkspace() {
             <Button
               type="button"
               onClick={startAnalyses}
-              disabled={state !== "idle" || queuedFiles.length === 0}
+              disabled={state !== "idle" || queuedFiles.length === 0 || guideLoading || !!guide?.error}
             >
               {state === "uploading" ? (
                 <Loader2 className="h-4 w-4 animate-spin" />

@@ -91,7 +91,9 @@ class SemanticWrangler:
 
         try:
             df = pl.read_parquet(parquet_path)
-            result = await self.canonicalize_categorical_values(df)
+            protected = set((profile.get("cleaning_report") or {}).get("preserved_guide_columns") or [])
+            result = (await self.canonicalize_categorical_values(df, exclude_columns=protected)
+                      if protected else await self.canonicalize_categorical_values(df))
         except Exception as exc:
             logger.warning("Semantic categorical wrangling failed", exc=str(exc))
             return _attach_semantic_report(profile, {"enabled": True, "failed": str(exc)})
@@ -111,7 +113,9 @@ class SemanticWrangler:
         }
         return _attach_semantic_report(refreshed, result.report)
 
-    async def canonicalize_categorical_values(self, df: pl.DataFrame) -> SemanticWrangleResult:
+    async def canonicalize_categorical_values(
+        self, df: pl.DataFrame, *, exclude_columns: set[str] | None = None,
+    ) -> SemanticWrangleResult:
         """Merge likely equivalent category labels in low-cardinality columns."""
         report: dict[str, Any] = {
             "enabled": True,
@@ -132,6 +136,8 @@ class SemanticWrangler:
         candidate_columns = []
         candidate_counts = []
         for column in _candidate_category_columns(cleaned):
+            if column in (exclude_columns or set()):
+                continue
             counts = _string_value_counts(cleaned[column])
             tokens = set(re.findall(r"[a-z]+", column.lower()))
             code_values = sum(bool(re.fullmatch(r"[a-z]{1,8}\d+[a-z]?(?:_[a-z0-9]+)*", value, re.I)) for value in counts)
@@ -344,12 +350,14 @@ def apply_display_metadata_to_statistics(
     schema = []
     for column in statistics.get("schema", []):
         name = column.get("name")
-        label = labels.get(name)
+        definition = column.get("data_definition") or {}
+        label = definition.get("label") or labels.get(name)
         schema.append(
             {
                 **column,
                 "display_label": label or _humanize_identifier(str(name)),
-                "display_description": _column_descriptions(display_metadata).get(name),
+                "display_description": (column.get("display_description") if definition.get("time_basis")
+                                        else definition.get("description") or _column_descriptions(display_metadata).get(name)),
             }
         )
     updated = {**statistics, "schema": schema, "semantic_display": display_metadata}
@@ -378,10 +386,12 @@ def apply_display_metadata_to_statistics(
 def apply_display_metadata_to_charts(
     charts: list[dict[str, Any]],
     display_metadata: dict[str, Any],
+    statistics: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     labels = _column_labels(display_metadata)
     from app.services.report_language import present_chart
 
+    chart_context = statistics if any(field.get("data_definition") for field in (statistics or {}).get("schema", [])) else None
     updated = []
     for chart in charts:
         chart_copy = {
@@ -407,7 +417,7 @@ def apply_display_metadata_to_charts(
                 for series in opt["series"]
             ]
         chart_copy["echarts_option"] = opt
-        updated.append(present_chart(chart_copy, labels=labels))
+        updated.append(present_chart(chart_copy, chart_context, labels=labels))
     return updated
 
 
@@ -553,6 +563,12 @@ def _fallback_display_metadata(
         }
         for column in statistics.get("schema", [])
     ]
+    for item, field in zip(columns, statistics.get("schema", []), strict=True):
+        definition = field.get("data_definition")
+        if definition:
+            item["data_definition"] = definition
+            item["label"] = definition.get("label") or item["label"]
+            item["description"] = field.get("display_description") if definition.get("time_basis") else definition.get("description")
     labels = {item["name"]: item["label"] for item in columns}
     return {
         "columns": columns,
@@ -600,6 +616,7 @@ def _merge_display_metadata(
     for item in metadata.get("columns", []):
         if isinstance(item, dict) and item.get("name"):
             name = str(item["name"])
+            definition = columns_by_name.get(name, {}).get("data_definition") or {}
             fallback_label = str(columns_by_name.get(name, {}).get("label") or "")
             columns_by_name[name] = {
                 **columns_by_name.get(name, {"name": name}),
@@ -607,7 +624,7 @@ def _merge_display_metadata(
                 # when it is genuinely shorter. A successful response can still
                 # hand back a column's entire definition as its "label", and
                 # readability should not depend on which one arrives.
-                "label": fallback_label if fallback_label in {
+                "label": fallback_label if definition else (fallback_label if fallback_label in {
                     "Sales Amount", "Payment Method", "Certificates of sponsorship used",
                     "Source sheet", "Electricity used (kWh)",
                     "Shipment amount", *FOOTBALL_LABELS.values(),
@@ -616,8 +633,8 @@ def _merge_display_metadata(
                     str(item.get("label") or ""),
                     fallback_label,
                     name,
-                ),
-                "description": item.get("description"),
+                )),
+                "description": columns_by_name[name].get("description") if definition else item.get("description"),
             }
 
     charts_by_id = {

@@ -63,7 +63,8 @@ async def test_recovery_executes_validated_fact_average_by_numeric_lookup(tmp_pa
     assert "recorded_categories" not in repair
     fields = json.loads(repair.split("\nSaved fields for calculation review:\n", 1)[1].split("\nRecorded table relationships:\n", 1)[0])
     assert len(fields) == 3
-    assert set(fields[0]) == {"name", "role", "calculation_support", "aggregation_basis", "source_qualified_field", "source_role"}
+    assert set(fields[0]) == {"name", "role", "calculation_support", "aggregation_basis", "source_qualified_field"}
+    assert fields[0].get("source_role") is None
     assert "missing_requirements" in calls[1]["messages"][-1]["content"]
     assert calls[1]["model"] == calls[0]["model"]
 

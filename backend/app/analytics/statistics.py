@@ -13,8 +13,10 @@ from typing import Any
 import duckdb
 
 from app.analytics.category_values import category_expression, category_label
+from app.analytics.data_dictionary import apply_data_dictionary
 from app.analytics.data_quality import analyze_data_quality
 from app.analytics.kpi_detector import CURRENCY_KEYWORDS
+from app.analytics.measure_grain import annotate_measure_grain
 from app.analytics.semantic_detector import enrich_schema_with_semantics, is_serial_identifier
 from app.analytics.sql_utils import quote_identifier as _quote_identifier
 from app.analytics.text_matching import contains_keyword
@@ -43,13 +45,25 @@ def _shared_prefix(left: list[str], right: list[str]) -> int:
 class StatisticsEngine:
     """Compute descriptive statistics and data profiles from DuckDB."""
 
-    def __init__(self, conn: duckdb.DuckDBPyConnection, table: str = "data"):
+    def __init__(
+        self, conn: duckdb.DuckDBPyConnection, table: str = "data", *,
+        upload_context: dict[str, Any] | None = None, file_name: str | None = None,
+        parser: dict[str, Any] | None = None,
+    ):
         self.conn = conn
         self.table = table
+        self.upload_context = upload_context
+        self.file_name = file_name
+        self.parser = parser
+        self.field_metadata: dict[str, dict[str, Any]] = {}
 
     def describe_all(self) -> dict[str, Any]:
         """Return a comprehensive statistical summary of all columns."""
         schema = self._get_schema()
+        if isinstance(self.upload_context, dict) and "data_dictionary" in self.upload_context:
+            schema = annotate_measure_grain(schema, self.upload_context, self.parser)
+            schema = apply_data_dictionary(schema, self.upload_context, file_name=self.file_name, parser=self.parser)
+            self.field_metadata = {field["name"]: field for field in schema}
         numeric_cols = [c["name"] for c in schema if c["is_numeric"]]
         date_cols = [c["name"] for c in schema if c["is_date"]]
         categorical_cols = [c["name"] for c in schema if not c["is_numeric"] and not c["is_date"]]
@@ -57,6 +71,7 @@ class StatisticsEngine:
         self._flag_unresolved_duration_codes(numeric_stats)
         categorical_stats = self._categorical_stats(categorical_cols)
         schema = enrich_schema_with_semantics(schema, numeric_stats, categorical_stats)
+        schema = apply_data_dictionary(schema, self.upload_context, file_name=self.file_name, parser=self.parser)
         # Numeric columns recognized as categorical codes act as dimensions
         # downstream, so they need the same grouped value counts.
         coded_cols = [
@@ -87,6 +102,8 @@ class StatisticsEngine:
         Signed time offsets, balances and physical readings remain untouched.
         """
         for name, stats in numeric_stats.items():
+            if (self.field_metadata.get(name, {}).get("data_definition") or {}).get("time_basis"):
+                continue
             words = set(_name_tokens(name))
             elapsed = ("duration" in words or "elapsed" in words or "wait" in words
                        or "since" in words and bool(words & {"days", "hours", "minutes", "seconds"})
@@ -321,7 +338,7 @@ class StatisticsEngine:
         stats: dict[str, Any] = {}
         for col in limited:
             unique_count = unique_counts.get(col, 0)
-            safe_col = category_expression(col)
+            safe_col = category_expression(col, self.field_metadata.get(col))
             try:
                 # Only get top values for low-cardinality columns. Each column
                 # needs its own GROUP BY, so these can't be batched like the
@@ -337,7 +354,7 @@ class StatisticsEngine:
                     """).fetchall()
                     stats[col] = {
                         "unique_count": unique_count,
-                        "top_values": [{"value": category_label(col, r[0]), "count": r[1]} for r in top],
+                        "top_values": [{"value": category_label(col, r[0], self.field_metadata.get(col)), "count": r[1]} for r in top],
                     }
                 else:
                     stats[col] = {"unique_count": unique_count, "top_values": []}
@@ -348,7 +365,7 @@ class StatisticsEngine:
     def _categorical_unique_counts(self, columns: list[str]) -> dict[str, int]:
         try:
             select_parts = [
-                f"COUNT(DISTINCT {category_expression(col)})" for col in columns
+                f"COUNT(DISTINCT {category_expression(col, self.field_metadata.get(col))})" for col in columns
             ]
             row = self.conn.execute(
                 f"SELECT {', '.join(select_parts)} FROM {_quote_identifier(self.table)}"
@@ -362,7 +379,7 @@ class StatisticsEngine:
         for col in columns:
             try:
                 row = self.conn.execute(
-                    f"SELECT COUNT(DISTINCT {category_expression(col)}) FROM {_quote_identifier(self.table)}"
+                    f"SELECT COUNT(DISTINCT {category_expression(col, self.field_metadata.get(col))}) FROM {_quote_identifier(self.table)}"
                 ).fetchone()
                 counts[col] = row[0] if row else 0
             except Exception as exc:

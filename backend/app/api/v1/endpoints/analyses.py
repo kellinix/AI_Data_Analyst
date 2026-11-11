@@ -1,5 +1,6 @@
 import asyncio
 import math
+import re
 import secrets
 import uuid
 from pathlib import Path
@@ -10,6 +11,8 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import selectinload
 
+from app.analytics.data_dictionary import apply_data_dictionary, value_display_label
+from app.analytics.labels import source_column_label
 from app.analytics.live_filter import (
     FilterValidationError,
     build_where_clause,
@@ -17,6 +20,7 @@ from app.analytics.live_filter import (
     requery_chart,
     validate_filters,
 )
+from app.analytics.measure_grain import annotate_measure_grain
 from app.api.deps import DB, CurrentUser, ensure_analysis_quota, ensure_storage_quota
 from app.core.config import settings
 from app.core.limiter import limiter
@@ -88,6 +92,7 @@ def _derive_filterable_columns(metadata: dict | None) -> list[FilterableColumn]:
     endpoint already supports `"between"` filters on them today.
     """
     columns = ((metadata or {}).get("data_profile") or {}).get("columns", [])
+    schema = {field["name"]: field for field in (metadata or {}).get("schema", [])}
     date_ranges = (metadata or {}).get("date_range") or {}
     out: list[FilterableColumn] = []
     for c in columns:
@@ -95,16 +100,21 @@ def _derive_filterable_columns(metadata: dict | None) -> list[FilterableColumn]:
         name = c.get("name")
         if not name:
             continue
-        display_label = c.get("display_label") or name
+        field = {**c, **schema.get(name, {})}
+        display_label = source_column_label(field) if field.get("data_definition") else c.get("display_label") or name
         if role in {"dimension", "flag"}:
             cat = c.get("categorical_summary") or {}
             unique_count = cat.get("unique_count")
             if unique_count is None or not (2 <= unique_count <= (100 if name.lower().endswith("question_code") or name.lower() == "answer" else 30)):
                 continue
+            top_values = [] if cat.get("top_values") is not None else None
+            for item in cat.get("top_values") or []:
+                label = value_display_label(field, item.get("value"))
+                top_values.append({**item, "label": label} if label else item)
             out.append(FilterableColumn(
                 column=name, display_label=display_label, role=role,
                 kind="categorical", unique_count=unique_count,
-                top_values=cat.get("top_values"),
+                top_values=top_values,
             ))
         elif role == "temporal_dimension" and c.get("is_date"):
             bounds = date_ranges.get(name) or {}
@@ -173,6 +183,55 @@ def _cleaning_options(cleaning: dict | None) -> dict:
         "outlier_policy": cleaning.get("outlier_policy", "keep"),
         "semantic_categorical_merging": cleaning.get("semantic_categorical_merging", False),
     }
+
+
+def _dictionary_upload_context(context: dict | None, files: list[UploadedFile]) -> dict:
+    result = dict(context or {})
+    if "data_dictionary" in result:
+        # Field origins and cleaning records come from our parser, never a
+        # caller's proposed source descriptions.
+        for key in ("relationship_resolution", "cleaning", "source_files", "_table_sources"):
+            result.pop(key, None)
+        result["source_files"] = [{"id": str(file.id), "name": file.original_filename,
+                                   "row_count": file.row_count, "column_count": file.column_count}
+                                  for file in files]
+    return result
+
+
+def _require_data_dictionary(
+    columns: list[dict] | None, context: dict, *, file_name: str,
+    parser: dict | None = None,
+) -> None:
+    if "data_dictionary" not in context:
+        return
+    schema = []
+    for column in columns or []:
+        numeric = bool(re.match(r"^(?:U?INT(?:\d+|EGER)?|BIGINT|SMALLINT|TINYINT|HUGEINT|FLOAT\d*|DOUBLE|REAL|DECIMAL)(?:\b|\()",
+                                str(column.get("dtype") or "").upper()))
+        schema.append({**column, "is_numeric": column.get("is_numeric", numeric)})
+    schema = annotate_measure_grain(schema, context, parser)
+    try:
+        apply_data_dictionary(schema, context, file_name=file_name, parser=parser)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+
+def _require_analysis_dictionary(
+    file: UploadedFile, context: dict, cleaning: dict | None, processor: FileProcessor,
+    columns: list[dict] | None = None,
+) -> None:
+    if "data_dictionary" not in context:
+        return
+    parser = ((cleaning or {}).get("report") or {}).get("parser")
+    if parser is None:
+        parser = processor._parser_metadata(file.storage_path, Path(file.storage_path).suffix.lower())
+    try:
+        _require_data_dictionary(file.columns if columns is None else columns, {**context, "cleaning": cleaning or {}},
+                                 file_name=file.original_filename, parser=parser)
+    except HTTPException:
+        for key in ("cleaned_parquet_path", "cleaned_csv_path"):
+            _delete_file_quietly((cleaning or {}).get(key))
+        raise
 
 
 async def _create_cleaned_uploaded_file(
@@ -313,6 +372,8 @@ async def _regenerate_cleaned_file_for_rerun(
             return old_file
 
     try:
+        if "data_dictionary" in upload_context:
+            processor = FileProcessor(data_dictionary_context=upload_context, source_name=source_file.original_filename)
         original_options = ((cleaning.get("report") or {}).get("options") or {}) if clean else {}
         new_file, new_cleaning_metadata = await _create_cleaned_uploaded_file(
             source_file=source_file, current_user=current_user, db=db, processor=processor,
@@ -443,7 +504,16 @@ async def create_analysis(
 
     ensure_analysis_quota(current_user)
 
-    processor = FileProcessor()
+    context = _dictionary_upload_context(body.relationship_context, [uploaded_file])
+    processor = FileProcessor(data_dictionary_context=context, source_name=uploaded_file.original_filename)
+    source_columns = None
+    if "data_dictionary" in context:
+        extension = Path(uploaded_file.storage_path).suffix.lower()
+        frame = await asyncio.to_thread(processor._read_file, uploaded_file.storage_path, extension)
+        source_columns = processor._profile_dataframe(frame)["columns"]
+        if not _cleaning_enabled(body.cleaning):
+            _require_data_dictionary(source_columns, context, file_name=uploaded_file.original_filename,
+                                     parser=processor._parser_metadata(uploaded_file.storage_path, extension))
     analysis_file, cleaning_metadata = await _create_cleaned_uploaded_file(
         source_file=uploaded_file,
         current_user=current_user,
@@ -451,10 +521,12 @@ async def create_analysis(
         processor=processor,
         cleaning=body.cleaning,
     )
+    _require_analysis_dictionary(analysis_file, context, cleaning_metadata, processor,
+                                 columns=source_columns if analysis_file.id == uploaded_file.id else None)
 
     analysis_name = body.name or uploaded_file.original_filename.rsplit(".", 1)[0]
     upload_context = {
-        **(body.relationship_context or {}),
+        **context,
         "cleaning": cleaning_metadata or {"enabled": False, "mode": "raw"},
     }
 
@@ -520,7 +592,7 @@ async def create_combined_analysis(
     upload_dir = Path(settings.upload_dir) / str(current_user.id)
     combined_filename = f"{uuid.uuid4()}.parquet"
     combined_path = upload_dir / combined_filename
-    relationship_context = body.relationship_context or {}
+    relationship_context = _dictionary_upload_context(body.relationship_context, ordered_files)
 
     profile = await FileProcessor().combine_uploaded_files(
         ordered_files,
@@ -529,6 +601,8 @@ async def create_combined_analysis(
     )
     try:
         _require_resolved_relationship(relationship_context)
+        if not _cleaning_enabled(body.cleaning):
+            _require_data_dictionary(profile.get("columns"), relationship_context, file_name="Combined analysis.parquet")
     except HTTPException:
         _delete_file_quietly(str(combined_path))
         raise
@@ -554,14 +628,18 @@ async def create_combined_analysis(
     await db.flush()
     await db.refresh(combined_file)
 
-    processor = FileProcessor()
-    analysis_file, cleaning_metadata = await _create_cleaned_uploaded_file(
-        source_file=combined_file,
-        current_user=current_user,
-        db=db,
-        processor=processor,
-        cleaning=body.cleaning,
-    )
+    processor = FileProcessor(data_dictionary_context=relationship_context, source_name=combined_file.original_filename)
+    try:
+        analysis_file, cleaning_metadata = await _create_cleaned_uploaded_file(
+            source_file=combined_file,
+            current_user=current_user,
+            db=db,
+            processor=processor,
+            cleaning=body.cleaning,
+        )
+    except Exception:
+        _delete_file_quietly(str(combined_path))
+        raise
 
     combined_context = {
         **relationship_context,
@@ -577,6 +655,11 @@ async def create_combined_analysis(
             for uploaded_file in ordered_files
         ],
     }
+    try:
+        _require_analysis_dictionary(analysis_file, combined_context, cleaning_metadata, processor)
+    except HTTPException:
+        _delete_file_quietly(str(combined_path))
+        raise
 
     analysis = Analysis(
         user_id=current_user.id,
@@ -702,15 +785,17 @@ async def query_analysis(
     schema = (analysis.metadata_ or {}).get("schema", [])
     try:
         filters = validate_filters([f.model_dump() for f in body.filters], schema)
+        filter_sql, filter_params = build_where_clause(filters, schema)
     except FilterValidationError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-
-    filter_sql, filter_params = build_where_clause(filters)
 
     conn = duckdb.connect(":memory:")
     try:
         extension = Path(analysis.file.storage_path).suffix.lower()
-        sample_row_count, _truncated = await FileProcessor().read_to_duckdb_ex(
+        sample_row_count, _truncated = await FileProcessor(
+            data_dictionary_context=(analysis.metadata_ or {}).get("upload_context"),
+            source_name=analysis.file.original_filename,
+        ).read_to_duckdb_ex(
             conn, analysis.file.storage_path, extension
         )
         count_sql = "SELECT COUNT(*) FROM data" + (f" WHERE {filter_sql}" if filter_sql else "")
@@ -719,7 +804,7 @@ async def query_analysis(
 
         chart_patches: list[ChartPatch] = []
         for chart in analysis.charts or []:
-            patched = requery_chart(conn, chart, filter_sql, filter_params)
+            patched = requery_chart(conn, chart, filter_sql, filter_params, schema)
             if patched is None:
                 chart_patches.append(ChartPatch(id=chart["id"], skipped=True))
             else:
@@ -964,6 +1049,7 @@ async def export_pdf(
         charts=[present_chart(c, analysis.metadata_)
                 for c in analysis.charts or []],
         limitations=((presented_metadata or {}).get("analysis_evidence") or {}).get("limitations"),
+        metadata=analysis.metadata_,
     )
     filename = f"{analysis.name.replace(' ', '_').lower()}.pdf"
     db.add(ExportEvent(analysis_id=analysis.id, format="pdf"))
@@ -992,6 +1078,7 @@ async def export_excel(
         charts=[present_chart(c, analysis.metadata_)
                 for c in analysis.charts or []],
         limitations=((presented_metadata or {}).get("analysis_evidence") or {}).get("limitations"),
+        metadata=analysis.metadata_,
     )
     filename = f"{analysis.name.replace(' ', '_').lower()}.xlsx"
     db.add(ExportEvent(analysis_id=analysis.id, format="excel"))

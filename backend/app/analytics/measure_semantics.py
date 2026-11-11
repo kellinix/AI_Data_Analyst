@@ -29,11 +29,24 @@ def tokens(name: str) -> set[str]:
     return set(re.findall(r"[a-z0-9]+", name.lower()))
 
 
+def _declared_unit(field: dict[str, Any] | None) -> str:
+    metadata = field or {}
+    supplied = (metadata.get("data_definition") or {}).get("unit")
+    return str(supplied or metadata.get("unit") or metadata.get("display_unit") or "").strip().lower()
+
+
+def _provided_numeric_label(field: dict[str, Any] | None) -> str:
+    metadata = field or {}
+    if not metadata.get("is_numeric") or metadata.get("analysis_role") not in {None, "metric", "attribute"}:
+        return ""
+    label = str((metadata.get("data_definition") or {}).get("label") or "")
+    return re.sub(r"([a-z])([A-Z])", r"\1 \2", label)
+
+
 def is_power_reading(name: str, field: dict[str, Any] | None = None) -> bool:
     """Power samples cannot be added into energy without known time intervals."""
-    words = tokens(re.sub(r"([a-z])([A-Z])", r"\1_\2", name))
-    metadata = field or {}
-    unit = str(metadata.get("unit") or metadata.get("display_unit") or "").strip().lower()
+    words = tokens(re.sub(r"([a-z])([A-Z])", r"\1_\2", f"{name} {_provided_numeric_label(field)}"))
+    unit = _declared_unit(field)
     power_units = {"w", "kw", "mw", "watt", "watts", "kilowatt", "kilowatts", "megawatt", "megawatts"}
     if unit in power_units:
         return True
@@ -48,9 +61,14 @@ def is_power_reading(name: str, field: dict[str, Any] | None = None) -> bool:
 
 def is_rate_or_average(name: str, field: dict[str, Any] | None = None) -> bool:
     """Rate/average fields need a per-entry average instead of a raw sum."""
+    supplied_label = _provided_numeric_label(field)
     return bool(
         (field or {}).get("semantic_type") in {"percentage", "average_metric"}
+        or _declared_unit(field) in {"%", "percent", "percentage", "pct", "per cent"}
         or name.lower() in {"cgpa", "gpa"}
+        or supplied_label.strip().lower() in {"cgpa", "gpa"}
+        or "%" in supplied_label
+        or contains_keyword(supplied_label, ("average", "avg", "mean", "median", "percentage", "percent", "pct", "rate", "ratio"))
         or re.search(r"(?:^|_)(?:pct|percent|percentage|rate)(?:_|$)|%", name, re.I)
     )
 

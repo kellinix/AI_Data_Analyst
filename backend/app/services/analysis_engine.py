@@ -38,6 +38,7 @@ from app.analytics.analysis_evidence import (
 from app.analytics.anomaly_detection import detect_anomalies
 from app.analytics.chart_selector import _horizontal_bar_chart, select_charts
 from app.analytics.chart_specs import attach_visual_specs
+from app.analytics.data_dictionary import apply_data_dictionary
 from app.analytics.football_context import (
     clarify_football_chart,
     clarify_football_display,
@@ -441,21 +442,27 @@ async def compute_analysis(
 
     conn = duckdb.connect(":memory:")
     try:
+        if isinstance(upload_context, dict) and "data_dictionary" in upload_context:
+            file_processor = FileProcessor(data_dictionary_context=upload_context, source_name=file_name)
         # Step 1: Load into DuckDB
         extension = Path(storage_path).suffix.lower()
         row_count, truncated = await file_processor.read_to_duckdb_ex(conn, storage_path, extension)
         await progress(15)
 
         # Step 2: Compute statistics
-        statistics = StatisticsEngine(conn).describe_all()
         cleaning = upload_context.get("cleaning", {}) if isinstance(upload_context, dict) else {}
         source_parser = (cleaning.get("report") or {}).get("parser") if isinstance(cleaning, dict) else None
-        statistics["parser"] = source_parser or file_processor._parser_metadata(storage_path, extension)
+        parser = source_parser or file_processor._parser_metadata(storage_path, extension)
+        statistics = StatisticsEngine(conn, upload_context=upload_context, file_name=file_name, parser=parser).describe_all()
+        statistics["parser"] = parser
         statistics["schema"] = annotate_measure_grain(statistics["schema"], upload_context, statistics["parser"])
         original_names = {cleaned: original for original, cleaned in ((cleaning.get("report") or {}).get("renamed_columns") or {}).items()}
         statistics["schema"] = enrich_schema_with_semantics(
             statistics["schema"], statistics["numeric_stats"], statistics["categorical_stats"],
             original_names=original_names,
+        )
+        statistics["schema"] = apply_data_dictionary(
+            statistics["schema"], upload_context, file_name=file_name, parser=statistics["parser"],
         )
         if truncated or (isinstance(upload_context, dict) and upload_context.get("source_sample_truncated")):
             statistics["sample_truncated"] = True
@@ -511,7 +518,7 @@ async def compute_analysis(
                     and statistics.get("numeric_stats", {}).get("wait_minutes", {}).get("count", 0) > 0
                     and "wait_minutes" in {field["name"] for field in analytical_schema(statistics["schema"])}):
                 charts.append(_horizontal_bar_chart("clinic", "wait_minutes", aggregation="average"))
-        charts = _populate_charts(conn, charts)
+        charts = _populate_charts(conn, charts, statistics["schema"])
         semantic_display = await SemanticWrangler().build_display_metadata(
             file_name=file_name,
             statistics=statistics,
@@ -522,7 +529,7 @@ async def compute_analysis(
             clarify_football_display(semantic_display)
         clarify_percentage_display(statistics, semantic_display, charts)
         statistics = apply_display_metadata_to_statistics(statistics, semantic_display)
-        charts = apply_display_metadata_to_charts(charts, semantic_display)
+        charts = apply_display_metadata_to_charts(charts, semantic_display, statistics)
         if statistics.get("clinic_wait_attended_only"):
             for chart in charts:
                 if chart.get("xAxis") == "wait_minutes" and chart.get("yAxis") == "clinic":
@@ -699,12 +706,12 @@ def _resolve_currency(statistics: dict[str, Any], upload_context: Any) -> dict[s
 
 
 def _populate_charts(
-    conn: duckdb.DuckDBPyConnection, charts: list[dict[str, Any]]
+    conn: duckdb.DuckDBPyConnection, charts: list[dict[str, Any]], schema: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     populated = []
     for chart in charts:
         try:
-            populate_chart_option(conn, chart)
+            populate_chart_option(conn, chart, schema=schema)
             populated.append(chart)
         except Exception as exc:
             logger.warning("Chart data population failed", chart_type=chart.get("type"), exc=str(exc))

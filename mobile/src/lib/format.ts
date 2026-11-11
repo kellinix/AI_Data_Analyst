@@ -1,4 +1,28 @@
-import type { Insight } from '../generated/contracts';
+import type { Analysis, Insight } from '../generated/contracts';
+
+export function analysisSourceLabel(analysis: Pick<Analysis, 'filename' | 'metadata'>): string | null {
+  const context = analysis.metadata?.upload_context as {
+    source_files?: { name?: unknown }[]; files?: { name?: unknown }[];
+    cleaning?: { source_filename?: unknown }; current_file_name?: unknown;
+  } | undefined;
+  function visibleFilename(value: unknown): string | null {
+    if (typeof value !== 'string') return null;
+    const name = value.trim().split(/[\\/]/).pop() ?? '';
+    const identifier = '(?:[a-f0-9]{32}|[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12})';
+    if (!name || new RegExp(`${identifier}.*\\.parquet$`, 'i').test(name)) return null;
+    return name;
+  }
+  for (const sources of [context?.source_files, context?.files]) {
+    if (!Array.isArray(sources)) continue;
+    const names = sources.flatMap(source => {
+      const name = visibleFilename(source?.name);
+      return name ? [name] : [];
+    });
+    if (names.length) return names.join(', ');
+  }
+  return visibleFilename(context?.cleaning?.source_filename) ??
+    visibleFilename(context?.current_file_name) ?? visibleFilename(analysis.filename);
+}
 
 export const fieldLabel = (name: string) => {
   const text = name.replaceAll('_', ' ').replace(/\bavg\b/gi, 'average').replace(/\bpct\b/gi, 'percentage').replace(/\bid\b/gi, 'ID');

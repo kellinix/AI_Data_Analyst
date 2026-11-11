@@ -12,6 +12,7 @@ from __future__ import annotations
 import copy
 import math
 from datetime import date
+from decimal import Decimal, InvalidOperation
 from typing import Any, Literal
 
 import duckdb
@@ -80,22 +81,54 @@ def validate_filters(
                 raise FilterValidationError("Numeric range must contain finite ascending numbers")
         if not f.get("values"):
             continue
+        if f.get("op") == "in" and (column.get("data_definition") or {}).get("value_labels"):
+            for value in f["values"]:
+                _code_filter_value(column, value)
         validated.append(f)
     return validated
 
 
-def build_where_clause(filters: list[dict[str, Any]]) -> tuple[str, list[Any]]:
+def _code_filter_value(field: dict[str, Any], value: Any) -> Any:
+    if field.get("is_numeric"):
+        if isinstance(value, bool):
+            raise FilterValidationError("A numeric code requires a finite number.")
+        try:
+            parsed = Decimal(str(value))
+        except InvalidOperation as exc:
+            raise FilterValidationError("A numeric code requires a finite number.") from exc
+        if not parsed.is_finite():
+            raise FilterValidationError("A numeric code requires a finite number.")
+        return value if isinstance(value, int | float) else parsed
+    if str(field.get("dtype") or "").upper() in {"BOOLEAN", "BOOL"}:
+        if isinstance(value, bool):
+            return str(value).lower()
+        if value in ("true", "false"):
+            return value
+        raise FilterValidationError("A true/false code requires true or false.")
+    if not isinstance(value, str):
+        raise FilterValidationError("A text code requires its exact text value.")
+    return value
+
+
+def build_where_clause(
+    filters: list[dict[str, Any]], schema: list[dict[str, Any]] | dict[str, dict[str, Any]] | None = None,
+) -> tuple[str, list[Any]]:
     """Returns (clause_sql, params) with no leading WHERE/AND keyword — the
     caller composes it into whatever WHERE clause it already has. Empty
     string + [] when there are no filters."""
     clauses: list[str] = []
     params: list[Any] = []
+    fields = schema if isinstance(schema, dict) else {field["name"]: field for field in schema or []}
     for f in filters:
         column = _quote_identifier(f["column"])
         if f["op"] == "in":
-            values = [category_filter_value(f["column"], v) for v in f["values"]]
+            field = fields.get(f["column"], {})
+            coded = bool((field.get("data_definition") or {}).get("value_labels"))
+            values = [_code_filter_value(field, value) if coded else category_filter_value(f["column"], value, field)
+                      for value in f["values"]]
             placeholders = ", ".join(["?"] * len(values))
-            clauses.append(f"{category_expression(f['column'])} IN ({placeholders})")
+            expression = column if coded and field.get("is_numeric") else category_expression(f["column"], field)
+            clauses.append(f"{expression} IN ({placeholders})")
             params.extend(values)
         elif f["op"] == "between":
             lo, hi = f["values"][0], f["values"][1]
@@ -219,11 +252,12 @@ def _populate_bar(
     cols: dict[str, Any],
     filter_sql: str,
     filter_params: list[Any],
+    fields: dict[str, dict[str, Any]] | None = None,
 ) -> bool:
     x_col, y_col = cols.get("x"), cols.get("y")
     if not (x_col and y_col):
         return False
-    x_identifier, y_identifier = category_expression(x_col), _quote_identifier(y_col)
+    x_identifier, y_identifier = category_expression(x_col, (fields or {}).get(x_col)), _quote_identifier(y_col)
     aggregation = cols.get("aggregation", "sum")
     if aggregation == "percent_rate":
         agg_expr = f"100.0 * AVG({y_identifier})"
@@ -242,7 +276,7 @@ def _populate_bar(
         """,
         filter_params,
     ).fetchall()
-    labels = [category_label(x_col, r[0]) for r in rows]
+    labels = [category_label(x_col, r[0], (fields or {}).get(x_col)) for r in rows]
     values = [round(float(r[1]), 2) for r in rows]
     counts = [int(r[2]) for r in rows]
     opt["_group_counts"] = dict(zip(labels, counts, strict=True))
@@ -265,6 +299,7 @@ def _populate_stacked_bar(
     cols: dict[str, Any],
     filter_sql: str,
     filter_params: list[Any],
+    fields: dict[str, dict[str, Any]] | None = None,
 ) -> bool:
     """A measure per dimension value, split into one series per status.
 
@@ -275,9 +310,9 @@ def _populate_stacked_bar(
     x_col, y_col, series_col = cols.get("x"), cols.get("y"), cols.get("series_by")
     if not (x_col and y_col and series_col):
         return False
-    x_identifier = category_expression(x_col)
+    x_identifier = category_expression(x_col, (fields or {}).get(x_col))
     y_identifier = _quote_identifier(y_col)
-    series_identifier = category_expression(series_col)
+    series_identifier = category_expression(series_col, (fields or {}).get(series_col))
     # SUM and COUNT rather than the aggregate itself: values that say nothing
     # ("Exempt under Section 43...", "Unknown") are folded into one series
     # below, and an average has to be re-derived over the folded group rather
@@ -304,8 +339,8 @@ def _populate_stacked_bar(
     sums: dict[tuple[str, str], float] = {}
     counts: dict[tuple[str, str], int] = {}
     for category, series_value, total, count in rows:
-        category_name = category_label(x_col, category)
-        label = category_label(series_col, series_value)
+        category_name = category_label(x_col, category, (fields or {}).get(x_col))
+        label = category_label(series_col, series_value, (fields or {}).get(series_col))
         if is_unreported_category(label):
             label = _UNREPORTED_SERIES
         key = (category_name, label)
@@ -353,11 +388,12 @@ def _populate_donut(
     cols: dict[str, Any],
     filter_sql: str,
     filter_params: list[Any],
+    fields: dict[str, dict[str, Any]] | None = None,
 ) -> bool:
     cat_col = cols.get("category")
     if not cat_col:
         return False
-    cat_identifier = category_expression(cat_col)
+    cat_identifier = category_expression(cat_col, (fields or {}).get(cat_col))
     rows = conn.execute(
         f"""
         SELECT CAST({cat_identifier} AS VARCHAR), COUNT(*) as cnt
@@ -369,7 +405,7 @@ def _populate_donut(
         """,
         filter_params,
     ).fetchall()
-    opt["series"][0]["data"] = [{"name": category_label(cat_col, r[0]), "value": int(r[1])} for r in rows]
+    opt["series"][0]["data"] = [{"name": category_label(cat_col, r[0], (fields or {}).get(cat_col)), "value": int(r[1])} for r in rows]
     total, missing = conn.execute(
         f"SELECT COUNT(*), COUNT(*) FILTER (WHERE {cat_identifier} IS NULL) FROM data"
         + (f" WHERE {filter_sql}" if filter_sql else ""), filter_params,
@@ -384,17 +420,17 @@ def _populate_donut(
     return True
 
 
-def _populate_record_count(conn, opt, cols, filter_sql, filter_params) -> bool:
+def _populate_record_count(conn, opt, cols, filter_sql, filter_params, fields=None) -> bool:
     column = cols.get("category")
     if not column:
         return False
-    expression = category_expression(column)
+    expression = category_expression(column, (fields or {}).get(column))
     rows = conn.execute(
         f"SELECT {expression}, COUNT(*) AS n FROM data "
         f"WHERE {expression} IS NOT NULL{_extra_and(filter_sql)} "
         f"GROUP BY {expression} ORDER BY n DESC LIMIT 15", filter_params,
     ).fetchall()
-    opt["yAxis"]["data"] = [category_label(column, row[0]) for row in reversed(rows)]
+    opt["yAxis"]["data"] = [category_label(column, row[0], (fields or {}).get(column)) for row in reversed(rows)]
     opt["series"][0]["data"] = [int(row[1]) for row in reversed(rows)]
     opt["_group_scope"] = {"limit": 15, "order_by": "count", "requires_value": False}
     return True
@@ -553,6 +589,7 @@ def populate_chart_option(
     chart: dict[str, Any],
     filter_sql: str = "",
     filter_params: list[Any] | None = None,
+    schema: list[dict[str, Any]] | None = None,
 ) -> bool:
     """Mutate `chart["echarts_option"]` in place with query results, optionally
     narrowed by an already-validated `filter_sql`/`filter_params` (see
@@ -564,6 +601,7 @@ def populate_chart_option(
     opt = chart.get("echarts_option", {})
     cols = opt.get("_columns", {})
     chart_type = chart.get("type")
+    fields = {field["name"]: field for field in schema or []}
 
     matched = False
     if cols.get("survey_fields"):
@@ -574,13 +612,13 @@ def populate_chart_option(
     elif chart_type == "line":
         matched = _populate_line_single(conn, opt, cols, filter_sql, filter_params)
     elif chart_type == "bar" and cols.get("aggregation") == "count":
-        matched = _populate_record_count(conn, opt, cols, filter_sql, filter_params)
+        matched = _populate_record_count(conn, opt, cols, filter_sql, filter_params, fields)
     elif chart_type == "bar" and cols.get("series_by"):
-        matched = _populate_stacked_bar(conn, opt, cols, filter_sql, filter_params)
+        matched = _populate_stacked_bar(conn, opt, cols, filter_sql, filter_params, fields)
     elif chart_type == "bar":
-        matched = _populate_bar(conn, opt, cols, filter_sql, filter_params)
+        matched = _populate_bar(conn, opt, cols, filter_sql, filter_params, fields)
     elif chart_type == "donut":
-        matched = _populate_donut(conn, opt, cols, filter_sql, filter_params)
+        matched = _populate_donut(conn, opt, cols, filter_sql, filter_params, fields)
     elif chart_type == "scatter":
         matched = _populate_scatter(conn, opt, cols, filter_sql, filter_params)
     elif chart_type == "histogram":
@@ -596,6 +634,7 @@ def requery_chart(
     chart: dict[str, Any],
     filter_sql: str = "",
     filter_params: list[Any] | None = None,
+    schema: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
     """Return a NEW chart dict (the stored `chart` is never mutated) with
     fresh `echarts_option` data and a freshly rebuilt `visual_spec` for the
@@ -606,7 +645,7 @@ def requery_chart(
     if not (chart.get("echarts_option") or {}).get("_columns"):
         return None
     working = copy.deepcopy(chart)
-    if not populate_chart_option(conn, working, filter_sql, filter_params or []):
+    if not populate_chart_option(conn, working, filter_sql, filter_params or [], schema):
         return None
     working["visual_spec"] = build_visual_spec(working)
     return working

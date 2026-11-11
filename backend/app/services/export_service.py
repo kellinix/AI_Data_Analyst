@@ -20,8 +20,10 @@ from reportlab.platypus import (
 )
 from xlsxwriter import Workbook
 
+from app.analytics.labels import source_column_label
 from app.analytics.report_relevance import useful_charts, useful_insights
 from app.services.export_charts import PdfChart, add_excel_charts, normalise_charts
+from app.services.report_language import provided_definitions
 
 _IMPORTANCE_ORDER = {"critical": 0, "high": 1, "medium": 2, "low": 3}
 _KNOWN_CURRENCY_SYMBOLS = {"USD": "$", "GBP": "£", "EUR": "€", "JPY": "¥"}
@@ -73,6 +75,27 @@ def _recommendation_insights(insights: list[dict[str, Any]]) -> list[dict[str, A
     )
 
 
+def _definition_fields(metadata: dict[str, Any] | None, charts: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    fields = provided_definitions(metadata)
+    for chart in charts or []:
+        reader = (chart.get("echarts_option") or {}).get("_reader") or {}
+        for name, definition in (reader.get("definitions") or {}).items():
+            fields.setdefault(name, {"name": name, "display_label": (reader.get("labels") or {}).get(name),
+                                     "data_definition": definition})
+    return list(fields.values())
+
+
+def _code_text(value: Any) -> str:
+    import json
+
+    return json.dumps(value, ensure_ascii=False) if value is None or isinstance(value, bool) or value == "" else str(value)
+
+
+def _definition_source(definition: dict[str, Any]) -> str:
+    return " / ".join(str(definition[key]) for key in ("source_table", "source_sheet", "source_role", "source_column")
+                      if definition.get(key))
+
+
 def build_pdf_report(
     *,
     name: str,
@@ -82,6 +105,7 @@ def build_pdf_report(
     insights: list[dict[str, Any]],
     charts: list[dict[str, Any]] | None = None,
     limitations: list[str] | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> bytes:
     """Render the analysis narrative and its saved dashboard charts."""
     buffer = io.BytesIO()
@@ -156,7 +180,43 @@ def build_pdf_report(
             story.append(Paragraph(f"<b>{rec.get('title', '')}</b>", item_heading))
             story.append(Paragraph(rec.get("description", ""), body))
 
-    if not summary and not kpis and not findings and not recommendations and not visual_charts:
+    definitions = _definition_fields(metadata, charts)
+    if definitions:
+        story.append(Paragraph("What the fields and codes mean", heading))
+        story.append(Paragraph("These explanations come from the supplied data guide.", body))
+        for field in definitions:
+            definition = field["data_definition"]
+            story.append(Paragraph(escape(source_column_label(field)), styles["Heading3"]))
+            if _definition_source(definition):
+                story.append(Paragraph(escape(f"The source field is {_definition_source(definition)}."), body))
+            description = definition.get("description") or field.get("display_description")
+            if description:
+                story.append(Paragraph(escape(str(description)), body))
+            if definition.get("unit"):
+                story.append(Paragraph(escape(f"The supplied unit is {definition['unit']}."), body))
+            time_basis = definition.get("time_basis") or {}
+            if time_basis.get("kind") == "relative_day":
+                story.append(Paragraph(escape(
+                    f"Days are counted from {time_basis['origin']}. Zero is that starting point. "
+                    "Negative numbers are days before it, and positive numbers are days after it."), body))
+            codes = definition.get("value_labels") or []
+            if codes:
+                header = ParagraphStyle("DefinitionTableHeader", parent=body, textColor=colors.white)
+                rows = [[Paragraph("Recorded code", header), Paragraph("Meaning from the guide", header)]]
+                for code in codes:
+                    meaning = str(code["label"])
+                    if code.get("description"):
+                        meaning += " - " + str(code["description"])
+                    rows.append([Paragraph(escape(_code_text(code.get("value"))), body), Paragraph(escape(meaning), body)])
+                table = Table(rows, colWidths=[3 * cm, 12 * cm], repeatRows=1)
+                table.setStyle(_table_style())
+                story.append(table)
+            source = definition.get("source") or {}
+            for key, wording in (("title", "The supplied guide is"), ("version", "The supplied guide version is"), ("url", "Its source link is")):
+                if source.get(key):
+                    story.append(Paragraph(escape(f"{wording} {source[key]}."), body))
+
+    if not summary and not kpis and not findings and not recommendations and not visual_charts and not definitions:
         story.append(Paragraph(
             "This analysis has not finished generating content yet.", body
         ))
@@ -188,6 +248,7 @@ def build_excel_report(
     insights: list[dict[str, Any]],
     charts: list[dict[str, Any]] | None = None,
     limitations: list[str] | None = None,
+    metadata: dict[str, Any] | None = None,
 ) -> bytes:
     """Render a multi-sheet workbook with editable charts and source values."""
     buffer = io.BytesIO()
@@ -265,6 +326,34 @@ def build_excel_report(
             sheet.write(row, 0, rec.get("title", ""))
             sheet.write(row, 1, rec.get("description", ""), wrap_fmt)
             sheet.write(row, 2, rec.get("importance", ""))
+
+    definitions = _definition_fields(metadata, charts)
+    if definitions:
+        sheet = workbook.add_worksheet("Data Definitions")
+        headers = ["Report field", "Meaning", "Original source field", "Description", "Recorded code", "Code meaning",
+                   "Code description", "Unit", "Time basis", "Supplied guide", "Guide URL", "Guide version", "Definition source"]
+        sheet.write_row(0, 0, headers, header_fmt)
+        sheet.set_column(0, 2, 26)
+        sheet.set_column(3, 3, 65)
+        sheet.set_column(4, 4, 18)
+        sheet.set_column(5, 8, 35)
+        sheet.set_column(9, 12, 45)
+        row_number = 1
+        for field in definitions:
+            definition = field["data_definition"]
+            source = definition.get("source") or {}
+            time_basis = definition.get("time_basis") or {}
+            for code in definition.get("value_labels") or [{}]:
+                row = [field["name"], source_column_label(field), _definition_source(definition),
+                       field.get("display_description") or definition.get("description") or "",
+                       _code_text(code["value"]) if "value" in code else "", code.get("label") or "",
+                       code.get("description") or "", definition.get("unit") or "", time_basis.get("origin") or "",
+                       source.get("title") or "", source.get("url") or "", source.get("version") or "", "Supplied data guide"]
+                for column, value in enumerate(row):
+                    sheet.write_string(row_number, column, str(value), wrap_fmt)
+                row_number += 1
+        sheet.freeze_panes(1, 0)
+        sheet.autofilter(0, 0, max(row_number - 1, 1), len(headers) - 1)
 
     add_excel_charts(workbook, normalise_charts(useful_charts(charts or [])))
 

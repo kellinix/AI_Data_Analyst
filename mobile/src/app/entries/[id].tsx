@@ -6,6 +6,7 @@ import { entryValue, fieldLabel } from '../../lib/format';
 import { useAuth } from '../../providers/auth';
 import type { EvidenceEntries, EvidenceEntryRequest } from '../../generated/contracts';
 import { Body, Button, Card, ErrorNotice, Label, Loading, Screen } from '../../components/ui';
+import { guideEntryValue } from '../../generated/data-guide';
 
 export default function EntriesScreen() {
   const { id, request: encoded } = useLocalSearchParams<{ id: string; request: string }>();
@@ -31,7 +32,7 @@ export default function EntriesScreen() {
 
 function EntryCard({ entry, columns }: { entry: EvidenceEntries['entries'][number]; columns: EvidenceEntries['columns'] }) {
   const [expanded, setExpanded] = useState(false);
-  return <Card><Label>{entry.record_label ?? `Record ${entry.entry_number}`}</Label><Body>Position {entry.entry_number} in the analysed file</Body>{(expanded ? columns : columns.slice(0, 5)).map((column) => <Body key={column.name}>{fieldLabel(column.label)}: {entryValue(entry.values[column.name], column.is_date)}</Body>)}
+  return <Card><Label>{entry.record_label ?? `Record ${entry.entry_number}`}</Label><Body>Position {entry.entry_number} in the analysed file</Body>{(expanded ? columns : columns.slice(0, 5)).map((column) => <Body key={column.name}>{fieldLabel(column.label)}: {entryValue(guideEntryValue(entry, column.name), column.is_date)}</Body>)}
     {columns.length > 5 && <Button title={expanded ? 'Show less' : 'More record details'} variant="secondary" onPress={() => setExpanded((value) => !value)} />}
   </Card>;
 }

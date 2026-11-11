@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import date
 
 import duckdb
+import pytest
 
 from app.analytics.forecasting import generate_forecasts
 
@@ -28,6 +29,30 @@ def test_forecasts_a_contiguous_monthly_series():
     assert len(forecasts) == 1
     assert forecasts[0]["metric"] == "revenue"
     assert forecasts[0]["observations"] == 12
+
+
+@pytest.mark.parametrize("unit", ["kW", "%", "percent"])
+def test_supplied_nonadditive_units_cannot_be_forecast_as_monthly_sums(unit):
+    rows = [(date(2025, month, 1), 1000.0 + month * 50 + (month % 3) * 10) for month in range(1, 13)]
+    schema = [{**field, "data_definition": {"unit": unit}} if field["name"] == "revenue" else dict(field) for field in SCHEMA]
+    with _connection(rows) as conn:
+        assert generate_forecasts(conn, schema, KPIS, reference_date=date(2026, 1, 5)) == []
+
+
+def test_supplied_energy_unit_keeps_existing_forecast_values_and_scale():
+    rows = [(date(2025, month, 1), 1000.0 + month * 50 + (month % 3) * 10) for month in range(1, 13)]
+    schema = [{**field, "data_definition": {"unit": "kWh"}} if field["name"] == "revenue" else dict(field) for field in SCHEMA]
+    with _connection(rows) as conn:
+        assert generate_forecasts(conn, schema, KPIS, reference_date=date(2026, 1, 5)) == generate_forecasts(
+            conn, SCHEMA, KPIS, reference_date=date(2026, 1, 5))
+
+
+@pytest.mark.parametrize("label", ["Average value", "Recorded percentage", "Power in kilowatts"])
+def test_supplied_nonadditive_label_prevents_sum_forecasting(label):
+    rows = [(date(2025, month, 1), 1000.0 + month * 50 + (month % 3) * 10) for month in range(1, 13)]
+    schema = [{**field, "data_definition": {"label": label}} if field["name"] == "revenue" else dict(field) for field in SCHEMA]
+    with _connection(rows) as conn:
+        assert generate_forecasts(conn, schema, KPIS, reference_date=date(2026, 1, 5)) == []
 
 
 def test_skips_short_or_perfectly_linear_history_without_a_defensible_range():

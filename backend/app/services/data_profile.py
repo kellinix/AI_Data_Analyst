@@ -104,6 +104,7 @@ def _column_profile(
         "analysis_role": column.get("analysis_role"),
         "display_label": column.get("display_label"),
         "display_description": column.get("display_description"),
+        **({"definition_available": True} if column.get("data_definition") else {}),
         **({"measure_grain": column["measure_grain"]} if column.get("measure_grain") else {}),
     }
 

@@ -6,12 +6,13 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Ionicons } from '@expo/vector-icons';
 import { api, messageOf } from '../../lib/api';
 import { ApiError } from '../../lib/api-core';
-import { uploadDocument } from '../../lib/files';
+import { readGuideDocument, uploadDocument } from '../../lib/files';
 import { addUploadAssets, analysisUploadRequest, profileUploadQueue, type QueuedDocument } from '../../lib/upload-workflow';
 import { generateRelationshipSuggestions } from '../../generated/upload-relationships';
 import { useAuth } from '../../providers/auth';
 import type { Analysis, UserProfile } from '../../generated/contracts';
 import { Body, Button, Card, ErrorNotice, Field, Label, Screen, colors } from '../../components/ui';
+import type { DataGuide } from '../../generated/data-guide';
 
 export default function Upload() {
   const { session } = useAuth();
@@ -21,6 +22,7 @@ export default function Upload() {
   const [name, setName] = useState('');
   const [context, setContext] = useState('');
   const [instructions, setInstructions] = useState('');
+  const [guide, setGuide] = useState<{ name: string; data?: DataGuide; error?: string } | null>(null);
   const [clean, setClean] = useState(true);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState(0);
@@ -95,14 +97,39 @@ export default function Upload() {
     }
   }
 
+  async function chooseGuide() {
+    if (operationActive.current) return;
+    operationActive.current = true;
+    setBusy(true);
+    setStage('Reading data guide…');
+    let selectedName = '';
+    try {
+      const result = await DocumentPicker.getDocumentAsync({ type: '*/*', copyToCacheDirectory: true, multiple: false });
+      if (result.canceled) return;
+      const asset = result.assets[0];
+      selectedName = asset.name;
+      setGuide({ name: selectedName });
+      const data = await readGuideDocument(asset);
+      setGuide({ name: selectedName, data });
+      setError(null);
+    } catch (failure) {
+      if (selectedName) setGuide({ name: selectedName, error: messageOf(failure) });
+      else setError(messageOf(failure));
+    } finally {
+      operationActive.current = false;
+      setBusy(false);
+      setStage('');
+    }
+  }
+
   async function create() {
-    if (operationActive.current || !ready || quotaFull || creationUncertain) return;
+    if (operationActive.current || !ready || quotaFull || creationUncertain || guide?.error) return;
     operationActive.current = true;
     setBusy(true);
     setError(null);
     setStage('Preparing analysis…');
     try {
-      const request = analysisUploadRequest(uploadedFiles, name, context, instructions, clean);
+      const request = analysisUploadRequest(uploadedFiles, name, context, instructions, clean, guide?.data);
       const analysis = await api<Analysis>(request.path, { method: 'POST', timeout: 600_000, body: request.body });
       void queryClient.invalidateQueries({ queryKey: ['analyses'] });
       void queryClient.invalidateQueries({ queryKey: ['profile'] });
@@ -110,6 +137,7 @@ export default function Upload() {
       setProgress(0);
       setContext('');
       setInstructions('');
+      setGuide(null);
       setName('');
       router.push({ pathname: '/analysis/[id]', params: { id: analysis.id } });
     } catch (failure) {
@@ -143,6 +171,16 @@ export default function Upload() {
       {item.uploaded ? <Body>{item.uploaded.row_count ?? 'Unknown'} rows · {item.uploaded.column_count ?? 'Unknown'} columns · Ready</Body> : <Body>Waiting to upload and profile</Body>}
       <Button title={`Remove ${item.asset.name}`} disabled={busy} variant="secondary" onPress={() => setQueue(current => current.filter(file => file.id !== item.id))} />
     </Card>)}
+    <Card>
+      <Label>Data guide (optional)</Label>
+      <Body>Choose the JSON guide supplied with your data to explain column names and codes. Up to 1 MB.</Body>
+      <Button title={guide ? 'Choose another guide' : 'Add data guide'} disabled={busy} variant="secondary" onPress={() => void chooseGuide()} />
+      {guide && <>
+        <Body>{guide.name}{guide.data ? ` · ${guide.data.fields.length} field definition${guide.data.fields.length === 1 ? '' : 's'}` : ''}</Body>
+        <Button title="Remove data guide" disabled={busy} variant="secondary" onPress={() => setGuide(null)} />
+      </>}
+      {guide?.error && <ErrorNotice message={guide.error} />}
+    </Card>
     {queue.length > 0 && <Card>
       <Field label="Analysis name" value={name} onChangeText={setName} editable={!busy} maxLength={512} />
       <Field label="What should Vesquiri know? (optional)" placeholder="For example, monthly sales by region. Revenue is recorded in GBP." value={context} onChangeText={setContext} multiline maxLength={2000} editable={!busy} />
@@ -170,7 +208,7 @@ export default function Upload() {
     {creationUncertain
       ? <Button title="Check Analyses" variant="secondary" onPress={() => router.push('/(tabs)')} />
       : ready
-        ? <Button title="Create analysis" icon="sparkles-outline" loading={busy} disabled={quotaFull} onPress={() => void create()} />
+        ? <Button title="Create analysis" icon="sparkles-outline" loading={busy} disabled={quotaFull || !!guide?.error} onPress={() => void create()} />
         : <Button title="Upload and review files" icon="cloud-upload-outline" loading={busy} disabled={queue.length === 0} onPress={() => void prepare()} />}
     {profile.data && <Body>{profile.data.usage.analyses_this_month} of {profile.data.usage.analyses_limit} monthly analyses used.</Body>}
     <Body>Your files are sent to your Vesquiri server for processing. Keep this screen open until the analysis starts.</Body>

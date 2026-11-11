@@ -356,7 +356,7 @@ export interface EvidenceEntries {
   offset: number
   limit: number
   columns: { name: string; label: string; is_date?: boolean }[]
-  entries: { entry_number: number; record_label?: string; values: Record<string, unknown> }[]
+  entries: { entry_number: number; record_label?: string; values: Record<string, unknown>; display_values?: Record<string, string> }[]
   scope: string
   has_more: boolean
 }
@@ -370,7 +370,7 @@ export interface ComparisonResult {
   matched_entries: number
   group_count: number
   plan: ComparisonPlan
-  groups: { group: string | null; group_value: string | null; value: number | null; entries: number; supplied_values: number }[]
+  groups: { group: string | null; display_label?: string | null; group_value: string | null; value: number | null; entries: number; supplied_values: number }[]
 }
 
 export interface ChatSession {

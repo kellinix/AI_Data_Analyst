@@ -12,6 +12,7 @@ from reportlab.lib import colors
 from reportlab.platypus import Flowable
 from xlsxwriter import Workbook
 
+from app.analytics.data_dictionary import value_definition, value_display_label
 from app.analytics.histogram_presentation import present_histogram
 from app.analytics.line_presentation import present_time_line
 from app.services.report_language import chart_description, present_chart
@@ -35,6 +36,8 @@ class ExportChart:
     connect_line: bool
     x_log: bool = False
     y_log: bool = False
+    category_labels: list[str] | None = None
+    series_labels: list[str] | None = None
 
 
 def _number(value: Any) -> float | None:
@@ -53,6 +56,15 @@ def _text(value: Any) -> str:
 
 def _color(value: Any) -> str | None:
     return value if isinstance(value, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", value) else None
+
+
+def _provided_label(mapping: dict[str, Any], value: Any) -> str:
+    field = {"name": mapping.get("field"), "is_numeric": mapping.get("numeric", False),
+             "data_definition": {"value_labels": mapping.get("values") or []}}
+    meaning = value_definition(field, value)
+    if meaning:
+        return str(meaning.get("display_label") or value_display_label(field, value))
+    return _text(value)
 
 
 def normalise_charts(charts: list[dict[str, Any]] | None) -> list[ExportChart]:
@@ -75,6 +87,7 @@ def normalise_charts(charts: list[dict[str, Any]] | None) -> list[ExportChart]:
         palette = [_color(value) for value in (raw.get("color_scheme") or [])]
         palette = [value for value in palette if value] or list(PALETTE)
         categories: list[str] = []
+        raw_categories: list[Any] = []
         series: list[tuple[str, list[float | None]]] = []
         points: list[tuple[float, float]] = []
         if kind == "donut":
@@ -82,6 +95,7 @@ def normalise_charts(charts: list[dict[str, Any]] | None) -> list[ExportChart]:
             for item in data:
                 if isinstance(item, dict) and (value := _number(item.get("value"))) is not None:
                     categories.append(_text(item.get("name")))
+                    raw_categories.append(item.get("name"))
                     series.append((_text(item.get("name")), [value]))
         elif kind == "scatter":
             data = option_series[0].get("data", []) if option_series else []
@@ -92,7 +106,8 @@ def normalise_charts(charts: list[dict[str, Any]] | None) -> list[ExportChart]:
                         points.append((x, y))
         else:
             axis = y_axis if horizontal else x_axis
-            categories = [_text(value) for value in axis.get("data", [])]
+            raw_categories = list(axis.get("data", []))
+            categories = [_text(value) for value in raw_categories]
             for index, item in enumerate(option_series):
                 data = item.get("data", [])
                 values = [_number(value) for value in data[: len(categories)]]
@@ -100,6 +115,11 @@ def normalise_charts(charts: list[dict[str, Any]] | None) -> list[ExportChart]:
                 series.append((_text(item.get("name") or f"Series {index + 1}"), values))
         if not points and not any(value is not None for _, values in series for value in values):
             continue
+        mappings = option.get("_reader_value_maps") or {}
+        category_map = mappings.get("pie" if kind == "donut" else "yAxis" if horizontal else "xAxis") or {}
+        series_map = mappings.get("pie" if kind == "donut" else "series") or {}
+        category_labels = [_provided_label(category_map, value) for value in raw_categories] if category_map else None
+        series_labels = [_provided_label(series_map, name) for name, _ in series] if series_map else None
         result.append(ExportChart(
             kind=kind,
             title=_text(raw.get("title") or "Chart"),
@@ -116,6 +136,8 @@ def normalise_charts(charts: list[dict[str, Any]] | None) -> list[ExportChart]:
                               (option_series[0].get("lineStyle") or {}).get("opacity") == 0),
             x_log=bool((option.get("_scale") or {}).get("x")),
             y_log=bool((option.get("_scale") or {}).get("y")),
+            category_labels=category_labels,
+            series_labels=series_labels,
         ))
     return result
 
@@ -197,7 +219,7 @@ class PdfChart(Flowable):
             x = x0 + w * (index / max(1, count - 1) if chart.kind == "line" else (index + .5) / count)
             c.setFillColor(colors.HexColor("#716B86"))
             c.setFont("Helvetica", 7)
-            label = chart.categories[index]
+            label = (chart.category_labels or chart.categories)[index]
             if chart.kind == "line":
                 try:
                     label = datetime.fromisoformat(label).strftime("%b %Y")
@@ -206,6 +228,7 @@ class PdfChart(Flowable):
             c.drawCentredString(x, y0 - 13, _short(label, 16))
         baseline = y0 + h * (0 - low) / (high - low)
         for series_index, (name, data) in enumerate(chart.series):
+            name = chart.series_labels[series_index] if chart.series_labels else name
             color = colors.HexColor(chart.palette[series_index % len(chart.palette)])
             c.setStrokeColor(color)
             c.setFillColor(color)
@@ -247,7 +270,7 @@ class PdfChart(Flowable):
         values = [value for _, data in chart.series for value in data if value is not None]
         low, high = _range(values)
         baseline = x0 + w * (0 - low) / (high - low)
-        for index, label in enumerate(chart.categories):
+        for index, label in enumerate(chart.category_labels or chart.categories):
             y = y0 + (index + .5) * 23
             c.setFont("Helvetica", 8)
             c.setFillColor(colors.HexColor("#29213F"))
@@ -278,6 +301,7 @@ class PdfChart(Flowable):
         angle = 90.0
         center_y = self.height / 2
         for index, (name, values) in enumerate(chart.series):
+            name = chart.series_labels[index] if chart.series_labels else name
             value = values[0] or 0
             extent = 360 * value / total
             c.setFillColor(colors.HexColor(chart.palette[index % len(chart.palette)]))
@@ -355,11 +379,20 @@ def add_excel_charts(workbook: Workbook, charts: list[ExportChart]) -> None:
                 series = [("Records", [values[0] for _, values in chart.series])]
             else:
                 categories, series = chart.categories, chart.series
-            for col, (name, _) in enumerate(series, start=1):
+            category_column = 1 if chart.category_labels else 0
+            series_start = category_column + 1
+            if chart.category_labels:
+                data.write_string(data_row + 1, category_column, "Meaning from the guide", heading_fmt)
+            for series_index, (name, _) in enumerate(series):
+                col = series_start + series_index
+                if chart.series_labels and chart.kind != "donut":
+                    name = chart.series_labels[series_index]
                 data.write_string(data_row + 1, col, name, heading_fmt)
             for index, category in enumerate(categories, start=data_row + 2):
                 data.write_string(index, 0, category)
-                for col, (_, values) in enumerate(series, start=1):
+                if chart.category_labels:
+                    data.write_string(index, category_column, chart.category_labels[index - data_row - 2])
+                for col, (_, values) in enumerate(series, start=series_start):
                     if values[index - data_row - 2] is not None:
                         data.write_number(index, col, values[index - data_row - 2])
             kind = {"line": "line", "bar": "bar" if chart.horizontal else "column", "histogram": "bar" if chart.horizontal else "column", "donut": "doughnut"}[chart.kind]
@@ -367,13 +400,14 @@ def add_excel_charts(workbook: Workbook, charts: list[ExportChart]) -> None:
             if chart.stacked and kind in {"bar", "column"}:
                 options["subtype"] = "stacked"
             excel_chart = workbook.add_chart(options)
-            for col, (_name, _) in enumerate(series, start=1):
+            for series_index, (_name, _) in enumerate(series):
+                col = series_start + series_index
                 series_config: dict[str, Any] = {
                     "name": ["Chart Data", data_row + 1, col],
-                    "categories": ["Chart Data", data_row + 2, 0, data_row + 1 + len(categories), 0],
+                    "categories": ["Chart Data", data_row + 2, category_column, data_row + 1 + len(categories), category_column],
                     "values": ["Chart Data", data_row + 2, col, data_row + 1 + len(categories), col],
-                    "fill": {"color": chart.palette[(col - 1) % len(chart.palette)]},
-                    "line": {"color": chart.palette[(col - 1) % len(chart.palette)]},
+                    "fill": {"color": chart.palette[series_index % len(chart.palette)]},
+                    "line": {"color": chart.palette[series_index % len(chart.palette)]},
                 }
                 if chart.kind == "donut":
                     series_config["points"] = [
@@ -384,8 +418,8 @@ def add_excel_charts(workbook: Workbook, charts: list[ExportChart]) -> None:
                     series_config["line"] = {"none": True}
                     series_config["marker"] = {
                         "type": "circle", "size": 5,
-                        "border": {"color": chart.palette[(col - 1) % len(chart.palette)]},
-                        "fill": {"color": chart.palette[(col - 1) % len(chart.palette)]},
+                        "border": {"color": chart.palette[series_index % len(chart.palette)]},
+                        "fill": {"color": chart.palette[series_index % len(chart.palette)]},
                     }
                 excel_chart.add_series(series_config)
             if chart.kind == "donut":

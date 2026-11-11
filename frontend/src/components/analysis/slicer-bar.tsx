@@ -208,7 +208,8 @@ export function SlicerBar({ filterableColumns }: SlicerBarProps) {
                 onClick={() => toggleValue(filter.column, value)}
                 className="flex items-center gap-1 rounded-full bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 transition-colors hover:bg-blue-100 dark:bg-blue-950/40 dark:text-blue-300 dark:hover:bg-blue-950/60"
               >
-                {filter.display_label}: {value}
+                {filter.display_label}: {categorical.find((column) => column.column === filter.column)
+                  ?.top_values?.find((item) => item.value === String(value))?.label ?? value}
                 <X className="h-3 w-3" />
               </button>
             ))

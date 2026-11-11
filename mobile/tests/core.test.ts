@@ -5,8 +5,8 @@ import { runInNewContext } from 'node:vm';
 import { createClient } from '@supabase/supabase-js';
 import { ApiError, createApi, errorDetail } from '../src/lib/api-core';
 import { chunkedStorage, type KeyValueStore } from '../src/lib/secure-storage';
-import { chartDocument } from '../src/lib/chart-document';
-import { formatMetric } from '../src/lib/format';
+import { chartDocument, chartDocumentHeight } from '../src/lib/chart-document';
+import { analysisSourceLabel, formatMetric } from '../src/lib/format';
 import { installPkceCrypto } from '../src/lib/pkce-crypto';
 import type { Insight } from '../src/generated/contracts';
 
@@ -161,12 +161,14 @@ test('chart text cannot escape the serialized script into executable HTML', () =
   assert.ok(!html.includes('eval('));
 });
 
-function renderedChartOption(option: Record<string, unknown>, currency?: string) {
+function renderedChartOption(option: Record<string, unknown>, currency?: string, legendText?: string[]) {
   let captured: Record<string, unknown> = {};
   const html = chartDocument('/* test runtime */', option, currency);
   const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)];
+  const element = () => ({ style: {}, textContent: '', setAttribute: () => {},
+    appendChild: (child: { textContent: string }) => { if (child.textContent) legendText?.push(child.textContent); } });
   runInNewContext(scripts[scripts.length - 1][1], {
-    document: { getElementById: () => ({ textContent: '' }) },
+    document: { getElementById: element, createElement: element, body: element() },
     echarts: { init: () => ({ setOption: (value: Record<string, unknown>) => { captured = value; }, resize: () => {} }) },
     window: { addEventListener: () => {} },
     Intl,
@@ -234,6 +236,63 @@ test('native lines retain all three complete recorded series and their legend', 
   assert.equal((option.legend as { show: boolean }).show, true);
 });
 
+test('guide meanings change native labels and tooltips while preserving raw categories', () => {
+  const option = renderedChartOption({ _group_counts: { M: 3 },
+    _reader_value_maps: { yAxis: { field: 'status', values: [{ value: 'M', label: 'Married' }] } },
+    xAxis: { type: 'value' }, yAxis: { type: 'category', data: ['M', 'S'] },
+    series: [{ type: 'bar', name: 'Amount', data: [10, 20] }],
+  });
+  const axis = option.yAxis as { data: string[]; axisLabel: { formatter: (value: string) => string } };
+  assert.deepEqual(Array.from(axis.data), ['M', 'S']);
+  assert.equal(axis.axisLabel.formatter('M'), 'Married (M)');
+  assert.equal(axis.axisLabel.formatter('S'), 'S');
+  const tooltip = option.tooltip as { formatter: (items: { name: string; seriesName: string; value: number }[]) => string };
+  const text = tooltip.formatter([{ name: 'M', seriesName: 'Amount', value: 10 }]);
+  assert.ok(text.includes('Married (M)') && text.includes('3 entries with a supplied value'));
+});
+
+test('guide meanings label native pie legends and split series without changing names', () => {
+  const pie = renderedChartOption({ _reader_value_maps: { pie: { field: 'status', values: [{ value: 'M', label: 'Married' }] } },
+    series: [{ type: 'pie', data: [{ name: 'M', value: 2 }] }],
+  });
+  const media = pie.media as { option: { legend: { formatter: (name: string) => string } } }[];
+  assert.ok(media[0].option.legend.formatter('M').startsWith('Married (M)\n2'));
+  assert.equal((pie.series as { data: { name: string }[] }[])[0].data[0].name, 'M');
+  const grouped = renderedChartOption({ _reader_value_maps: { series: { field: 'status', values: [{ value: 'M', label: 'Married' }] } },
+    xAxis: { type: 'category', data: ['A'] }, yAxis: { type: 'value' },
+    series: [{ type: 'bar', name: 'M', data: [2] }],
+  });
+  assert.equal((grouped.legend as { formatter: (name: string) => string }).formatter('M'), 'Married (M)');
+  assert.equal((grouped.series as { name: string }[])[0].name, 'M');
+});
+
+test('native guide lookup treats reserved-property codes as plain labels', () => {
+  const option = renderedChartOption({ _reader_value_maps: {
+    pie: { field: 'code', values: [{ value: '__proto__', label: 'Special code' }] },
+  }, series: [{ type: 'pie', data: [{ name: '__proto__', value: 2 }, { name: 'constructor', value: 1 }] }] });
+  const media = option.media as { option: { legend: { formatter: (name: string) => string } } }[];
+  assert.ok(media[0].option.legend.formatter('__proto__').startsWith('Special code (__proto__)'));
+  assert.ok(media[0].option.legend.formatter('constructor').startsWith('constructor\n1'));
+});
+
+test('an empty pie code keeps its meaning and all figures in a visible native legend', () => {
+  const input = { _reader_value_maps: { pie: { field: 'codeshare', values: [
+    { value: '', label: 'Other route' }, { value: 'Y', label: 'Operated by another carrier' },
+  ] } }, series: [{ type: 'pie', data: [{ name: '', value: 53066 }, { name: 'Y', value: 14597 }] }] };
+  const text: string[] = [];
+  const option = renderedChartOption(input, undefined, text);
+  assert.ok(text.some(value => value.includes('Other route ("")\n53,066 (78.4%)')));
+  assert.ok(text.some(value => value.includes('Operated by another carrier (Y)\n14,597 (21.6%)')));
+  assert.equal((option.legend as { show: boolean }).show, false);
+  const points = (option.series as { data: { name: string; value: number }[] }[])[0].data;
+  assert.deepEqual(Array.from(points, point => [point.name, point.value]), [['', 53066], ['Y', 14597]]);
+  assert.ok(chartDocumentHeight(input) > 320);
+  assert.equal(chartDocumentHeight({ series: [{ type: 'pie', data: [{ name: 'Y', value: 2 }] }] }), 320);
+  const long = structuredClone(input);
+  long._reader_value_maps.pie.values[0].label = 'A'.repeat(80);
+  assert.ok(chartDocumentHeight(long) > chartDocumentHeight(input));
+});
+
 test('metric formatting preserves percentages, negative values, and unknown currency', () => {
   const metric = (data: Record<string, unknown>) => ({ data } as Insight);
   assert.ok(formatMetric(metric({ value: 12.5, is_percent: true })).endsWith('%'));
@@ -242,4 +301,20 @@ test('metric formatting preserves percentages, negative values, and unknown curr
   assert.match(formatMetric(metric({ value: 7310.95, is_currency: true, currency: 'GBP', unit: 'million' })), /million$/);
   assert.ok(!formatMetric(metric({ value: 1500, is_currency: true })).includes('$'));
   assert.equal(formatMetric(metric({ value: NaN })), '—');
+});
+
+test('analysis headers use recorded source names and hide internal parquet identifiers', () => {
+  const internal = '8c36c90f-78cc-448b-b9cb-f4d9ee242560.cleaned.parquet';
+  assert.equal(analysisSourceLabel({ filename: internal, metadata: { upload_context: {
+    cleaning: { source_filename: 'inventory.csv' },
+  } } }), 'inventory.csv');
+  assert.equal(analysisSourceLabel({ filename: internal, metadata: { upload_context: {
+    source_files: [{ name: 'inventory.csv' }, { name: 'products.csv' }, { name: 'stores.csv' }],
+  } } }), 'inventory.csv, products.csv, stores.csv');
+  assert.equal(analysisSourceLabel({ filename: 'Sales 2025.csv', metadata: {} }), 'Sales 2025.csv');
+  assert.equal(analysisSourceLabel({ filename: internal, metadata: {} }), null);
+  assert.equal(analysisSourceLabel({ filename: 'a'.repeat(32) + '.parquet', metadata: {} }), null);
+  assert.equal(analysisSourceLabel({ filename: internal, metadata: { upload_context: {
+    files: [{ name: 'C:\\private\\inventory.csv' }],
+  } } }), 'inventory.csv');
 });

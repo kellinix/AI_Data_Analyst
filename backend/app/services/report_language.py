@@ -7,13 +7,14 @@ from copy import deepcopy
 from datetime import datetime
 from typing import Any
 
+from app.analytics.data_dictionary import value_definition, value_display_label
 from app.analytics.labels import derive_label, reader_label, sentence_label, source_column_label
 from app.analytics.plain_language import plain_english
 from app.analytics.record_context import record_context
 from app.analytics.summary_evidence import _finite, _format
 from app.services.chat_evidence import _friendly_fact, explain_fact
 
-VERSION = "plain_reader_v9"
+VERSION = "plain_reader_v10"
 _AVERAGE_EXPLANATION = "To find an average, we add the supplied numbers and divide by how many there are."
 
 
@@ -70,7 +71,7 @@ def _field_label(column: Any, metadata: dict[str, Any]) -> str:
             return sentence_label(LABELS[str(normalized).lower()])
     for field in metadata.get("schema") or []:
         if field.get("name") == normalized:
-            return reader_label(source_column_label(field))
+            return reader_label(source_column_label(field), field)
     return sentence_label(business_text(derive_label(normalized)))
 
 
@@ -79,6 +80,15 @@ def chart_description(text: str | None) -> str | None:
     if text is None:
         return None
     return re.sub(r"^How many (?:fall|falls) into each\b", "Number of entries in each", text, flags=re.I)
+
+
+def provided_definitions(metadata: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
+    """Read source-bound definitions already attached by the analysis pipeline."""
+    metadata = metadata or {}
+    profile = metadata.get("data_profile") or metadata.get("profile_json") or {}
+    fields = metadata.get("schema") or profile.get("columns") or []
+    return {field["name"]: field for field in fields
+            if field.get("name") and isinstance(field.get("data_definition"), dict) and field["data_definition"]}
 
 
 def present_chart(
@@ -98,9 +108,12 @@ def present_chart(
     columns = option.get("_columns") or {}
     saved = option.get("_reader") or {}
     field_labels = {**saved.get("labels", {}), **(labels or {})}
-    fields = {field["name"]: field for field in (metadata or {}).get("schema", []) if field.get("name")}
-    field_labels.update({field["name"]: source_column_label(field)
-                         for field in (metadata or {}).get("schema", []) if field.get("name")})
+    profile = (metadata or {}).get("data_profile") or (metadata or {}).get("profile_json") or {}
+    fields = {field["name"]: field for field in (metadata or {}).get("schema") or profile.get("columns") or [] if field.get("name")}
+    field_labels.update({name: source_column_label(field) for name, field in fields.items()})
+    definitions = {**(saved.get("definitions") or {}),
+                   **{name: field["data_definition"] for name, field in provided_definitions(metadata).items()}}
+    previous_maps = option.get("_reader_value_maps") or {}
     aggregation = result.get("aggregation") or columns.get("aggregation") or saved.get("aggregation")
     split = result.get("series_by") or columns.get("series_by") or saved.get("series_by")
     current_description = str(result.get("description") or "")
@@ -119,7 +132,8 @@ def present_chart(
         if currency and fields.get(str(name), {}).get("semantic_type") == "currency" and not re.search(r"[$£€]|\b(?:USD|GBP|EUR)\b", str(text)):
             text = f"{text} ({currency})"
             field_labels[str(name)] = text
-        return reader_label(str(text))
+        bound = fields.get(str(name)) or {"data_definition": definitions.get(str(name), {})}
+        return reader_label(str(text), bound)
 
     def measure(name: Any) -> str:
         text = label(name)
@@ -195,7 +209,7 @@ def present_chart(
             original_label = source_column_label({**date_field, "name": original_date, "display_label": None})
             if not date_field and not is_observation_date(date_label):
                 original_label = field_labels.get(str(x)) or original_label
-            date_label = reader_label(original_label)
+            date_label = reader_label(original_label, date_field)
             field_labels[str(x)] = original_label
         value_columns = columns.get("ys") or result.get("series") or [y]
         operations = columns.get("aggregations") or [aggregation] * len(value_columns)
@@ -275,6 +289,8 @@ def present_chart(
         measured_fields = [y if split else x]
     code_labels = []
     for name in measured_fields:
+        if definitions.get(str(name)):
+            continue
         text = field_labels.get(str(name)) or derive_label(str(name or ""))
         if re.fullmatch(r"[A-Z]{1,2}", text) and text not in {"ID", "UK", "US", "EU"} and text not in code_labels:
             code_labels.append(text)
@@ -284,9 +300,47 @@ def present_chart(
         names = f"{', '.join(code_labels[:-1])} and {code_labels[-1]}"
         description += f" The file calls these figures {names}. Its source guide is needed to explain the codes."
     used_fields = {str(name) for name in [x, y, split, *(result.get("series") or []), *(columns.get("ys") or [])] if name}
+    if kind == "histogram":
+        used_fields.add(str(original))
     option["_reader"] = {"version": VERSION, "aggregation": aggregation, "series_by": split,
                          "labels": {name: value for name, value in field_labels.items() if name in used_fields},
                          "source_description": source_description}
+    if definitions:
+        option["_reader"]["definitions"] = {name: definition for name, definition in definitions.items() if name in used_fields}
+    bindings = {axis: str(name) for axis, name in (("xAxis", x), ("yAxis", y))
+                if kind in {"bar", "line"} and (option.get(axis) or {}).get("type") == "category" and name}
+    if split:
+        bindings["series"] = str(split)
+    if kind == "donut":
+        bindings["pie"] = str(category)
+    value_maps = {}
+    for binding, name in bindings.items():
+        definition = definitions.get(name) or {}
+        if not definition.get("value_labels"):
+            continue
+        previous = previous_maps.get(binding) or {}
+        numeric = fields.get(name, {}).get("is_numeric")
+        if numeric is None and previous.get("field") == name:
+            numeric = previous.get("numeric")
+        if binding in {"xAxis", "yAxis"}:
+            plotted = (option.get(binding) or {}).get("data") or []
+        elif binding == "series":
+            plotted = [item.get("name") for item in series]
+        else:
+            plotted = [item.get("name") for item in (series[0].get("data") or [])] if series else []
+        bound_field = {**fields.get(name, {}), "name": name, "is_numeric": bool(numeric), "data_definition": definition}
+        values = []
+        for raw in plotted:
+            meaning = value_definition(bound_field, raw)
+            if meaning is not None:
+                values.append({**meaning, "raw_value": meaning["value"], "value": raw,
+                               "display_label": value_display_label(bound_field, raw)})
+        if values:
+            value_maps[binding] = {"field": name, "numeric": bool(numeric), "values": values}
+    if value_maps:
+        option["_reader_value_maps"] = value_maps
+    else:
+        option.pop("_reader_value_maps", None)
     if kind == "histogram":
         option["_reader"]["histogram_column"] = original
     if kind == "donut":

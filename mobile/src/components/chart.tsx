@@ -3,17 +3,17 @@ import { View } from 'react-native';
 import { WebView } from 'react-native-webview';
 import type { ChartConfig } from '../generated/contracts';
 import runtime from '../generated/echarts';
-import { chartDocument } from '../lib/chart-document';
+import { chartDocument, chartDocumentHeight } from '../lib/chart-document';
 import { Body, Button, Card, Label, colors } from './ui';
+import { ChartDefinitions } from './chart-definitions';
 
 export function Chart({ chart, defaultExpanded = false }: { chart: ChartConfig; defaultExpanded?: boolean }) {
   const [expanded, setExpanded] = useState(defaultExpanded);
   const [failed, setFailed] = useState(false);
-  const rangeAxis = chart.echarts_option.yAxis as { type?: string; data?: unknown[] } | undefined;
-  const horizontalBar = (chart.type === 'bar' || chart.type === 'histogram') && rangeAxis?.type === 'category';
-  const chartHeight = horizontalBar ? Math.max(320, (rangeAxis?.data?.length ?? 0) * 34 + 80) : 320;
+  const chartHeight = chartDocumentHeight(chart.echarts_option);
   const html = useMemo(() => expanded ? chartDocument(runtime, chart.echarts_option, chart.currency) : '', [chart, expanded]);
   return <Card><View style={{ height: 4, borderRadius: 4, backgroundColor: colors.teal, marginBottom: 2 }} /><Label>{chart.title}</Label>{chart.description && <Body>{chart.description}</Body>}
+    <ChartDefinitions option={chart.echarts_option} />
     <Button title={expanded ? 'Hide chart' : 'View chart'} variant="secondary" onPress={() => { setExpanded(!expanded); setFailed(false); }} />
     {expanded && <View style={{ height: chartHeight, overflow: 'hidden', borderRadius: 16 }}>
       <WebView source={{ html }} originWhitelist={['*']} onShouldStartLoadWithRequest={({ url }) => url === 'about:blank' || url.startsWith('about:blank#')}

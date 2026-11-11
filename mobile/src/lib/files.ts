@@ -1,13 +1,24 @@
 import { Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
+import { File as LocalFile } from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import type { DocumentPickerAsset } from 'expo-document-picker';
 import type { UploadedFile } from '../generated/contracts';
 import { config } from './config';
 import { accessToken } from './api';
 import { ApiError, errorDetail } from './api-core';
+import { readDataGuide, type DataGuide } from '../generated/data-guide';
 
 export { supportedFile } from './upload-workflow';
+
+export async function readGuideDocument(asset: DocumentPickerAsset): Promise<DataGuide> {
+  if (Platform.OS === 'web') {
+    if (!asset.file) throw new Error('Please choose the data guide again');
+    return readDataGuide(asset.file);
+  }
+  const file = new LocalFile(asset.uri);
+  return readDataGuide({ name: asset.name, size: asset.size ?? file.size, text: () => file.text() });
+}
 
 export async function uploadDocument(asset: DocumentPickerAsset, onProgress: (progress: number) => void): Promise<UploadedFile> {
   const token = await accessToken();

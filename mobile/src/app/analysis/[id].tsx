@@ -4,7 +4,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, messageOf } from '../../lib/api';
 import { exportReport } from '../../lib/files';
-import { count, fieldLabel, formatMetric } from '../../lib/format';
+import { analysisSourceLabel, count, fieldLabel, formatMetric } from '../../lib/format';
 import { useAuth } from '../../providers/auth';
 import type { Analysis, EvidenceEntryRequest, Insight, ShareLinkResponse } from '../../generated/contracts';
 import { Chart } from '../../components/chart';
@@ -56,6 +56,7 @@ export default function AnalysisScreen() {
   if (result.isPending) return <Screen><Loading label="Opening your analysis…" /></Screen>;
   if (!result.data) return <Screen><ErrorNotice message={messageOf(result.error)} retry={() => void result.refetch()} /></Screen>;
   const analysis = result.data;
+  const sourceLabel = analysisSourceLabel(analysis);
   const summaryChecks = (analysis.metadata?.analysis_evidence as {
     summary_checks?: { method?: string; facts?: { id: string; text: string; calculation: string; scope: string; explanation?: string; scope_explanation?: string }[] };
   } | undefined)?.summary_checks;
@@ -71,7 +72,7 @@ export default function AnalysisScreen() {
     <View style={{ position: 'absolute', width: 170, height: 170, borderRadius: 85, right: -48, top: -86, backgroundColor: '#6042A4' }} />
     <Text style={{ color: '#B5F3D8', fontSize: 12, fontWeight: '800', letterSpacing: 2 }}>ANALYSIS REPORT</Text>
     <Text style={{ color: '#fff', fontSize: 27, fontWeight: '800', letterSpacing: -0.7 }}>{analysis.name}</Text>
-    <Text style={{ color: '#DDD1F2', fontSize: 13 }}>{analysis.filename} · {count(analysis.row_count)} rows</Text>
+    <Text style={{ color: '#DDD1F2', fontSize: 13 }}>{sourceLabel ? `${sourceLabel} · ` : ''}{count(analysis.row_count)} rows</Text>
     <Badge status={analysis.status} />
   </View>
     {result.error && <ErrorNotice message={messageOf(result.error)} retry={() => void result.refetch()} />}
