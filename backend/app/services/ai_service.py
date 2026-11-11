@@ -348,11 +348,20 @@ Before returning the JSON:
         history: list[dict[str, str]],
         user_message: str,
     ) -> dict[str, Any]:
-        from app.services.investigation import _verified_binary_flag
+        from app.services.investigation import _verified_binary_flag, validate_plan
 
         def _chat_field_catalogue(metadata: dict[str, Any], profile: dict[str, Any]) -> list[dict[str, Any]]:
             categories = metadata.get("categorical_stats") or profile.get("categories") or {}
+            saved_columns = {field["name"]: field for field in profile.get("columns", [])}
             catalogue = []
+
+            def supports(plan: ComparisonPlan) -> bool:
+                try:
+                    validate_plan(plan, metadata)
+                    return True
+                except ValueError:
+                    return False
+
             for field in metadata.get("schema") or profile.get("columns", []):
                 origin = field.get("measure_grain") or {}
                 table, column = origin.get("source_table"), origin.get("source_column")
@@ -361,14 +370,19 @@ Before returning the JSON:
                 if source and sheet:
                     source = f"{source}[{sheet}]"
                 binary = bool(field.get("is_numeric") and _verified_binary_flag(field["name"], metadata))
+                category_summary = categories.get(field.get("name")) or saved_columns.get(field.get("name"), {}).get("categorical_summary") or {}
+                calculation_support = {operation: supports(ComparisonPlan(aggregation=operation, column=field["name"]))
+                                       for operation in ("sum", "average")}
+                calculation_support["group_by"] = supports(ComparisonPlan(aggregation="count", group_by=field["name"]))
                 catalogue.append({
                     "name": field.get("name"), "role": field.get("analysis_role"),
                     "numeric": field.get("is_numeric"), "date": field.get("is_date"),
                     "semantic_type": field.get("semantic_type"), "binary_0_1": binary,
+                    "calculation_support": calculation_support,
                     "repeated_lookup": is_repeated_lookup(field), "source_table": table,
                     "source_column": column, "source_sheet": sheet,
                     "source_qualified_field": f"{source}.{column}" if source and column else None,
-                    "recorded_categories": [value["value"] for value in (categories.get(field.get("name"), {}).get("top_values") or [])[:50]]
+                    "recorded_categories": [value["value"] for value in (category_summary.get("top_values") or [])[:50]]
                         if field.get("analysis_role") in {"dimension", "flag"} else [],
                 })
             return catalogue
@@ -456,6 +470,19 @@ plan {"aggregation":"sum","column":"revenue","group_by":"region",
 "filters":[],"order":"desc","limit":10}. The server will compute the ranking.
 Likewise, "average revenue by region" requires average, not sum. These are
 examples only: use exact existing field names, never assume those fields exist.
+Each field's calculation_support records the server's validation for plain sum,
+arithmetic average and group_by. Use a calculated plan when the requested
+operation is supported for the named measure and grouping field. A numeric flag
+with average=true supports the arithmetic mean of its recorded values, including
+when the question asks for an average rather than a proportion. A joined profile
+or lookup field with group_by=true supports grouping a fact-table measure.
+A source filename can be a technical export name. A uniquely named attribute can
+match the question's business label even when that label is absent from the
+filename. Use the requested attribute when only one recorded field matches.
+When several fields match, preserve their source/entity and modifier distinctions.
+Capabilities apply to individual fields. Their combination still needs a recorded
+relationship. Count, distinct_count, weighted_average and retention follow their
+additional rules below.
 The source_qualified_field describes each field's original table and header.
 Use that provenance to match the entity AND attribute named by the question.
 An entity's own attribute differs from an invoice's billing or shipping attribute,
@@ -578,6 +605,14 @@ Measured fact catalogue:
                         defaults = {"order", "limit", "filters", "cohort_filters", "return_filters"}
                         plan_payload = {key: value for key, value in plan_payload.items()
                                         if value is not None or key not in defaults}
+                        for collection in ("filters", "cohort_filters", "return_filters"):
+                            selected_filters = plan_payload.get(collection)
+                            if isinstance(selected_filters, list):
+                                for selected_filter in selected_filters:
+                                    if isinstance(selected_filter, dict) and selected_filter.get("op") == "eq":
+                                        values = selected_filter.get("values")
+                                        if isinstance(values, list) and len(values) == 1 and values[0] is not None:
+                                            selected_filter["op"] = "in"
                         bucket = _requested_date_bucket(user_message)
                         fields = metadata.get("schema") or profile.get("columns", [])
                         date_fields = {field.get("name") for field in fields if field.get("is_date")}
