@@ -50,6 +50,7 @@ try {
  const pie=(option.series||[]).find(series=>series.type==='pie');
  let smallScreenOption={};
  if(horizontalBar){
+   option.xAxis={...option.xAxis,nameLocation:'middle',nameGap:38};
    smallScreenOption={
      grid:{left:8,right:56,top:16,bottom:60,containLabel:true},
      yAxis:{axisLabel:{width:112,overflow:'break',lineHeight:14,interval:0,margin:8}},

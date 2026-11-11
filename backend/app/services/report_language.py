@@ -14,6 +14,7 @@ from app.analytics.summary_evidence import _finite, _format
 from app.services.chat_evidence import _friendly_fact, explain_fact
 
 VERSION = "plain_reader_v9"
+_AVERAGE_EXPLANATION = "To find an average, we add the supplied numbers and divide by how many there are."
 
 
 def business_text(text: Any) -> str:
@@ -156,7 +157,7 @@ def present_chart(
             wording = measure(value)
             description = f"Each bar shows {wording} for one {group} group."
             if aggregation == "average":
-                description += " We add the supplied numbers and divide by how many there are."
+                description += " " + _AVERAGE_EXPLANATION
             elif aggregation == "sum":
                 description += " We add the supplied numbers in each group."
             else:
@@ -167,7 +168,7 @@ def present_chart(
             if aggregation == "average":
                 description = f"Each bar shows {wording} for one {group} and one {label(split)}."
                 description += f" Colours show {label(split)} groups side by side."
-                description += " We add the supplied numbers and divide by how many there are."
+                description += " " + _AVERAGE_EXPLANATION
             else:
                 description = f"Each coloured part shows {wording} for one {group} and one {label(split)}."
                 description += " We add the supplied numbers with the same two labels."
@@ -209,6 +210,8 @@ def present_chart(
             lifecycle_period = f"the {period} of their {date_label}"
         description = (f"Each point groups {records} by {lifecycle_period}. It compares different groups of {records}."
                        if lifecycle else f"Each point shows {' and '.join(measures)} for one {period}.")
+        if "average" in operations:
+            description += " " + _AVERAGE_EXPLANATION
         if columns.get("partial_last_month"):
             description += " The final month has fewer recorded dates and may be incomplete."
         if series and (series[0].get("lineStyle") or {}).get("opacity") == 0:

@@ -183,6 +183,9 @@ test('narrow bar charts wrap full names and keep exact figures and counts in the
   const media = option.media as { option: { grid: { right: number }; yAxis: { axisLabel: { width: number; overflow: string } };
     series: { data: number[]; label: { formatter: (item: { value: number }) => string } }[] } }[];
   const narrow = media[0].option;
+  const xAxis = option.xAxis as { nameLocation: string; nameGap: number };
+  assert.equal(xAxis.nameLocation, 'middle');
+  assert.equal(xAxis.nameGap, 38);
   assert.equal(narrow.yAxis.axisLabel.overflow, 'break');
   assert.equal(narrow.yAxis.axisLabel.width, 112);
   assert.equal(narrow.grid.right, 56);

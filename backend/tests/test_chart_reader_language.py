@@ -15,7 +15,7 @@ from app.analytics.chart_selector import (
     _time_series_chart,
 )
 from app.analytics.forecasting import generate_forecasts
-from app.analytics.labels import derive_label, source_column_label
+from app.analytics.labels import derive_label, reader_label, source_column_label
 from app.analytics.live_filter import populate_chart_option
 from app.analytics.measure_semantics import is_observation_date
 from app.schemas.analysis import ChartConfig
@@ -29,6 +29,7 @@ from app.services.report_language import (
 from app.services.semantic_wrangler import (
     _fallback_display_metadata,
     apply_display_metadata_to_charts,
+    apply_display_metadata_to_statistics,
 )
 
 
@@ -49,6 +50,46 @@ def test_source_roles_and_existing_decoded_names_are_retained():
     assert source_column_label(field("country", "Country", "Customer.csv")) == "Customer country"
     assert source_column_label(field("dob", "dob", display_label="Date of birth")) == "Date of birth"
     assert source_column_label(field("g", "G")) == "G"
+
+
+@pytest.mark.parametrize("saved", [None, "Country", "Country country", "Country country country"])
+def test_countries_country_label_is_stable_across_generation_and_repeated_reads(saved):
+    statistics = {"schema": [field("country", "Country", "countries.csv", display_label=saved),
+                              field("weight", "weight", "athletes.csv")]}
+    chart = _horizontal_bar_chart("country", "weight", aggregation="average")
+    for _ in range(3):
+        display = _fallback_display_metadata(statistics, [chart])
+        statistics = apply_display_metadata_to_statistics(statistics, display)
+        chart = apply_display_metadata_to_charts([chart], display)[0]
+        shown = present_chart(chart, statistics)
+        response = ChartConfig(**shown)
+        assert response.title == "Average weight by country"
+        assert response.echarts_option["yAxis"]["name"] == "Country"
+        assert statistics["schema"][0]["display_label"] == "Country"
+        chart = response.model_dump()
+
+
+def test_source_qualification_preserves_meaningful_labels_and_singular_status():
+    assert source_column_label(field("country", "Country", "countries.csv", display_label="Country of residence")) == "Country of residence"
+    assert source_column_label(field("type", "Type", "Status.csv")) == "Status type"
+
+
+def test_num_expands_for_numeric_measures_while_identifier_labels_stay_precise():
+    measure = field("num_parts", "num_parts", "sets.csv", is_numeric=True, analysis_role="metric")
+    assert reader_label("num_parts", measure) == "number of parts"
+    assert source_column_label(measure) == "Number of parts"
+    identifier = field("num_account", "num_account", "accounts.csv", is_numeric=True, analysis_role="identifier")
+    assert reader_label("num_account", identifier) == "num account"
+    assert source_column_label(identifier) == "Num Account"
+    assert reader_label("num_parts") == "num parts"
+
+
+def test_average_line_explains_the_same_calculation_as_a_bar():
+    chart = _time_series_chart("year", "num_parts", "average")
+    schema = [field("num_parts", "num_parts", "sets.csv", is_numeric=True, analysis_role="metric")]
+    shown = present_chart(chart, {"schema": schema})
+    assert shown["title"] == "Average number of parts by year"
+    assert "To find an average, we add the supplied numbers and divide by how many there are." in shown["description"]
 
 
 def test_total_bars_name_the_calculation_and_keep_exact_data():

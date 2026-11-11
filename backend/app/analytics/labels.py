@@ -87,7 +87,7 @@ def sentence_label(label: str) -> str:
     return " ".join(words)
 
 
-def reader_label(column: str) -> str:
+def reader_label(column: str, field: dict | None = None) -> str:
     """Use a short field name and explain units that the header supplies."""
     if column.isalpha() and column.isupper() and len(column) <= 3:
         return {"USD": "US dollars", "GBP": "British pounds", "EUR": "euros"}.get(column, column)
@@ -95,6 +95,10 @@ def reader_label(column: str) -> str:
     for meaning, code in (("US dollars", "USD"), ("British pounds", "GBP"), ("euros", "EUR")):
         name = re.sub(rf"\b{meaning}\b", code, name, flags=re.I)
     text = sentence_label(derive_label(name))
+    original = str(((field or {}).get("measure_grain") or {}).get("source_column") or (field or {}).get("name") or column)
+    if ((field or {}).get("is_numeric") and (field or {}).get("analysis_role") == "metric"
+            and re.search(r"(?:^|[\s_])num(?=[\s_]+[A-Za-z])", original, flags=re.I)):
+        text = re.sub(r"\bnum(?=\s+[A-Za-z])", "number of", text, flags=re.I)
     for code, meaning in (("USD", "US dollars"), ("GBP", "British pounds"), ("EUR", "euros")):
         replacement = meaning if text == code else f"({meaning})"
         text = re.sub(rf"\b{code}\b", replacement, text)
@@ -120,15 +124,20 @@ def source_column_label(field: dict) -> str:
         table = re.sub(r"\.(csv|tsv|xlsx?|parquet)$", "", table, flags=re.I)
         table = re.split(r"[/\\]", table)[-1]
         table_label = derive_label(table)
+        if table_label.endswith("ies"):
+            table_label = table_label[:-3] + "y"
+        elif table_label.endswith("s") and not table_label.endswith(("ss", "us", "is")):
+            table_label = table_label[:-1]
+        label = re.sub(rf"\b({re.escape(original)})(?:\s+{re.escape(original)})+\b", r"\1", label, flags=re.I)
         table_key = re.sub(r"[^a-z0-9]", "", table_label.lower())
         label_key = re.sub(r"[^a-z0-9]", "", label.lower())
-        if table_label and table_key not in {label_key, label_key + "s"} and not label_key.startswith(table_key.rstrip("s")):
-            if table_label.endswith("ies"):
-                table_label = table_label[:-3] + "y"
-            elif table_label.endswith("s") and not table_label.endswith("ss"):
-                table_label = table_label[:-1]
+        if table_label and table_key != original_key and not label_key.startswith(table_key):
             label = f"{table_label} {sentence_label(label)}"
-    return label or derive_label(name)
+    label = label or derive_label(name)
+    if re.search(r"\bnum\b", label, flags=re.I) and field.get("is_numeric") and field.get("analysis_role") == "metric":
+        expanded = reader_label(label, field)
+        label = expanded[:1].upper() + expanded[1:]
+    return label
 
 
 def _extract_unit(tokens: list[str]) -> tuple[list[str], str]:
