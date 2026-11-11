@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import codecs
 import csv
 import re
 from difflib import SequenceMatcher
@@ -179,10 +180,49 @@ class FileProcessor:
         return {"type": ext.removeprefix(".")}
 
     def _detect_encoding(self, file_path: str) -> str:
-        raw = Path(file_path).read_bytes()[:128_000]
-        if raw.startswith(b"\xef\xbb\xbf"):
-            return "utf-8-sig"
-        detection = chardet.detect(raw)
+        with open(file_path, "rb") as handle:
+            raw = handle.read(128_000)
+            for marker, encoding in (
+                (codecs.BOM_UTF8, "utf-8-sig"),
+                (codecs.BOM_UTF32_LE, "utf-32"),
+                (codecs.BOM_UTF32_BE, "utf-32"),
+                (codecs.BOM_UTF16_LE, "utf-16"),
+                (codecs.BOM_UTF16_BE, "utf-16"),
+            ):
+                if raw.startswith(marker):
+                    return encoding
+
+            # Sparse UTF-8 characters can look like a legacy single-byte
+            # encoding to chardet. Validate every byte, retaining incomplete
+            # characters between chunks and checking the final decoder state.
+            decoder = codecs.getincrementaldecoder("utf-8")(errors="strict")
+            chunk = raw
+            failed_chunk = raw
+            valid_utf8 = True
+            while chunk:
+                if b"\x00" in chunk:
+                    failed_chunk = chunk
+                    valid_utf8 = False
+                    break
+                try:
+                    decoder.decode(chunk, final=False)
+                except UnicodeDecodeError as error:
+                    failed_chunk = error.object
+                    valid_utf8 = False
+                    break
+                chunk = handle.read(128_000)
+            if valid_utf8:
+                try:
+                    decoder.decode(b"", final=True)
+                except UnicodeDecodeError as error:
+                    failed_chunk = error.object
+                else:
+                    return "utf-8"
+
+        # Include the failing part when a legacy character occurs after the
+        # initial sample, so an ASCII prefix cannot hide its actual encoding.
+        sample = raw if failed_chunk == raw else raw + failed_chunk
+        detection = chardet.detect(sample)
         encoding = detection.get("encoding") or "utf-8"
         confidence = float(detection.get("confidence") or 0)
         if confidence < 0.45:

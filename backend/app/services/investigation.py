@@ -6,7 +6,7 @@ import json
 import math
 import re
 from datetime import date, datetime
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, localcontext
 from pathlib import Path
 from typing import Any, Literal
 
@@ -92,7 +92,7 @@ def label(column: Any) -> str:
     return reader_label(str(column or "entries"))
 
 
-def _display_number(value: float, scale: str | None = None) -> str:
+def _display_number(value: int | float, scale: str | None = None) -> str:
     return f"{value:,.6g}" if scale == "unconfirmed" else _format(value)
 
 
@@ -127,6 +127,29 @@ def _verified_binary_flag(column: str, metadata: dict) -> bool:
             _numeric_filter_value(item["value"]) in {0, 1} for item in values)
     except (KeyError, TypeError, ValueError):
         return False
+
+
+def _decimal_aggregate(values: list[str | None] | None, operation: str) -> float | None:
+    if not values:
+        return None
+    # Cover the Float64 exponent range and the supported record count without
+    # rounding intermediate sums. Convert to the API's float result once.
+    with localcontext() as context:
+        context.prec = 700
+        total, count = Decimal(0), 0
+        for value in values:
+            if value is None:
+                continue
+            number = Decimal(value)
+            if not number.is_finite():
+                # DuckDB converts a Python NaN result to SQL NULL. Infinity
+                # remains nonfinite so the comparison's validation rejects it.
+                return float("inf")
+            total += number
+            count += 1
+        if not count:
+            return None
+        return float(total / count if operation == "average" else total)
 
 
 def validate_plan(plan: ComparisonPlan, metadata: dict) -> tuple[str, str | None, list[dict]]:
@@ -192,7 +215,14 @@ def validate_plan(plan: ComparisonPlan, metadata: dict) -> tuple[str, str | None
             else:
                 if plan.weight_column is not None:
                     raise ValueError("Weights require a weighted average.")
-                expression = f"{'SUM' if plan.aggregation == 'sum' else 'AVG'}({quote(plan.column)})"
+                floating = str(measure.get("dtype", "")).casefold() in {"double", "float", "real", "float32", "float64", "double precision"}
+                if plan.aggregation == "sum" and not floating:
+                    # Preserve native integer/decimal totals and legacy schema
+                    # behavior instead of converting their sums to Float64.
+                    expression = f"SUM({quote(plan.column)})"
+                else:
+                    values = f"LIST(CAST({quote(plan.column)} AS VARCHAR)) FILTER (WHERE {quote(plan.column)} IS NOT NULL)"
+                    expression = f"vesquiri_decimal_aggregate({values}, '{plan.aggregation}')"
     group = None
     if plan.group_by:
         field = schema.get(plan.group_by)
@@ -305,6 +335,8 @@ def _display_group(column: str, value: Any, bucket: str | None = None) -> str | 
 async def _load(analysis: Any) -> tuple[duckdb.DuckDBPyConnection, int, bool]:
     conn = duckdb.connect(":memory:")
     try:
+        conn.create_function("vesquiri_decimal_aggregate", _decimal_aggregate,
+                             ["VARCHAR[]", "VARCHAR"], "DOUBLE", null_handling="special")
         path = analysis.file.storage_path
         rows, truncated = await FileProcessor().read_to_duckdb_ex(conn, path, Path(path).suffix.lower())
         actual = {r[0] for r in conn.execute("DESCRIBE data").fetchall()}
@@ -380,6 +412,13 @@ async def compare(analysis: Any, plan: ComparisonPlan, *, resolve_categories: bo
             exclude_average = f"LOWER(CAST({quote(survey['country'])} AS VARCHAR)) <> 'average'"
             where = f"({where}) AND {exclude_average}" if where else exclude_average
         clause = f" WHERE {where}" if where else ""
+        if plan.aggregation in {"sum", "average"}:
+            column = quote(plan.column)
+            numeric = f"TRY_CAST({column} AS DOUBLE)"
+            invalid = f"{column} IS NOT NULL AND ({numeric} IS NULL OR NOT isfinite({numeric}))"
+            invalid_where = f"({where}) AND ({invalid})" if where else invalid
+            if conn.execute(f"SELECT EXISTS(SELECT 1 FROM data WHERE {invalid_where})", params).fetchone()[0]:
+                raise ValueError("Some values in this measure cannot be used as numbers. Check the file before comparing it.")
         matched = conn.execute("SELECT COUNT(*) FROM data" + clause, params).fetchone()[0]
         supplied = "COUNT(*)" if plan.column is None else f"COUNT({quote(plan.column)})"
         if plan.aggregation == "weighted_average":
@@ -618,6 +657,10 @@ def comparison_answer(result: dict) -> str:
     tied = ranking.get("tied", 1)
     if tied > 1:
         lead = f"{tied:,} groups tie for the {rank} {metric} at {_display_number(value, scale)}{suffix} each."
+        visible_ties = sum(row.get("value") == first.get("value") for row in groups)
+        if visible_ties < tied:
+            lead += f" Showing {visible_ties:,} of these tied groups"
+            lead += f", {subject}." if len(groups) == 1 else "."
     elif result.get("group_count") == 1:
         lead = f"{subject} is the only group in this comparison, with {metric} of {_display_number(value, scale)}{suffix}."
     else:

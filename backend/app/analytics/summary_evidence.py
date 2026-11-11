@@ -13,13 +13,15 @@ from app.analytics.percentage_scale import raw_percentage_label
 from app.analytics.semantic_detector import is_serial_identifier
 
 
-def _finite(value: Any) -> float | None:
+def _finite(value: Any) -> int | float | None:
     if isinstance(value, bool) or not isinstance(value, int | float):
         return None
-    return float(value) if math.isfinite(value) else None
+    return value if isinstance(value, int) or math.isfinite(value) else None
 
 
-def _format(value: float) -> str:
+def _format(value: int | float) -> str:
+    if isinstance(value, int):
+        return f"{value:,}"
     if 0 < abs(value) < .01:
         return f"{value:.4g}"
     return f"{value:,.2f}".rstrip("0").rstrip(".") if not value.is_integer() else f"{value:,.0f}"

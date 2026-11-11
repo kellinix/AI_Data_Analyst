@@ -52,7 +52,7 @@ def _friendly_fact(fact: dict[str, Any]) -> str:
             # Earlier audited replies did not save display_value separately.
             # Recover only their server-rendered amount, retaining currency/%.
             match = re.search(r"(?:sums to|averages) (.+?) (?:across|when weighted by)", fact.get("text", ""))
-            display = match[1] if match and str(fact["id"]).startswith("metric_") else _format(float(values["value"]))
+            display = match[1] if match and str(fact["id"]).startswith("metric_") else _format(values["value"])
         phrases = {"total": "Total" if column.lower() == "total" else f"Total {column}", "mean": f"Average {column}",
                    "weighted_mean": f"Average {column}", "min": f"The lowest {column}",
                    "max": f"The highest {column}"}
