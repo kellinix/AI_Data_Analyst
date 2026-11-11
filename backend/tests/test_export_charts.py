@@ -60,6 +60,21 @@ def test_all_saved_chart_types_export_as_editable_excel_charts():
                    for name in chart_names)
 
 
+def test_horizontal_bar_chart_data_header_names_the_category_axis():
+    workbook_bytes = build_excel_report(
+        name="Regional revenue", row_count=2, column_count=2, summary=None,
+        insights=[], charts=[_charts()[1]],
+    )
+    workbook = load_workbook(io.BytesIO(workbook_bytes))
+
+    assert list(workbook["Chart Data"].values)[1:] == [
+        ("Region", "Recorded revenue"),
+        ("North", 30),
+        ("South", 40),
+    ]
+    assert len(workbook["Charts"]._charts) == 1
+
+
 def test_pdf_chart_section_adds_vector_visuals_without_dropping_narrative():
     kpis = [{"type": "summary", "title": f"Metric {index}", "data": {"value": index}}
             for index in range(6)]

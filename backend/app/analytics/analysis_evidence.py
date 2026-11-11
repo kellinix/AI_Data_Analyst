@@ -6,6 +6,59 @@ from datetime import date
 from typing import Any
 
 from app.analytics.category_values import normalized_geography
+from app.analytics.measure_semantics import is_observation_date
+
+_MISSING_OBSERVATION_DATE = (
+    "A date showing when these figures were recorded is needed to check their age or change over time."
+)
+_LEGACY_MISSING_DATE_NOTES = {
+    "No usable date series was detected; this file alone cannot establish growth or change over time.",
+    "Without usable dates, this file cannot show how things changed over time.",
+    _MISSING_OBSERVATION_DATE,
+}
+
+
+def date_coverage_limitations(
+    statistics: dict[str, Any], existing: list[str] | None = None,
+) -> list[str]:
+    """Use observation dates for recency while retaining saved non-date notes."""
+    profile = statistics.get("data_profile") or statistics.get("profile_json") or {}
+    schema = {field["name"]: field for field in statistics.get("schema") or profile.get("columns") or [] if field.get("name")}
+    ranges = {name: bounds for name, bounds in (statistics.get("date_range") or {}).items()
+              if is_observation_date(name, schema.get(name), include_snapshot=True)}
+    observation_field = any(field.get("analysis_role") == "temporal_dimension"
+                            and is_observation_date(name, field, include_snapshot=True) for name, field in schema.items())
+    notes = []
+    if not ranges and not observation_field:
+        notes.append(_MISSING_OBSERVATION_DATE)
+    recorded_dates = []
+    for bounds in ranges.values():
+        if not isinstance(bounds, dict) or not bounds.get("max"):
+            continue
+        try:
+            recorded_dates.append(date.fromisoformat(str(bounds["max"])[:10]))
+        except ValueError:
+            continue
+    if recorded_dates and (date.today() - max(recorded_dates)).days > 120:
+        notes.append(
+            f"The latest recorded date is {max(recorded_dates):%d %b %Y}. "
+            "These figures are too old for a current forward-looking forecast."
+        )
+    if existing is None:
+        return notes
+    retained = []
+    inserted = False
+    for note in existing:
+        generated = isinstance(note, str) and (note in _LEGACY_MISSING_DATE_NOTES or (
+            note.startswith("The latest recorded date is ")
+            and note.endswith("These figures are too old for a current forward-looking forecast.")))
+        if generated:
+            if not inserted:
+                retained.extend(notes)
+                inserted = True
+        else:
+            retained.append(note)
+    return retained
 
 
 def analysis_evidence(statistics: dict[str, Any], upload_context: Any) -> dict[str, Any]:
@@ -20,23 +73,7 @@ def analysis_evidence(statistics: dict[str, Any], upload_context: Any) -> dict[s
     notes = [f"Counts describe {noun} unless a count of different names or IDs is clearly stated."]
     if any(normalized_geography(c["name"]) for c in statistics.get("schema", [])):
         notes.append("Geographic groups combine case, spacing and hyphen variants; source values are preserved and names are not verified against an external geographic reference.")
-    if not statistics.get("date_range") and not any(c.get("analysis_role") == "temporal_dimension" for c in statistics.get("schema", [])):
-        notes.append(
-            "No usable date series was detected; this file alone cannot establish growth or change over time."
-        )
-    recorded_dates = []
-    for bounds in (statistics.get("date_range") or {}).values():
-        if not isinstance(bounds, dict) or not bounds.get("max"):
-            continue
-        try:
-            recorded_dates.append(date.fromisoformat(str(bounds["max"])[:10]))
-        except ValueError:
-            continue
-    if recorded_dates and (date.today() - max(recorded_dates)).days > 120:
-        notes.append(
-            f"The latest recorded date is {max(recorded_dates):%d %b %Y}. "
-            "These figures are too old for a current forward-looking forecast."
-        )
+    notes.extend(date_coverage_limitations(statistics))
     if not any(c.get("analysis_role") == "metric" for c in statistics.get("schema", [])):
         notes.append(
             "Category frequencies describe the composition of this file, not demand, performance or outcomes."

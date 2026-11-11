@@ -358,7 +358,8 @@ def add_excel_charts(workbook: Workbook, charts: list[ExportChart]) -> None:
         if chart.description:
             display.write_string(chart_row + 1, 0, chart.description)
         data.write_string(data_row, 0, chart.title, heading_fmt)
-        data.write_string(data_row + 1, 0, chart.x_label or "Category", heading_fmt)
+        category_label = chart.y_label if chart.horizontal else chart.x_label
+        data.write_string(data_row + 1, 0, category_label or "Category", heading_fmt)
         if chart.kind == "scatter":
             data.write_string(data_row + 1, 1, chart.y_label or "Value", heading_fmt)
             for index, (x, y) in enumerate(chart.points, start=data_row + 2):

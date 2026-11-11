@@ -104,7 +104,9 @@ def is_additive_flow(name: str) -> bool:
     )
 
 
-def is_observation_date(name: str, field: dict[str, Any] | None = None) -> bool:
+def is_observation_date(
+    name: str, field: dict[str, Any] | None = None, *, include_snapshot: bool = False,
+) -> bool:
     # Catalogue/lifecycle dates group entities into cohorts, not period flows.
     original = str(((field or {}).get("measure_grain") or {}).get("source_column") or "")
     words = tokens(re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", f"{name} {original}"))
@@ -114,6 +116,10 @@ def is_observation_date(name: str, field: dict[str, Any] | None = None) -> bool:
     # Week/month/period start and end are ordinary reporting boundaries.
     if words & {"period", "week", "month", "quarter", "year"}:
         words -= {"start", "end"}
+    if include_snapshot:
+        # A snapshot date can establish recency without qualifying a sequence
+        # of stock snapshots for additive flow forecasting.
+        words -= {"snapshot", "asof"}
     return not words & {
         "first", "last", "birth", "born", "death", "released", "release",
         "published", "publication", "created", "updated", "start", "end",

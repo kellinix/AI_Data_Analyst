@@ -7,6 +7,7 @@ from copy import deepcopy
 from datetime import datetime
 from typing import Any
 
+from app.analytics.analysis_evidence import date_coverage_limitations
 from app.analytics.data_dictionary import value_definition, value_display_label
 from app.analytics.labels import derive_label, reader_label, sentence_label, source_column_label
 from app.analytics.plain_language import plain_english
@@ -703,6 +704,11 @@ def present_metadata(metadata: dict[str, Any] | None, summary: str | None) -> tu
         return metadata, summary
     result = deepcopy(metadata)
     context = record_context(result)
+    if "date_range" in result or any(field.get("analysis_role") == "temporal_dimension" for field in result.get("schema") or []):
+        for source in (result, result.get("data_profile") or result.get("profile_json") or {}):
+            evidence = source.get("analysis_evidence")
+            if isinstance(evidence, dict) and "limitations" in evidence:
+                evidence["limitations"] = date_coverage_limitations(result, evidence["limitations"])
     if result.get("presentation_version") == VERSION:
         context = record_context(result)
         if context and summary:
