@@ -53,7 +53,7 @@ def _base_spec(chart: dict[str, Any], mark: str | dict[str, Any], values: list[d
         "title": chart.get("title"),
         "description": chart.get("description"),
         "mark": mark,
-        "data": {"values": values[:1_000]},
+        "data": {"values": values},
         "encoding": {},
     }
 

@@ -55,6 +55,11 @@ function valuesFromSpec(spec: Record<string, unknown>): Record<string, unknown>[
   )
 }
 
+function plottedPointCount(option: Record<string, unknown>): number {
+  return asArray(option.series).reduce<number>((total, item) =>
+    total + asArray(asObject(item).data).filter((point) => point != null).length, 0)
+}
+
 function specTitle(channel: unknown, fallback?: string | null): string {
   const channelObject = asObject(channel)
   return typeof channelObject.title === "string"
@@ -420,7 +425,12 @@ function ChartCard({ chart, index, palette }: ChartCardProps) {
             ? String(asObject(patch.visual_spec).description) : chart.description }
       : chart
 
-  const chartOption = optionFromVisualSpec(effectiveChart) ?? asObject(effectiveChart.echarts_option)
+  const savedOption = asObject(effectiveChart.echarts_option)
+  const visualOption = optionFromVisualSpec(effectiveChart)
+  // Saved visual specs may contain only a bounded preview of the chart data.
+  // Reconstructing a plot from that preview can drop periods or whole series.
+  const chartOption = visualOption && plottedPointCount(visualOption) >= plottedPointCount(savedOption)
+    ? visualOption : savedOption
   const grid = asObject(chartOption.grid)
   const tooltip = asObject(chartOption.tooltip)
   const xAxis = asObject(chartOption.xAxis)

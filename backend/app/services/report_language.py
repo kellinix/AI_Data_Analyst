@@ -273,10 +273,16 @@ def present_chart(
         measured_fields = columns.get("ys") or [y]
     elif kind == "bar" and aggregation != "count":
         measured_fields = [y if split else x]
+    code_labels = []
     for name in measured_fields:
         text = field_labels.get(str(name)) or derive_label(str(name or ""))
-        if re.fullmatch(r"[A-Z]{1,2}", text) and text not in {"ID", "UK", "US", "EU"}:
-            description += f" The file calls this figure {text}. Its source guide is needed to explain the code."
+        if re.fullmatch(r"[A-Z]{1,2}", text) and text not in {"ID", "UK", "US", "EU"} and text not in code_labels:
+            code_labels.append(text)
+    if len(code_labels) == 1:
+        description += f" The file calls this figure {code_labels[0]}. Its source guide is needed to explain the code."
+    elif code_labels:
+        names = f"{', '.join(code_labels[:-1])} and {code_labels[-1]}"
+        description += f" The file calls these figures {names}. Its source guide is needed to explain the codes."
     used_fields = {str(name) for name in [x, y, split, *(result.get("series") or []), *(columns.get("ys") or [])] if name}
     option["_reader"] = {"version": VERSION, "aggregation": aggregation, "series_by": split,
                          "labels": {name: value for name, value in field_labels.items() if name in used_fields},
@@ -508,8 +514,18 @@ def _contextual_action(result: dict, data: dict, metadata: dict) -> None:
 
     if "source_evidence" not in data:
         data["source_evidence"] = data.get("evidence")
-    spec = evidence_spec(metadata, result)
-    figures = supporting_figures(metadata, result)
+    evidence_input = result
+    spec = evidence_spec(metadata, evidence_input)
+    if (spec is None and data.get("confidence_source") == "rule:data_quality"
+            and metadata.get("presentation_version") == VERSION and data.get("source_evidence")):
+        current_evidence = plain_english(str(data.get("evidence") or "")).lower()
+        matching_issues = [issue for issue in (metadata.get("data_quality") or {}).get("issues", [])
+                           if issue.get("column") == data.get("column") and issue.get("description")
+                           and plain_english(issue["description"]).lower() in current_evidence]
+        if len(matching_issues) == 1:
+            evidence_input = {**result, "data": {**data, "source_evidence": data.get("evidence")}}
+            spec = evidence_spec(metadata, evidence_input)
+    figures = supporting_figures(metadata, evidence_input)
     if figures:
         data["supporting_figures"] = figures
     source = data.get("confidence_source")

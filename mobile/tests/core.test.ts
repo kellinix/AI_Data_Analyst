@@ -218,6 +218,22 @@ test('a money scatter chart keeps quantity and money axis units separate', () =>
   assert.ok(yAxis.axisLabel.formatter(3).includes('£'));
 });
 
+test('native lines retain all three complete recorded series and their legend', () => {
+  const names = ['Average G', 'Average AB', 'Average R'];
+  const option = renderedChartOption({
+    legend: { show: true, bottom: 0 },
+    xAxis: { type: 'category', data: Array.from({ length: 938 }, (_, index) => String(index)) },
+    yAxis: { type: 'value' },
+    series: names.map((name, metric) => ({ type: 'line', name,
+      data: Array.from({ length: 938 }, (_, index) => index + metric) })),
+  });
+  const series = option.series as { name: string; data: number[] }[];
+  assert.deepEqual(Array.from(series, item => item.name), names);
+  assert.deepEqual(Array.from(series, item => item.data.length), [938, 938, 938]);
+  assert.equal(series[2].data[937], 939);
+  assert.equal((option.legend as { show: boolean }).show, true);
+});
+
 test('metric formatting preserves percentages, negative values, and unknown currency', () => {
   const metric = (data: Record<string, unknown>) => ({ data } as Insight);
   assert.ok(formatMetric(metric({ value: 12.5, is_percent: true })).endsWith('%'));

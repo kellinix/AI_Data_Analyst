@@ -134,7 +134,7 @@ def test_spec_axis_titles_fall_back_to_the_column_name() -> None:
     assert spec["encoding"]["y"]["title"] == "forecast"
 
 
-def test_build_visual_spec_limits_embedded_rows() -> None:
+def test_build_visual_spec_preserves_all_selected_embedded_rows() -> None:
     chart = {
         "type": "histogram",
         "title": "Distribution",
@@ -149,4 +149,5 @@ def test_build_visual_spec_limits_embedded_rows() -> None:
 
     spec = build_visual_spec(chart)
 
-    assert len(spec["data"]["values"]) == 1_000
+    assert len(spec["data"]["values"]) == 1_200
+    assert spec["data"]["values"][-1] == {"bucket": "1199", "count": 1199.0}
