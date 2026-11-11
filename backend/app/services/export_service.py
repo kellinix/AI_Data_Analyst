@@ -97,9 +97,10 @@ def build_pdf_report(
     styles = getSampleStyleSheet()
     heading = ParagraphStyle(
         "SectionHeading", parent=styles["Heading2"], spaceBefore=16, spaceAfter=8,
-        textColor=colors.HexColor("#1e3a8a"),
+        textColor=colors.HexColor("#1e3a8a"), keepWithNext=True,
     )
     body = ParagraphStyle("Body", parent=styles["BodyText"], spaceAfter=6, leading=15)
+    item_heading = ParagraphStyle("ItemHeading", parent=body, keepWithNext=True)
 
     story: list[Any] = []
     story.append(Paragraph(escape(name), styles["Title"]))
@@ -145,14 +146,14 @@ def build_pdf_report(
     if findings:
         story.append(Paragraph("Findings", heading))
         for finding in findings[:10]:
-            story.append(Paragraph(f"<b>{finding.get('title', '')}</b>", body))
+            story.append(Paragraph(f"<b>{finding.get('title', '')}</b>", item_heading))
             story.append(Paragraph(finding.get("description", ""), body))
 
     recommendations = _recommendation_insights(insights)
     if recommendations:
         story.append(Paragraph("Recommended Actions", heading))
         for rec in recommendations[:8]:
-            story.append(Paragraph(f"<b>{rec.get('title', '')}</b>", body))
+            story.append(Paragraph(f"<b>{rec.get('title', '')}</b>", item_heading))
             story.append(Paragraph(rec.get("description", ""), body))
 
     if not summary and not kpis and not findings and not recommendations and not visual_charts:

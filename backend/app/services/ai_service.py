@@ -456,6 +456,35 @@ Before returning the JSON:
                        "reason": "The question explicitly names one source entity and attribute"}
             return plan.model_copy(update={"group_by": field["name"]}), [binding]
 
+        def _normalise_source_total_group(
+            plan: ComparisonPlan, schema: dict[str, Any],
+        ) -> tuple[ComparisonPlan, list[dict[str, Any]]]:
+            field = schema.get(plan.column) or {}
+            origin = field.get("measure_grain") or {}
+            if (plan.aggregation not in {"sum", "average"} or not is_repeated_lookup(field)
+                    or origin.get("key_basis") != "parent_primary"
+                    or plan.group_by not in (origin.get("entity_key_columns") or [])):
+                return plan, []
+            once_pattern = (r"\b(?:(?:by|while)[ \t]+)?(?:(?:count(?:ing)?|using|including)[ \t]+)?"
+                            r"(?:each|every)[ \t]+(?:[\w-]+[ \t]+){1,8}"
+                            r"(?:(?:only|exactly|just)[ \t]+)?once\b")
+            remaining, instructions = re.subn(once_pattern, " ", user_message, flags=re.IGNORECASE)
+            grouping_pattern = (
+                r"\b(?:by|per|each|every|which|highest|lowest|largest|smallest|most|least|"
+                r"rank(?:ed|ing)?|top|bottom|group(?:ed|ing)?|breakdown|split|"
+                r"compar(?:e|ed|ing|ison|isons)|distributions?|list(?:ed|ing|s)?|separat(?:e|ed|ely|ion))\b"
+            )
+            if (
+                not instructions
+                or not re.search(r"\b(?:total|overall|sum|average|mean)\b", user_message, flags=re.IGNORECASE)
+                or re.search(grouping_pattern, remaining, flags=re.IGNORECASE)
+            ):
+                return plan, []
+            binding = {"field": "group_by", "model_column": plan.group_by, "bound_column": None,
+                       "source_table": origin.get("source_table"), "source_column": origin.get("source_column"),
+                       "reason": "The question requests one overall result, with each source record counted once."}
+            return plan.model_copy(update={"group_by": None}), [binding]
+
         facts = build_chat_facts(analysis)
         system_prompt = """Choose how the server should answer the user's question.
 There are two evidence sources: saved measured facts AND new server calculations
@@ -533,7 +562,10 @@ entries. A repeated_lookup field can be used as group_by or in filters, includin
 a readable lookup Name or Title. This remains valid when the measure comes from
 the main fact table. Grouping a fact measure by a lookup label is supported.
 A repeated_lookup numeric operand with sum=true or average=true supports that
-operation at source_record_once grain. The server uses its recorded entity keys
+operation at source_record_once grain. Treat instructions such as "count each
+source ID once" as the counting basis. For one overall total or average, set
+group_by to null. Set group_by for requested groups or rankings, such as "by
+source ID", "for each source ID" or "per source ID". The server uses its recorded entity keys
 to count each source record once. Filters select source records through matching
 report entries. Grouping must put each source record in one group. A source record
 that appears in several groups needs clarification, and the server checks that.
@@ -679,7 +711,9 @@ Measured fact catalogue:
                     plan = ComparisonPlan.model_validate(plan_payload)
                     saved_schema = _schema(metadata)
                     plan = _normalise_filtered_count(plan, saved_schema)
+                    plan, grain_bindings = _normalise_source_total_group(plan, saved_schema)
                     plan, source_bindings = _bind_group_source(plan, list(saved_schema.values()))
+                    source_bindings = [*grain_bindings, *source_bindings]
                     result = await compare(analysis, plan, resolve_categories=True)
                     content = result["answer"] + "\n\n" + result["scope"]
                     checks = {"status": "succeeded", "method": "measured_chat_queries_v1", "comparison": result,

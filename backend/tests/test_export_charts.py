@@ -130,3 +130,23 @@ def test_exports_explain_scope_and_show_million_unit():
     assert "Project counts describe rows" in workbook["Overview"]["B7"].value
     assert workbook["Key Metrics"]["A2"].value == "Project value (millions)"
     assert workbook["Key Metrics"]["B2"].value == 12.5
+
+
+def test_pdf_section_and_item_headings_stay_with_their_first_explanation():
+    insights = [
+        {"type": "outlier", "title": "First finding", "importance": "high",
+         "description": "A recorded amount needs a closer look."},
+        {"type": "recommendation", "title": "Review the source", "importance": "high",
+         "description": "Compare the amount with the original file."},
+    ]
+    for line_count in range(18, 42):
+        summary = "\n".join(f"Entry {index} describes values supplied in this file." for index in range(line_count))
+        pdf = build_pdf_report(name="Page boundaries", row_count=42, column_count=4,
+                               summary=summary, insights=insights)
+        pages = [zlib.decompress(base64.a85decode(stream.strip(), adobe=True))
+                 for stream in re.findall(rb"stream\n(.*?)endstream", pdf, re.S)]
+        for page in pages:
+            if b"Findings" in page or b"First finding" in page:
+                assert b"A recorded amount needs a closer look." in page
+            if b"Recommended Actions" in page or b"Review the source" in page:
+                assert b"Compare the amount with the original file." in page
