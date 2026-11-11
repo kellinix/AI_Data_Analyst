@@ -802,10 +802,17 @@ def evidence_spec(metadata: dict, insight: dict | None = None, issue_index: int 
             return {"kind": "anomaly", "anomaly": metadata["anomalies"][0]}
         if source == "rule:data_quality" and data.get("column"):
             evidence = str(data.get("source_evidence") or data.get("evidence") or data.get("problem") or "")
-            for index, issue in enumerate((metadata.get("data_quality") or {}).get("issues") or []):
-                if (issue.get("column") == data["column"] and issue.get("description")
-                        and plain_english(issue["description"]).lower() in plain_english(evidence).lower()):
-                    return evidence_spec(metadata, issue_index=index)
+            evidence_texts = dict.fromkeys(str(value) for value in (
+                data.get("source_evidence"), data.get("evidence"), data.get("problem"),
+            ) if value)
+            for text in evidence_texts:
+                matches = [index for index, issue in enumerate((metadata.get("data_quality") or {}).get("issues") or [])
+                           if issue.get("column") == data["column"] and issue.get("description")
+                           and plain_english(issue["description"]).lower() in plain_english(text).lower()]
+                if len(matches) == 1:
+                    return evidence_spec(metadata, issue_index=matches[0])
+                if matches:
+                    return None
             for entity in (metadata.get("analysis_evidence") or {}).get("entity_counts", []):
                 if entity.get("column") == data["column"] and entity.get("repeated_records", 0) > 0 and "repeat" in evidence.lower():
                     return {"kind": "repeat_values", "column": data["column"], "expected": entity["repeated_records"]}

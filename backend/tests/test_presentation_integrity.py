@@ -109,6 +109,8 @@ def test_same_friendly_issue_description_does_not_bind_another_column():
 
 
 def test_ambiguous_same_column_fallback_keeps_general_advice():
+    from app.services.investigation import evidence_spec
+
     original, metadata = example()
     once = present_insight(original, metadata)
     displayed_metadata, _ = present_metadata(metadata, None)
@@ -118,6 +120,7 @@ def test_ambiguous_same_column_fallback_keeps_general_advice():
 
     assert twice["title"] == "Check the information behind these figures"
     assert twice["data"]["source_evidence"] == original["data"]["evidence"]
+    assert evidence_spec(displayed_metadata, twice) is None
 
 
 def test_owner_shared_and_export_wording_agree_after_repeated_model_validation():
@@ -145,3 +148,33 @@ def test_owner_shared_and_export_wording_agree_after_repeated_model_validation()
     assert final["data"]["evidence_link"] == first["data"]["evidence_link"]
     assert final["data"]["supporting_figures"] == first["data"]["supporting_figures"] == exported["data"]["supporting_figures"]
     assert saved.title == original["title"] and saved.data == original["data"]
+
+
+def test_joined_quality_scope_keeps_its_count_when_original_source_blanks_differ():
+    from app.services.investigation import evidence_spec
+
+    original, metadata = example()
+    issue = metadata["data_quality"]["issues"][0]
+    issue.update(affected_rows=10, description="83.3% of values are missing in the joined report")
+    original["data"]["evidence"] = "Optional value: " + issue["description"]
+    metadata["data_quality"]["source_quality"] = {"input_rows": 4, "issues": [
+        {"column": "optional_value", "type": "missing_values", "affected_rows": 3,
+         "description": "3 cells are blank in the source file"}]}
+    now, analysis_id = datetime.now(UTC), uuid4()
+    saved = SimpleNamespace(**original, id=uuid4(), analysis_id=analysis_id, confidence=.8,
+        chart_config=None, created_at=now, user_feedback=None)
+    report = AnalysisDetailResponse(id=analysis_id, name="Joined example", status="completed", file_id=uuid4(),
+        filename="example.csv", row_count=12, column_count=1, created_at=now, updated_at=now, summary=None,
+        metadata=metadata, insights=[InsightResponse.model_validate(saved)])
+    first_link = report.insights[0].data["evidence_link"]
+
+    report = AnalysisDetailResponse.model_validate(report)
+    report = AnalysisDetailResponse.model_validate(report.model_dump())
+
+    figures = report.insights[0].data["supporting_figures"]
+    assert figures["basis"] == "Saved file check for optional value."
+    assert figures["figures"] == [{"label": "Entries flagged", "value": 10}]
+    assert report.insights[0].data["evidence_link"] == first_link
+    assert report.insights[0].data["source_evidence"] == original["data"]["evidence"]
+    resolved = evidence_spec(report.metadata, report.insights[0].model_dump())
+    assert resolved["kind"] == "quality" and resolved["expected"] == 10

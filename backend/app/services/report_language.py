@@ -514,18 +514,8 @@ def _contextual_action(result: dict, data: dict, metadata: dict) -> None:
 
     if "source_evidence" not in data:
         data["source_evidence"] = data.get("evidence")
-    evidence_input = result
-    spec = evidence_spec(metadata, evidence_input)
-    if (spec is None and data.get("confidence_source") == "rule:data_quality"
-            and metadata.get("presentation_version") == VERSION and data.get("source_evidence")):
-        current_evidence = plain_english(str(data.get("evidence") or "")).lower()
-        matching_issues = [issue for issue in (metadata.get("data_quality") or {}).get("issues", [])
-                           if issue.get("column") == data.get("column") and issue.get("description")
-                           and plain_english(issue["description"]).lower() in current_evidence]
-        if len(matching_issues) == 1:
-            evidence_input = {**result, "data": {**data, "source_evidence": data.get("evidence")}}
-            spec = evidence_spec(metadata, evidence_input)
-    figures = supporting_figures(metadata, evidence_input)
+    spec = evidence_spec(metadata, result)
+    figures = supporting_figures(metadata, result)
     if figures:
         data["supporting_figures"] = figures
     source = data.get("confidence_source")
