@@ -15,7 +15,7 @@ from app.analytics.record_context import record_context
 from app.analytics.summary_evidence import _finite, _format
 from app.services.chat_evidence import _friendly_fact, explain_fact
 
-VERSION = "plain_reader_v11"
+VERSION = "plain_reader_v12"
 _AVERAGE_EXPLANATION = "To find an average, we add the supplied numbers and divide by how many there are."
 
 
@@ -121,7 +121,7 @@ def present_chart(
     source_description = (saved.get("source_description", current_description)
                           if current_description == saved.get("description") else current_description)
     kind = result.get("type")
-    records = (context or {}).get("plural", "entries")
+    records = (context or {}).get("plural") or saved.get("records") or "entries"
 
     def heading(text: str) -> str:
         return text[:1].upper() + text[1:]
@@ -138,11 +138,24 @@ def present_chart(
 
     def measure(name: Any) -> str:
         text = label(name)
+        if unexplained_measure(name) and aggregation in {"sum", "average"}:
+            action = "total" if aggregation == "sum" else "average"
+            return f"{action} recorded value for {text}"
         if aggregation == "sum":
             return text if text.lower().startswith("total ") or text.lower() == "total" else f"total {text}"
         if aggregation == "average":
             return f"average of {text}" if text.lower().startswith("average ") else f"average {text}"
         return f"recorded {text}"
+
+    def unexplained_measure(name: Any) -> bool:
+        field = fields.get(str(name), {})
+        source_name = str((field.get("measure_grain") or {}).get("source_column") or name)
+        if re.sub(r"[^a-z]", "", source_name.lower()) == "bmi":
+            return False  # Its standard meaning is explained below.
+        inferred = (field.get("semantic_reason") == "Numeric dtype" and field.get("is_numeric"))
+        if str(name) not in fields:
+            inferred = str(name) in (saved.get("unexplained_measures") or [])
+        return bool(inferred and not definitions.get(str(name)) and not field.get("unit"))
 
     x, y = result.get("xAxis"), result.get("yAxis")
     series = option.get("series") or []
@@ -290,6 +303,9 @@ def present_chart(
     elif kind == "bar" and aggregation != "count":
         measured_fields = [y if split else x]
     code_labels = []
+    unexplained = list(dict.fromkeys(label(name) for name in measured_fields if unexplained_measure(name)))
+    if unexplained:
+        description += " Vesquiri has no supplied definition for " + ", ".join(unexplained) + ". A data guide is needed to explain what those numbers mean."
     for name in measured_fields:
         if definitions.get(str(name)):
             continue
@@ -318,7 +334,8 @@ def present_chart(
         description += " Source codes " + ", ".join(unknown_codes[:6]) + " have no supplied definitions. A data guide is needed to explain them."
     if kind == "histogram":
         used_fields.add(str(original))
-    option["_reader"] = {"version": VERSION, "aggregation": aggregation, "series_by": split,
+    option["_reader"] = {"version": VERSION, "aggregation": aggregation, "series_by": split, "records": records,
+                         "unexplained_measures": [str(name) for name in measured_fields if unexplained_measure(name)],
                          "labels": {name: value for name, value in field_labels.items() if name in used_fields},
                          "source_description": source_description}
     if definitions:

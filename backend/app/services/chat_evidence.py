@@ -213,11 +213,17 @@ def build_chat_facts(analysis: Any) -> list[dict[str, Any]]:
         column = values.get("column")
         numeric = stats["numeric_stats"].get(column, {})
         low, high = _finite(numeric.get("min")), _finite(numeric.get("max"))
-        # A flag-like name alone does not prove 0/1 coding. Both endpoints
-        # and the exact distinct count must establish that no other codes exist.
-        if (values.get("operation") == "total" and schema.get(column, {}).get("analysis_role") == "flag"
+        field = schema.get(column, {})
+        binary_named = field.get("analysis_role") == "flag" or bool(re.match(r"^(?:is|has|was)_", str(column)))
+        integer_dtype = str(field.get("dtype") or "").upper() in {
+            "TINYINT", "SMALLINT", "INTEGER", "BIGINT", "HUGEINT", "UTINYINT", "USMALLINT", "UINTEGER", "UBIGINT", "UHUGEINT",
+        }
+        # A flag-like name alone does not prove 0/1 coding. Endpoints plus
+        # either an exact distinct count or an integer dtype exclude other codes.
+        if (values.get("operation") == "total" and binary_named
                 and low in (0, 1) and high in (0, 1)
-                and numeric.get("unique_count") == (1 if low == high else 2)
+                and (numeric.get("unique_count") == (1 if low == high else 2)
+                     or integer_dtype and numeric.get("unique_count") is None)
                 and _finite(values.get("value")) == _finite(numeric.get("total"))):
             values["verified_binary_count"] = True
     return _unique_facts(facts)

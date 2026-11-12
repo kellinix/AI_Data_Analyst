@@ -167,3 +167,63 @@ def test_unrelated_definition_cannot_hide_an_unknown_chart_code():
     result = present_chart(chart, meta)
     assert 'Source codes TO have no supplied definitions' in result['description']
     assert 'Source codes TA' not in result['description']
+
+
+def test_export_keeps_the_verified_record_name():
+    from app.services.export_charts import normalise_charts
+    from app.services.report_language import present_chart
+    schema = [{'name': 'date', 'is_date': True}, {'name': 'sales', 'is_numeric': True, 'analysis_role': 'metric'},
+              {'name': 'payment'}, {'name': 'branch', 'analysis_role': 'dimension'}]
+    chart = {'type': 'bar', 'xAxis': 'branch', 'yAxis': 'count', 'aggregation': 'count',
+        'echarts_option': {'xAxis': {'type': 'category', 'data': ['A', 'B']},
+                          'yAxis': {'type': 'value'}, 'series': [{'type': 'bar', 'data': [1, 2]}],
+                          '_columns': {'x': 'branch', 'aggregation': 'count'}}}
+    presented = present_chart(chart, {'schema': schema})
+    assert 'sales records' in presented['title']
+    exported = normalise_charts([presented])[0]
+    assert exported.title == presented['title']
+
+
+def test_numeric_dtype_alone_does_not_invent_the_measures_meaning():
+    from app.services.export_charts import normalise_charts
+    from app.services.report_language import present_chart
+    chart = {'type': 'bar', 'xAxis': 'family', 'yAxis': 'region', 'aggregation': 'average',
+        'echarts_option': {'yAxis': {'type': 'category', 'data': ['North']},
+                          'xAxis': {'type': 'value'}, 'series': [{'type': 'bar', 'data': [1.3]}],
+                          '_columns': {'x': 'region', 'y': 'family', 'aggregation': 'average'}}}
+    fields = [{'name': 'family', 'is_numeric': True, 'analysis_role': 'metric', 'semantic_reason': 'Numeric dtype'},
+              {'name': 'region', 'analysis_role': 'dimension'}]
+    result = present_chart(chart, {'schema': fields})
+    assert result['title'] == 'Average recorded value for family by region'
+    assert 'no supplied definition for family' in result['description']
+    assert 'data guide' in result['description']
+    assert normalise_charts([result])[0].title == result['title']
+    fields[0]['data_definition'] = {'label': 'Family support score', 'description': 'Owner-defined support score.'}
+    guided = present_chart(chart, {'schema': fields})
+    assert 'no supplied definition' not in guided['description']
+
+
+def test_standard_bmi_explanation_is_not_called_undefined():
+    from app.services.report_language import present_chart
+    chart = {'type': 'bar', 'xAxis': 'bmi', 'yAxis': 'region', 'aggregation': 'average',
+        'echarts_option': {'yAxis': {'type': 'category', 'data': ['North']},
+                          'xAxis': {'type': 'value'}, 'series': [{'type': 'bar', 'data': [25]}],
+                          '_columns': {'x': 'region', 'y': 'bmi', 'aggregation': 'average'}}}
+    meta = {'schema': [{'name': 'bmi', 'is_numeric': True, 'semantic_reason': 'Numeric dtype'},
+                       {'name': 'region', 'analysis_role': 'dimension'}]}
+    result = present_chart(chart, meta)
+    assert 'compares weight with height' in result['description']
+    assert 'no supplied definition' not in result['description']
+
+
+@pytest.mark.parametrize('dtype,verified', [('BIGINT', True), ('DOUBLE', False)])
+def test_saved_integer_flag_range_proves_binary_count_without_distinct_stat(dtype, verified):
+    from app.services.chat_evidence import build_chat_facts, friendly_chat_content
+    item = SimpleNamespace(row_count=3, column_count=1, insights=[], metadata_={
+        'schema': [{'name': 'is_wicket', 'analysis_role': 'metric', 'dtype': dtype}],
+        'data_profile': {'columns': [{'name': 'is_wicket', 'numeric_summary': {
+            'count': 3, 'total': 2, 'mean': 2/3, 'min': 0, 'max': 1}}]}})
+    total = next(f for f in build_chat_facts(item) if f['values'].get('operation') == 'total')
+    assert bool(total['values'].get('verified_binary_count')) is verified
+    if verified:
+        assert friendly_chat_content([total]) == '2 entries have is wicket set to 1.'
