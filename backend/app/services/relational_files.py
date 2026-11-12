@@ -12,6 +12,18 @@ from app.analytics.identifier_names import canonical_identifier_name
 
 KeyLink = tuple[tuple[str, ...], tuple[str, ...]]
 _GENERIC_KEYS = {"id", "key", "code", "uuid", "guid"}
+_ENTITY_KEYS = {"store", "branch", "shop", "dept", "department"}
+
+
+def _bare_name(column: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", column.casefold())
+
+
+def _unique_bare_names(frame: pl.DataFrame) -> dict[str, str]:
+    grouped: dict[str, list[str]] = {}
+    for column in frame.columns:
+        grouped.setdefault(_bare_name(column), []).append(column)
+    return {name: columns[0] for name, columns in grouped.items() if len(columns) == 1}
 
 
 def _identifier_columns(frame: pl.DataFrame) -> dict[str, str]:
@@ -78,6 +90,15 @@ def _candidate_relationships(
         pairs.extend((column, right[marker]) for name, column in left.items()
                      if name not in _GENERIC_KEYS and name.endswith(marker)
                      and any(name[:-len(marker)].endswith(entity) for entity in entities))
+        # Exports often call the child field PATIENT and the parent field Id.
+        # Require the parent filename to name that exact entity; value overlap
+        # alone must never link unrelated sequential IDs.
+        pairs.extend((column, right[marker]) for column in fact.columns
+                     if _bare_name(column) in entities)
+    left_bare = _unique_bare_names(fact)
+    right_bare = _unique_bare_names(lookup)
+    pairs.extend((left_bare[name], right_bare[name])
+                 for name in sorted(left_bare.keys() & right_bare.keys() & _ENTITY_KEYS))
     pairs = list(dict.fromkeys(pairs))
     singles = [((foreign,), (primary,)) for foreign, primary in pairs]
     candidates = [link for link in singles if _valid_link(fact, lookup, link, allow_unique)]
@@ -86,9 +107,20 @@ def _candidate_relationships(
     unique_parent_columns = {link[1][0] for link in singles
                              if _valid_link(fact, lookup, link, True)}
     remaining = [pair for pair in pairs if pair[1] not in unique_parent_columns]
+    entity_pairs = set(remaining)
+    # A dated entity table may need Store+Date, not Store alone. Dates can
+    # extend a named entity key, never establish an unrelated link by themselves.
+    if remaining:
+        for name in sorted(left_bare.keys() & right_bare.keys() & {"date", "week", "period", "timestamp"}):
+            foreign, primary = left_bare[name], right_bare[name]
+            values = _key(lookup, primary).drop_nulls()
+            if values.len() and values.str.contains(r"^\d{4}[-/]\d{1,2}[-/]\d{1,2}(?:[ T].*)?$").all():
+                remaining.append((foreign, primary))
     if len(remaining) <= 8:
         for size in (2, 3):
             for selected in combinations(remaining, size):
+                if not any(pair in entity_pairs for pair in selected):
+                    continue
                 if len({pair[0] for pair in selected}) != size or len({pair[1] for pair in selected}) != size:
                     continue
                 link = (tuple(pair[0] for pair in selected), tuple(pair[1] for pair in selected))

@@ -10,6 +10,8 @@ from app.analytics.text_matching import contains_keyword
 VOLUME_KEYWORDS = (
     "streams", "plays", "views", "downloads", "clicks", "impressions", "visits",
     "sessions", "requests", "events", "shipments", "deliveries", "attendance",
+    "runs", "wickets", "goals", "assists", "rebounds", "attempts", "errors",
+    "defects", "incidents", "admissions", "discharges", "counts",
 )
 NON_ADDITIVE_KEYWORDS = (
     "average", "avg", "mean", "median", "price", "rate", "ratio", "percent",
@@ -17,6 +19,7 @@ NON_ADDITIVE_KEYWORDS = (
     "margin", "rank", "position", "age", "height", "latitude", "longitude",
     "inventory", "stock", "balance", "cumulative", "lifetime",
     "growth", "change", "conversion", "retention", "churn", "yoy", "mom", "per",
+    "standard_error", "standard_deviation", "variance", "uncertainty", "confidence_interval",
 )
 FLOW_KEYWORDS = (
     "revenue", "sales", "income", "profit", "earnings", "amount", "cost",

@@ -56,6 +56,8 @@ def _friendly_fact(fact: dict[str, Any]) -> str:
         phrases = {"total": "Total" if column.lower() == "total" else f"Total {column}", "mean": f"Average {column}",
                    "weighted_mean": f"Average {column}", "min": f"The lowest {column}",
                    "max": f"The highest {column}"}
+        if operation == "total" and values.get("verified_binary_count"):
+            return f"{display} entries have {column} set to 1."
         if operation in phrases:
             if values.get("column") == "hired" and values.get("is_percent"):
                 return f"{display} of the job applications are marked as hired."
@@ -116,6 +118,8 @@ def explain_fact(fact: dict[str, Any]) -> str:
     column = _label(values.get("display_label") or values.get("column", "this field"))
     operation = values.get("operation")
     if operation == "total":
+        if values.get("verified_binary_count"):
+            return f"We counted entries where {column} is 1. Entries marked 0 or missing are not included."
         return f"We added the filled-in numbers for {column}."
     if operation == "mean":
         return (f"We added the filled-in numbers for {column}. "
@@ -204,6 +208,18 @@ def build_chat_facts(analysis: Any) -> list[dict[str, Any]]:
                 f"({count / rows:.1%} of all {rows:,} records in the {scope}).",
                 f"categorical_stats.{column}.top_values", "Category count / all analysed records * 100",
                 {"column": column, "category": item["value"], "count": int(count), "denominator": rows})
+    for fact in facts:
+        values = fact.get("values") or {}
+        column = values.get("column")
+        numeric = stats["numeric_stats"].get(column, {})
+        low, high = _finite(numeric.get("min")), _finite(numeric.get("max"))
+        # A flag-like name alone does not prove 0/1 coding. Both endpoints
+        # and the exact distinct count must establish that no other codes exist.
+        if (values.get("operation") == "total" and schema.get(column, {}).get("analysis_role") == "flag"
+                and low in (0, 1) and high in (0, 1)
+                and numeric.get("unique_count") == (1 if low == high else 2)
+                and _finite(values.get("value")) == _finite(numeric.get("total"))):
+            values["verified_binary_count"] = True
     return _unique_facts(facts)
 
 

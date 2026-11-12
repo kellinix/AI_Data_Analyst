@@ -63,9 +63,17 @@ def annotate_measure_grain(
         mapped = mapped_column(name)
         if mapped and isinstance(origin, dict):
             selected[mapped] = mapped_origin(origin)
+    linked_keys = set()
+    for resolution in candidates:
+        if not isinstance(resolution, dict) or resolution.get("status") != "enriched":
+            continue
+        for link in resolution.get("joins") or []:
+            linked_keys.update(mapped_column(key) for key in link.get("foreign_keys", []))
     annotated = []
     for field in schema:
         origin = merge_origins(mapped_origin(field.get("measure_grain")), selected.get(field["name"]))
+        if field["name"] in linked_keys:
+            origin["relationship_key"] = True
         annotated.append({**field, "measure_grain": origin} if origin else dict(field))
     return annotated
 

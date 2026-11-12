@@ -122,6 +122,13 @@ def detect_column_semantics(
     normalized = _normalize(semantic_name)
     stats = numeric_stats.get(name, {})
 
+    if (column.get("measure_grain") or {}).get("relationship_key"):
+        # A compound key may include a date or a useful group code. Preserve
+        # those meanings, but prevent opaque foreign IDs from becoming charts.
+        values = (categorical_stats.get(name) or {}).get("top_values") or []
+        if values and all(re.fullmatch(r"[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}", str(v.get("value", ""))) for v in values):
+            return _profile("identifier", 0.99, "Verified relationship key containing opaque record IDs", "identifier")
+
     identifier = canonical_identifier_name(semantic_name)
     if identifier is not None and (
         not identifier.endswith("code") or normalized.startswith("code_") or normalized == "code"
@@ -148,7 +155,7 @@ def detect_column_semantics(
     if re.fullmatch(r"column_\d+", normalized):
         return _profile("unknown", 0.95, "Unnamed source column needs a supplied label", "unknown")
 
-    if normalized in {"store", "store_number", "store_no", "store_num", "branch", "branch_number", "branch_no", "shop", "shop_number"}:
+    if normalized in {"store", "store_number", "store_no", "store_num", "branch", "branch_number", "branch_no", "shop", "shop_number", "dept", "department"}:
         return _profile("categorical_dimension", 0.94, "Column identifies a location or store group", "dimension")
     if normalized in {"shift", "hiring_stage", "appointment_status"}:
         return _profile("categorical_dimension", 0.94, "Named operational group, not a yes/no flag", "dimension")
@@ -174,6 +181,13 @@ def detect_column_semantics(
 
     if _looks_like_identifier(normalized):
         return _profile("identifier", 0.9, "Column name looks like a record identifier", "identifier")
+
+    if normalized in {"number", "no", "num"} and column.get("is_numeric"):
+        return _profile("unresolved_number", 0.8, "A bare number header does not establish what is measured; supply a definition", "unresolved")
+    if normalized in {"grid", "position", "position_order", "rank", "happiness_rank"} and column.get("is_numeric"):
+        return _profile("ordinal_position", 0.9, "A recorded order or position, not an additive quantity", "attribute")
+    if column.get("is_numeric") and contains_keyword(normalized, ("standard_error", "standard_deviation", "variance", "uncertainty", "confidence_interval")):
+        return _profile("average_metric", 0.95, "Statistical uncertainty or spread, not a count of events", "attribute")
     if normalized in SPORT_COUNT_COLUMNS:
         return _profile("numeric_metric", 0.7, "A short numeric field name does not establish its unit or whether values can be added", "metric")
     if column.get("is_numeric") and named_percentage(normalized):

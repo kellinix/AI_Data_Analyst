@@ -48,7 +48,11 @@ _SPARSE_NUMERIC_METRIC_NULL_RATIO = 0.7
 class FileProcessor:
     """Reads uploaded files into DuckDB and Polars for profiling and analysis."""
 
-    SAMPLE_ROWS = 200_000
+    # Whole-file analysis is supported up to one million rows per input.
+    # Above this bound the existing truncation disclosure and strict refusal
+    # to infer relationships from sampled lookup keys still apply.
+    SAMPLE_ROWS = 1_000_000
+    MAX_COMBINED_CELLS = 20_000_000
     HEADER_SCAN_ROWS = 25
 
     def __init__(self, *, data_dictionary_context: dict[str, Any] | None = None, source_name: str | None = None):
@@ -1433,6 +1437,12 @@ class FileProcessor:
         from app.services.relational_files import enrich_related_files
 
         table_sources = relationship_context.pop("_table_sources", [])
+        if sum(frame.height * frame.width for frame in frames) > self.MAX_COMBINED_CELLS:
+            relationship_context["relationship_resolution"] = {
+                "status": "unresolved", "reason_code": "analysis_size_limit",
+                "reason": "These tables contain more than 20 million cells together. Choose fewer columns or a smaller complete date range before linking them.",
+            }
+            return pl.DataFrame()
         if relationship_context.get("source_sample_truncated"):
             relationship_context["combine_strategy"] = "portfolio"
             relationship_context["relationship_resolution"] = {

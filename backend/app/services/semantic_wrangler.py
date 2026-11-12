@@ -391,7 +391,7 @@ def apply_display_metadata_to_charts(
     labels = _column_labels(display_metadata)
     from app.services.report_language import present_chart
 
-    chart_context = statistics if any(field.get("data_definition") for field in (statistics or {}).get("schema", [])) else None
+    chart_context = statistics
     updated = []
     for chart in charts:
         chart_copy = {

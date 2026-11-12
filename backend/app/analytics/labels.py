@@ -19,14 +19,14 @@ import re
 # naming it: "..._including_non_government_costs".
 _QUALIFIER_WORDS = frozenset({
     "including", "includes", "excluding", "excludes", "defined", "definition",
-    "definitions", "using", "based", "where", "which", "whether", "if", "per",
+    "definitions", "using", "based", "where", "which", "whether", "if",
     "versus", "vs", "than",
 })
 
 _ACRONYMS = {
     "ipa": "IPA", "sro": "SRO", "gmpp": "GMPP", "ict": "ICT", "id": "ID",
     "uk": "UK", "eu": "EU", "usd": "USD", "gbp": "GBP", "eur": "EUR",
-    "rd": "R&D", "kpi": "KPI", "vat": "VAT", "hr": "HR",
+    "rd": "R&D", "kpi": "KPI", "vat": "VAT", "hr": "HR", "gdp": "GDP",
     "q1": "Q1", "q2": "Q2", "q3": "Q3", "q4": "Q4",
 }
 
@@ -45,6 +45,11 @@ def derive_label(column: str) -> str:
     >>> derive_label("financial_year_baseline_currency_m_including_non_government_costs")
     'Financial Year Baseline (M)'
     """
+    familiar = {"bmi": "Body mass index (BMI)", "dept": "Department",
+                "encounterclass": "Visit type", "baseencountercost": "Base visit cost"}
+    compact = re.sub(r"[^a-z0-9]", "", str(column).lower())
+    if compact in familiar:
+        return familiar[compact]
     name = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", str(column))
     name = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", name)
     tokens = [token for token in re.split(r"[^A-Za-z0-9]+", name.lower()) if token]
@@ -146,6 +151,12 @@ def source_column_label(field: dict) -> str:
     if not provided and re.search(r"\bnum\b", label, flags=re.I) and field.get("is_numeric") and field.get("analysis_role") == "metric":
         expanded = reader_label(label, field)
         label = expanded[:1].upper() + expanded[1:]
+    # Annual snapshots frequently repeat identical headers. Preserve the
+    # source's explicit year so two different fields never look identical.
+    source = str(origin.get("source_sheet") or origin.get("source_table") or "")
+    years = re.findall(r"(?<!\d)(?:19|20)\d{2}(?!\d)", source)
+    if len(set(years)) == 1 and years[0] not in label:
+        label = f"{label} ({years[0]})"
     return label
 
 

@@ -75,6 +75,7 @@ class ComparisonPlan(BaseModel):
     return_filters: list[ComparisonFilter] = Field(default_factory=list, max_length=8)
     order: Literal["desc", "asc"] = "desc"
     limit: int = Field(default=10, ge=1, le=50)
+    all_groups: bool = False
 
 
 class EntryRequest(BaseModel):
@@ -541,17 +542,21 @@ async def compare(analysis: Any, plan: ComparisonPlan, *, resolve_categories: bo
         if group:
             sql = f"SELECT {query_group} AS group_name, {expression} AS result, {entry_count} AS entries, {supplied} AS supplied, COUNT(*) AS entities FROM {relation} GROUP BY 1"
             group_count = conn.execute(f"SELECT COUNT(*) FROM ({sql})", params).fetchone()[0]
+            if plan.all_groups and group_count > 1000:
+                raise ComparisonUnavailable(f"This question has {group_count:,} groups. I can show up to 1,000 together. Narrow the dates or choose a smaller set of groups to see every result.")
+            display_limit = group_count if plan.all_groups else plan.limit
             result = conn.execute(f"SELECT group_name, result, entries, supplied, COUNT(*) OVER (PARTITION BY result) AS tied, entities FROM ({sql}) ranked"
                                   + f" ORDER BY result {plan.order.upper()} NULLS LAST, group_name NULLS LAST LIMIT ?",
-                                  [*params, max(plan.limit, 2)]).fetchall()
+                                  [*params, max(display_limit, 2)]).fetchall()
         else:
             group_count = 1
+            display_limit = 1
             result = [(None, *conn.execute(f"SELECT {expression}, {entry_count}, {supplied}, COUNT(*) FROM {relation}", params).fetchone())]
         if any(isinstance(row[1], float) and not math.isfinite(row[1]) for row in result):
             raise ValueError("Some values in this measure cannot be used as numbers. Check the file before comparing it.")
         groups = [{"group": _display_group(plan.group_by, r[0], plan.date_bucket, schema[plan.group_by]) if plan.group_by else None,
                    "group_value": str(r[0]) if r[0] is not None else None,
-                   "value": _cell(r[1]), "entries": int(r[2]), "supplied_values": int(r[3])} for r in result[:plan.limit]]
+                   "value": _cell(r[1]), "entries": int(r[2]), "supplied_values": int(r[3])} for r in result[:display_limit]]
         if basis:
             for row, raw in zip(groups, result, strict=False):
                 row["aggregation_entities"] = int(raw[-1])
@@ -780,6 +785,8 @@ def _retention_result(conn: duckdb.DuckDBPyConnection, analysis: Any, plan: Comp
 def comparison_answer(result: dict) -> str:
     """Lead with the measured ranking, including ties beyond the displayed limit."""
     groups, plan = result.get("groups") or [], result.get("plan") or {}
+    if plan.get("all_groups"):
+        return result.get("answer", "")
     if not plan.get("group_by") or not groups or not result.get("matched_entries"):
         return result.get("answer", "")
     first = groups[0]

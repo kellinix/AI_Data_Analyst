@@ -718,7 +718,7 @@ Return only JSON: {"answer_kind": "measured", "fact_ids": [existing IDs]},
 or {"answer_kind": "calculated", "plan": {"aggregation": "sum"|"average"|"count"|"distinct_count"|"weighted_average"|"retention",
 "column": exact field name or null for count, "group_by": exact grouping field or null,
 "filters": [{"column": exact field name, "op": "in"|"between"|"date_between"|"gt"|"gte"|"lt"|"lte", "values": [...]}],
-"order": "desc"|"asc", "limit": 1 to 50}},
+"order": "desc"|"asc", "limit": 1 to 50, "all_groups": true|false}},
 or {"answer_kind": "unavailable", "fact_ids": []}.
 For an explicit question about a supplied field definition or code meaning, use
 {"answer_kind":"definition","columns":[exact saved field names],"code":the explicitly requested raw code}.
@@ -735,6 +735,10 @@ supplying an actual calendar date. Description excerpts help select fields. The
 server retains the complete supplied definitions for definition answers.
 Omit unused optional fields. Filters are arrays, order is asc or desc, and limit
 is an integer. Do not return null for these fields; their defaults are applied.
+Set all_groups=true when the user asks for each, every or all groups, or an
+unranked breakdown by a field. A top/bottom/highest/lowest question uses false.
+The server returns all groups up to its safe response limit instead of silently
+answering a complete breakdown with only the first 50 results.
 For count, column must be null. Put the tested numeric field in filters only.
 Use calculated for a new total, average or ranking by a group or with filters.
 For example, if numeric metric revenue and dimension region exist, the question
@@ -933,7 +937,7 @@ Measured fact catalogue:
                     if isinstance(plan_payload, dict):
                         # Models sometimes use null to mean an omitted optional
                         # default. Keep all other schema validation strict.
-                        defaults = {"order", "limit", "filters", "cohort_filters", "return_filters"}
+                        defaults = {"order", "limit", "all_groups", "filters", "cohort_filters", "return_filters"}
                         plan_payload = {key: value for key, value in plan_payload.items()
                                         if value is not None or key not in defaults}
                         for collection in ("filters", "cohort_filters", "return_filters"):
@@ -950,6 +954,8 @@ Measured fact catalogue:
                         if bucket and plan_payload.get("group_by") in date_fields:
                             plan_payload["date_bucket"] = bucket
                     plan = ComparisonPlan.model_validate(plan_payload)
+                    if plan.group_by and re.search(r"\b(?:each|every|all)\b", user_message, re.I) and not re.search(r"\b(?:top|bottom|highest|lowest|most|least)\b", user_message, re.I):
+                        plan = plan.model_copy(update={"all_groups": True})
                     saved_schema = _schema(metadata)
                     plan = _normalise_filtered_count(plan, saved_schema)
                     plan, grain_bindings = _normalise_source_total_group(plan, saved_schema)

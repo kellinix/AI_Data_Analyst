@@ -15,7 +15,7 @@ from app.analytics.record_context import record_context
 from app.analytics.summary_evidence import _finite, _format
 from app.services.chat_evidence import _friendly_fact, explain_fact
 
-VERSION = "plain_reader_v10"
+VERSION = "plain_reader_v11"
 _AVERAGE_EXPLANATION = "To find an average, we add the supplied numbers and divide by how many there are."
 
 
@@ -218,7 +218,8 @@ def present_chart(
         for index, name in enumerate(value_columns):
             operation = operations[index] if index < len(operations) else aggregation
             action = "total" if operation == "sum" else "average" if operation == "average" else "recorded"
-            measures.append(f"{action} {label(name)}")
+            text = label(name)
+            measures.append(text if text.lower().startswith(action + " ") else f"{action} {text}")
         title = f"{heading(' and '.join(measures))} by {date_label if lifecycle else period}"
         lifecycle_period = f"their {date_label}"
         if period in {"month", "year"} and not date_label.endswith(period):
@@ -301,6 +302,20 @@ def present_chart(
         names = f"{', '.join(code_labels[:-1])} and {code_labels[-1]}"
         description += f" The file calls these figures {names}. Its source guide is needed to explain the codes."
     used_fields = {str(name) for name in [x, y, split, *(result.get("series") or []), *(columns.get("ys") or [])] if name}
+    if any(re.sub(r"[^a-z]", "", str((fields.get(name, {}).get("measure_grain") or {}).get("source_column") or name).lower()) == "bmi" for name in used_fields):
+        description += " Body mass index (BMI) compares weight with height. It is a screening measure, not a diagnosis."
+    # Retain unfamiliar category codes verbatim, and disclose missing meaning
+    # instead of guessing what a source-specific abbreviation stands for.
+    undefined_labels = []
+    for axis, name in (("xAxis", x), ("yAxis", y)):
+        bound_field = {**fields.get(str(name), {}), "data_definition": definitions.get(str(name), {})}
+        for raw in (option.get(axis) or {}).get("data", []):
+            if value_definition(bound_field, raw) is None:
+                undefined_labels.append(str(raw))
+    unknown_codes = sorted({code for text in undefined_labels for code in re.findall(r"\b[A-Z]{2,5}\b", text)
+                            if code not in {"US", "UK", "USA", "USD", "GBP", "EUR", "ID", "BMI"}})
+    if unknown_codes:
+        description += " Source codes " + ", ".join(unknown_codes[:6]) + " have no supplied definitions. A data guide is needed to explain them."
     if kind == "histogram":
         used_fields.add(str(original))
     option["_reader"] = {"version": VERSION, "aggregation": aggregation, "series_by": split,
