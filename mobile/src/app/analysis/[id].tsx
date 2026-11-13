@@ -9,11 +9,14 @@ import { useAuth } from '../../providers/auth';
 import type { Analysis, EvidenceEntryRequest, Insight, ShareLinkResponse } from '../../generated/contracts';
 import { Chart } from '../../components/chart';
 import { Badge, Body, Button, Card, ErrorNotice, Label, Loading, Screen, colors } from '../../components/ui';
+import { AiConsent, useAiConsent } from '../../components/ai-consent';
+import { requireAiConsent } from '../../lib/ai-consent';
 
 export default function AnalysisScreen() {
   const { id: parameter } = useLocalSearchParams<{ id: string }>();
   const id = Array.isArray(parameter) ? parameter[0] : parameter;
   const { session } = useAuth();
+  const aiConsent = useAiConsent(session ? `${session.user.id}:${id}` : '');
   const queryClient = useQueryClient();
   const [actionError, setActionError] = useState<string | null>(null);
   const [exporting, setExporting] = useState<string | null>(null);
@@ -41,7 +44,10 @@ export default function AnalysisScreen() {
     void queryClient.invalidateQueries({ queryKey: ['profile'] });
     router.replace('/(tabs)');
   }, onError: (error) => setActionError(messageOf(error)) });
-  const rerun = useMutation({ mutationFn: () => api<Analysis>(`/analyses/${id}/rerun`, { method: 'POST', timeout: 600_000 }), onSuccess: (analysis) => {
+  const rerun = useMutation({ mutationFn: () => {
+    requireAiConsent(aiConsent.accepted);
+    return api<Analysis>(`/analyses/${id}/rerun`, { method: 'POST', timeout: 600_000 });
+  }, onSuccess: (analysis) => {
     queryClient.setQueryData(['analysis', session?.user.id, id], analysis);
     void queryClient.invalidateQueries({ queryKey: ['analyses'] });
   }, onError: (error) => setActionError(messageOf(error)) });
@@ -79,7 +85,7 @@ export default function AnalysisScreen() {
     {running && status.error && <ErrorNotice message={messageOf(status.error)} retry={() => void status.refetch()} />}
     {actionError && <ErrorNotice message={actionError} />}
     {running && <Card><Loading label={`Preparing your dashboard${status.data ? ` · ${status.data.progress}%` : ''}`} /><Body>You can return to your analyses while the server works.</Body></Card>}
-    {analysis.status === 'failed' && <Card><ErrorNotice message={analysis.error_message || 'This analysis could not be completed.'} /><Button title="Try analysis again" loading={rerun.isPending} onPress={() => rerun.mutate()} /></Card>}
+    {analysis.status === 'failed' && <><AiConsent {...aiConsent} busy={rerun.isPending} /><Card><ErrorNotice message={analysis.error_message || 'This analysis could not be completed.'} /><Button title="Try analysis again" disabled={!aiConsent.accepted} loading={rerun.isPending} onPress={() => rerun.mutate()} /></Card></>}
     {analysis.status === 'completed' && <>
       {recordContext?.description && <Card><Label>What this data is about</Label><Body>{recordContext.description}</Body></Card>}
       <Button title="Ask a question about this data" icon="chatbubble-ellipses-outline" onPress={() => router.push({ pathname: '/chat/[id]', params: { id } })} />

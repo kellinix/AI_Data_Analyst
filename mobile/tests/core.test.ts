@@ -9,6 +9,37 @@ import { chartDocument, chartDocumentHeight } from '../src/lib/chart-document';
 import { analysisSourceLabel, formatMetric } from '../src/lib/format';
 import { installPkceCrypto } from '../src/lib/pkce-crypto';
 import type { Insight } from '../src/generated/contracts';
+import { performAppleSignIn } from '../src/lib/apple-sign-in';
+import { requireAiConsent } from '../src/lib/ai-consent';
+
+test('Apple sign-in sends a hashed nonce to Apple and the raw nonce only to verification', async () => {
+  const values = ['private-nonce', 'request-state'];
+  const calls: unknown[] = [];
+  await performAppleSignIn({
+    random: () => values.shift()!,
+    sha256: async value => `hash(${value})`,
+    authorize: async (nonce, state) => { calls.push({ nonce, state }); return { identityToken: 'signed-token', state }; },
+    exchange: async (token, nonce) => { calls.push({ token, nonce }); return { error: null }; },
+  });
+  assert.deepEqual(calls, [{ nonce: 'hash(private-nonce)', state: 'request-state' }, { token: 'signed-token', nonce: 'private-nonce' }]);
+});
+
+test('Apple sign-in rejects missing tokens and mismatched state without exchanging them', async () => {
+  for (const credential of [{ identityToken: null, state: 'random' }, { identityToken: 'token', state: 'wrong-state' }]) {
+    let exchanges = 0;
+    await assert.rejects(performAppleSignIn({ random: () => 'random', sha256: async () => 'hash', authorize: async () => credential, exchange: async () => { exchanges++; return { error: null }; } }));
+    assert.equal(exchanges, 0);
+  }
+});
+
+test('Apple sign-in propagates rejected server verification', async () => {
+  await assert.rejects(performAppleSignIn({ random: () => 'random', sha256: async () => 'hash', authorize: async () => ({ identityToken: 'token', state: 'random' }), exchange: async () => ({ error: new Error('Rejected token') }) }), /Rejected token/);
+});
+
+test('AI requests require an affirmative consent choice', () => {
+  assert.throws(() => requireAiConsent(false), /share data with OpenAI/);
+  assert.doesNotThrow(() => requireAiConsent(true));
+});
 
 test('native PKCE uses secure randomness and an S256 challenge', async () => {
   const previous = Object.getOwnPropertyDescriptor(globalThis, 'crypto');

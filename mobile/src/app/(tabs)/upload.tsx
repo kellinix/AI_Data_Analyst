@@ -13,9 +13,12 @@ import { useAuth } from '../../providers/auth';
 import type { Analysis, UserProfile } from '../../generated/contracts';
 import { Body, Button, Card, ErrorNotice, Field, Label, Screen, colors } from '../../components/ui';
 import type { DataGuide } from '../../generated/data-guide';
+import { AiConsent, useAiConsent } from '../../components/ai-consent';
+import { requireAiConsent } from '../../lib/ai-consent';
 
 export default function Upload() {
   const { session } = useAuth();
+  const aiConsent = useAiConsent(session?.user.id ?? '');
   const queryClient = useQueryClient();
   const profile = useQuery({ queryKey: ['profile', session?.user.id], queryFn: ({ signal }) => api<UserProfile>('/users/me', { signal }) });
   const [queue, setQueue] = useState<QueuedDocument[]>([]);
@@ -123,12 +126,13 @@ export default function Upload() {
   }
 
   async function create() {
-    if (operationActive.current || !ready || quotaFull || creationUncertain || guide?.error) return;
+    if (operationActive.current || !aiConsent.accepted || !ready || quotaFull || creationUncertain || guide?.error) return;
     operationActive.current = true;
     setBusy(true);
     setError(null);
     setStage('Preparing analysis…');
     try {
+      requireAiConsent(aiConsent.accepted);
       const request = analysisUploadRequest(uploadedFiles, name, context, instructions, clean, guide?.data);
       const analysis = await api<Analysis>(request.path, { method: 'POST', timeout: 600_000, body: request.body });
       void queryClient.invalidateQueries({ queryKey: ['analyses'] });
@@ -203,12 +207,13 @@ export default function Upload() {
       {queue.length > 1 && <Body>These files will form one combined analysis with their source rows preserved, using the same workflow as the website.</Body>}
     </Card>}
     {quotaFull && <ErrorNotice message="You’ve used your analysis allowance for this month. You can create more analyses next month." />}
+    {ready && <AiConsent {...aiConsent} busy={busy} />}
     {error && <ErrorNotice message={error} />}
     {busy && <Body>{stage} {progress > 0 && progress < 100 ? `${progress}%` : ''}</Body>}
     {creationUncertain
       ? <Button title="Check Analyses" variant="secondary" onPress={() => router.push('/(tabs)')} />
       : ready
-        ? <Button title="Create analysis" icon="sparkles-outline" loading={busy} disabled={quotaFull || !!guide?.error} onPress={() => void create()} />
+        ? <Button title="Create analysis" icon="sparkles-outline" loading={busy} disabled={quotaFull || !!guide?.error || !aiConsent.accepted} onPress={() => void create()} />
         : <Button title="Upload and review files" icon="cloud-upload-outline" loading={busy} disabled={queue.length === 0} onPress={() => void prepare()} />}
     {profile.data && <Body>{profile.data.usage.analyses_this_month} of {profile.data.usage.analyses_limit} monthly analyses used.</Body>}
     <Body>Your files are sent to your Vesquiri server for processing. Keep this screen open until the analysis starts.</Body>

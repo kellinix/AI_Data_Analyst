@@ -10,6 +10,7 @@ import { completeAuthCallback } from '../lib/auth-callback';
 import { useAuth } from '../providers/auth';
 import { Body, Button, Card, ErrorNotice, Field, Heading, Screen, colors } from '../components/ui';
 import { LegalLinks } from '../components/legal-links';
+import { AppleSignInButton } from '../components/apple-sign-in-button';
 
 // Keep native Auth redirects stable in development builds as well as releases.
 const authCallbackUrl = Platform.OS === 'web' ? Linking.createURL('auth/callback') : 'zephyr://auth/callback';
@@ -85,6 +86,7 @@ export default function SignIn() {
     </View>}
     <Card><Heading title={mode === 'login' ? 'Welcome back' : mode === 'register' ? 'Create your account' : 'Reset your password'} />
       {mode !== 'reset' && <Button title="Continue with Google" variant="secondary" disabled={busy} onPress={() => void signInWithGoogle()} />}
+      {mode !== 'reset' && <AppleSignInButton busy={busy} setBusy={setBusy} onError={setError} />}
       {mode === 'register' && <Field label="Full name" value={name} onChangeText={setName} autoComplete="name" editable={!busy} />}
       <Field label="Email" value={email} onChangeText={setEmail} keyboardType="email-address" autoCapitalize="none" autoComplete="email" editable={!busy} />
       {mode !== 'reset' && <Field label="Password" value={password} onChangeText={setPassword} secureTextEntry autoCapitalize="none" autoComplete={mode === 'register' ? 'new-password' : 'current-password'} editable={!busy} onSubmitEditing={() => void submit()} />}

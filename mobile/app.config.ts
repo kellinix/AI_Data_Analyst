@@ -9,6 +9,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
     ios: {
       ...config.ios,
       supportsTablet: true,
+      usesAppleSignIn: true,
       bundleIdentifier: process.env.ZEPHYR_IOS_BUNDLE_IDENTIFIER ?? 'com.zephyr.analytics',
       infoPlist: { ITSAppUsesNonExemptEncryption: false, ...(development ? { NSAppTransportSecurity: { NSAllowsLocalNetworking: true, NSAllowsArbitraryLoads: true } } : {}) },
     },
@@ -20,7 +21,7 @@ export default ({ config }: ConfigContext): ExpoConfig => {
       adaptiveIcon: { foregroundImage: './assets/android-icon-foreground.png', monochromeImage: './assets/android-icon-monochrome.png', backgroundColor: '#F6F8FC' },
     },
     plugins: [
-      'expo-router', 'expo-secure-store', 'expo-dev-client', 'expo-font', 'expo-sharing', 'expo-iap',
+      'expo-router', 'expo-secure-store', 'expo-dev-client', 'expo-font', 'expo-sharing', 'expo-iap', 'expo-apple-authentication',
       ['expo-build-properties', { android: { usesCleartextTraffic: development } }],
     ],
     web: { ...config.web, bundler: 'metro', output: 'single', name: 'Vesquiri' },
