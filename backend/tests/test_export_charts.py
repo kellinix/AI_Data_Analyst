@@ -15,6 +15,37 @@ from app.services.export_service import build_excel_report, build_pdf_report
 from app.services.report_language import present_chart
 
 
+def test_long_pdf_categories_stay_distinguishable_and_keep_full_names():
+    from app.services.export_charts import PdfChart
+
+    labels = ['Trailers,Commentaries,Deleted Scenes',
+              'Trailers,Commentaries,Deleted Scenes,Behind the Scenes']
+    chart = {'type': 'bar', 'title': 'Payments by features', 'xAxis': 'Amount', 'yAxis': 'Features',
+             'echarts_option': {'yAxis': {'type': 'category', 'data': labels},
+                               'series': [{'name': 'Amount', 'data': [10, 20]}]}}
+    drawing = PdfChart(normalise_charts([chart])[0])
+    assert drawing.label_key == [(1, labels[0]), (2, labels[1])]
+    assert drawing._category_label(labels[0], 0, 35) != drawing._category_label(labels[1], 1, 35)
+    pdf = build_pdf_report(name='Long labels', row_count=2, column_count=2,
+                           summary=None, insights=[], charts=[chart])
+    content = b'\n'.join(zlib.decompress(base64.a85decode(stream.strip(), adobe=True))
+                         for stream in re.findall(rb'stream\n(.*?)endstream', pdf, re.S))
+    assert b'Full labels for' in content
+    assert labels[1].encode() in content
+
+
+def test_vertical_category_charts_identify_every_bar():
+    from app.services.export_charts import PdfChart
+
+    labels = ['North', 'South', 'East', 'West', 'Central']
+    chart = {'type': 'bar', 'title': 'Orders', 'xAxis': 'Region', 'yAxis': 'Orders',
+             'echarts_option': {'xAxis': {'type': 'category', 'data': labels},
+                               'series': [{'name': 'Orders', 'data': [10, 20, 30, 40, 50]}]}}
+    drawing = PdfChart(normalise_charts([chart])[0])
+    assert drawing.numbered_categories
+    assert drawing.label_key == list(enumerate(labels, 1))
+
+
 def _charts() -> list[dict]:
     return [
         {"type": "line", "title": "Revenue over time", "xAxis": "Week", "yAxis": "Revenue",

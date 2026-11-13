@@ -15,7 +15,7 @@ from app.analytics.record_context import record_context
 from app.analytics.summary_evidence import _finite, _format
 from app.services.chat_evidence import _friendly_fact, explain_fact
 
-VERSION = "plain_reader_v12"
+VERSION = "plain_reader_v13"
 _AVERAGE_EXPLANATION = "To find an average, we add the supplied numbers and divide by how many there are."
 
 
@@ -183,7 +183,7 @@ def present_chart(
                 description += " The percentage uses entries with a supplied value."
         else:
             wording = measure(value)
-            description = f"Each bar shows {wording} for one {group} group."
+            description = f"Each bar shows {wording} for entries with the same {group}."
             if aggregation == "average":
                 description += " " + _AVERAGE_EXPLANATION
             elif aggregation == "sum":

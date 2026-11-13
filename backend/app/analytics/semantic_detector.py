@@ -202,6 +202,27 @@ def detect_column_semantics(
     if normalized.startswith("is_") or normalized.startswith("has_") or normalized.endswith("_flag"):
         return _profile("boolean", 0.82, "Column name looks like a boolean flag", "flag")
 
+    # A measurable value can describe an item, country or category. Those
+    # nouns must not turn the number into a label. Keep bounded codes and
+    # explicit identifier/rate rules above; do not infer money or its unit.
+    if (column.get("is_numeric") and (normalized == "value" or normalized.endswith("_value"))
+            and not _looks_like_categorical_code(column, stats)
+            and not any(contains_keyword(normalized, rule.keywords) for rule in RULES
+                        if rule.semantic_type in {"currency", "percentage"})):
+        return _profile("numeric_metric", 0.8, "Numeric dtype", "metric")
+
+    # Short titles name films, books, courses and other things people can
+    # compare. Long prose remains text; title alone is not an identifier.
+    if not column.get("is_numeric") and (normalized == "title" or normalized.endswith("_title")):
+        title_stats = categorical_stats.get(name) or {}
+        values = title_stats.get("top_values") or []
+        short_titles = (0 < (title_stats.get("max_length") or 0) <= 160
+                        and not title_stats.get("multiline")) if "max_length" in title_stats else (
+            bool(values) and all(0 < len(str(item.get("value", "")).strip()) <= 160
+                                 and "\n" not in str(item.get("value", "")) for item in values))
+        if short_titles:
+            return _profile("categorical_dimension", 0.84, "Short recorded titles can be compared as labels", "dimension")
+
     if "description" in normalized or normalized in {"summary", "title", "headline"}:
         return _profile("text", 0.78, "Column name looks like descriptive text", "text")
 

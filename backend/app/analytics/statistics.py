@@ -358,6 +358,18 @@ class StatisticsEngine:
                     }
                 else:
                     stats[col] = {"unique_count": unique_count, "top_values": []}
+                # Titles can be useful labels even when a catalogue has more
+                # than fifty of them. Measure all supplied text lengths rather
+                # than mistaking the deliberately empty top-values list for
+                # evidence that these are long narrative fields.
+                if _name_tokens(col)[-1:] == ["title"]:
+                    shape = self.conn.execute(f"""
+                        SELECT MAX(LENGTH(CAST({safe_col} AS VARCHAR))),
+                            BOOL_OR(CONTAINS(CAST({safe_col} AS VARCHAR), CHR(10))
+                                OR CONTAINS(CAST({safe_col} AS VARCHAR), CHR(13)))
+                        FROM {_quote_identifier(self.table)}
+                    """).fetchone()
+                    stats[col].update(max_length=shape[0], multiline=bool(shape[1]))
             except Exception as exc:
                 logger.debug("Categorical stats failed for column", col=col, exc=str(exc))
         return stats

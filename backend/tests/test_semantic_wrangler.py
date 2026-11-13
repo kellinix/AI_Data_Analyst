@@ -243,7 +243,7 @@ def test_sales_amount_bar_caption_uses_its_display_label():
     display = {"columns": [{"name": "total", "label": "Sales Amount"},
                            {"name": "branch", "label": "Branch"}], "charts": []}
     shown = apply_display_metadata_to_charts([chart], display)[0]
-    assert shown["description"] == "Each bar shows total sales amount for one branch group. We add the supplied numbers in each group."
+    assert shown["description"] == "Each bar shows total sales amount for entries with the same branch. We add the supplied numbers in each group."
 
 
 def test_sales_payment_method_label_overrides_raw_cash_type_title():
@@ -254,4 +254,4 @@ def test_sales_payment_method_label_overrides_raw_cash_type_title():
                "charts": [{"id": "payment", "title": "Money by Cash Type"}]}
     shown = apply_display_metadata_to_charts([chart], display)[0]
     assert shown["title"] == "Total sales amount by payment method"
-    assert shown["description"] == "Each bar shows total sales amount for one payment method group. We add the supplied numbers in each group."
+    assert shown["description"] == "Each bar shows total sales amount for entries with the same payment method. We add the supplied numbers in each group."

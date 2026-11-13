@@ -152,8 +152,15 @@ def build_pdf_report(
             parts.append(Paragraph(escape(chart.title), styles["Heading3"]))
             if chart.description:
                 parts.append(Paragraph(escape(chart.description), body))
-            parts.extend([Spacer(1, 6), PdfChart(chart), Spacer(1, 10)])
+            drawing = PdfChart(chart)
+            if drawing.label_key:
+                parts.append(Paragraph("Numbered labels have their full names listed after this chart.", body))
+            parts.extend([Spacer(1, 6), drawing, Spacer(1, 10)])
             story.append(KeepTogether(parts))
+            if drawing.label_key:
+                story.append(Paragraph(f"Full labels for {escape(chart.title)}", item_heading))
+                for number, label in drawing.label_key:
+                    story.append(Paragraph(f"[{number}] {escape(label)}", body))
 
     kpis = _kpi_insights(insights)
     if kpis:

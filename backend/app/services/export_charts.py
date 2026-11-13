@@ -178,6 +178,18 @@ class PdfChart(Flowable):
         self.height = (max(95, len(chart.categories) * 23 + 45) if chart.horizontal
                        else max(250, len(chart.categories) * 18 + 38) if chart.kind == "donut"
                        else 250)
+        self.numbered_categories = chart.kind not in {"line", "scatter", "donut"} and not chart.horizontal and len(chart.categories) > 3
+        labels = (chart.category_labels or chart.categories) if chart.horizontal or self.numbered_categories else (
+            chart.series_labels or [name for name, _ in chart.series]) if chart.kind == "donut" else []
+        limit = 35 if chart.horizontal else 23
+        self.label_key = [(index + 1, label) for index, label in enumerate(labels)
+                          if self.numbered_categories or _short(label, limit) != label]
+
+    def _category_label(self, label: str, index: int, limit: int) -> str:
+        if any(number == index + 1 for number, _ in self.label_key):
+            prefix = f"[{index + 1}] "
+            return prefix + _short(label, limit - len(prefix))
+        return label
 
     def draw(self) -> None:
         if self.chart.kind == "donut":
@@ -215,7 +227,7 @@ class PdfChart(Flowable):
         count = len(chart.categories)
         if not count:
             return
-        for index in {0, count // 2, count - 1}:
+        for index in range(count) if self.numbered_categories else {0, count // 2, count - 1}:
             x = x0 + w * (index / max(1, count - 1) if chart.kind == "line" else (index + .5) / count)
             c.setFillColor(colors.HexColor("#716B86"))
             c.setFont("Helvetica", 7)
@@ -225,7 +237,7 @@ class PdfChart(Flowable):
                     label = datetime.fromisoformat(label).strftime("%b %Y")
                 except ValueError:
                     pass
-            c.drawCentredString(x, y0 - 13, _short(label, 16))
+            c.drawCentredString(x, y0 - 13, f"[{index + 1}]" if self.numbered_categories else _short(label, 16))
         baseline = y0 + h * (0 - low) / (high - low)
         for series_index, (name, data) in enumerate(chart.series):
             name = chart.series_labels[series_index] if chart.series_labels else name
@@ -274,7 +286,7 @@ class PdfChart(Flowable):
             y = y0 + (index + .5) * 23
             c.setFont("Helvetica", 8)
             c.setFillColor(colors.HexColor("#29213F"))
-            c.drawRightString(x0 - 9, y - 2, _short(label, 35))
+            c.drawRightString(x0 - 9, y - 2, self._category_label(label, index, 35))
             for series_index, (_, data) in enumerate(chart.series):
                 value = data[index]
                 if value is None:
@@ -311,7 +323,7 @@ class PdfChart(Flowable):
             c.rect(250, legend_y, 8, 8, fill=1, stroke=0)
             c.setFillColor(colors.HexColor("#29213F"))
             c.setFont("Helvetica", 8)
-            c.drawString(263, legend_y + 1, f"{_short(name, 23)}  {_tick(value)}")
+            c.drawString(263, legend_y + 1, f"{self._category_label(name, index, 23)}  {_tick(value)}")
         c.setFillColor(colors.white)
         c.circle(135, center_y, 51, fill=1, stroke=0)
 
