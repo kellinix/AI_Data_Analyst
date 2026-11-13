@@ -8,7 +8,7 @@ export default function PrivacyPage() {
   return (
     <LegalPage title="Vesquiri privacy policy">
       <p>VisaAtlas Ltd operates Vesquiri and is responsible for the personal information described in this notice. This policy covers our website and Android and iOS apps. For privacy questions or requests, email <a href="mailto:visaatlasdigital@gmail.com">visaatlasdigital@gmail.com</a>.</p>
-      <p>The current closed-test build uses a staging environment. Please use sample data and do not upload sensitive personal information or confidential records during testing.</p>
+      <p>Only upload information you are authorised to use. Review your files before uploading and remove personal or confidential information that is not needed for your analysis.</p>
 
       <h2>Information we process</h2>
       <ul>
@@ -27,7 +27,7 @@ export default function PrivacyPage() {
 
       <h2>AI processing and service providers</h2>
       <p>Vesquiri uses OpenAI for AI features. Depending on the feature, processing can include dataset labels and values, statistical summaries, file descriptions, instructions, questions and relevant conversation history. Do not include information you are not authorised to send for this processing.</p>
-      <p>Supabase provides authentication. Railway hosts the staging service. Our infrastructure, database and error-monitoring providers process information needed to provide and maintain the service. Providers may process information outside the UK. Contact us for details of the locations and transfer safeguards applicable to your information.</p>
+      <p>Supabase provides authentication. Railway hosts the service. Our infrastructure, database and error-monitoring providers process information needed to provide and maintain the service. Providers may process information outside the UK. Contact us for details of the locations and transfer safeguards applicable to your information.</p>
       <p>We do not sell your personal information or use it for advertising. We may disclose information when required by law or to protect the service and its users.</p>
       <p>Stripe processes website payments. Apple and Google process purchases made through their respective app stores and handle payment information under their own privacy policies. We check purchase status with the relevant provider to deliver access, process renewals and respond to refunds.</p>
 

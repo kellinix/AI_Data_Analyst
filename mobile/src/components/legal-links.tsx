@@ -2,11 +2,11 @@ import { useState } from 'react';
 import * as Linking from 'expo-linking';
 import { Body, Button, Card, ErrorNotice, Label } from './ui';
 
-// Public policy pages for the current staging closed test.
+// Public policy pages shared by the website and store releases.
 const legalPages = [
-  { title: 'Privacy policy', url: 'https://zephyr-web-staging.up.railway.app/privacy' },
-  { title: 'Terms of use', url: 'https://zephyr-web-staging.up.railway.app/terms' },
-  { title: 'Account and data deletion', url: 'https://zephyr-web-staging.up.railway.app/delete-account' },
+  { title: 'Privacy policy', url: 'https://vesquiri.com/privacy' },
+  { title: 'Terms of use', url: 'https://vesquiri.com/terms' },
+  { title: 'Account and data deletion', url: 'https://vesquiri.com/delete-account' },
 ] as const;
 
 export function LegalLinks() {
