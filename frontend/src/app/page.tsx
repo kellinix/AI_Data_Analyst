@@ -9,6 +9,7 @@ import { ProcessingAnimation } from "@/components/upload/processing-animation"
 import { BrandLogo } from "@/components/layout/brand-logo"
 import { useCreateAnalysis } from "@/hooks/use-analyses"
 import { uploadsApi } from "@/lib/api/uploads"
+import { createClient } from "@/lib/supabase/client"
 import type { UploadedFile } from "@/types"
 
 type PageState = "idle" | "uploading" | "processing" | "done"
@@ -30,6 +31,20 @@ function getErrorMessage(error: unknown): string {
   return "Please try again or check the backend logs."
 }
 
+function isAuthError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "response" in error &&
+    typeof error.response === "object" &&
+    error.response !== null &&
+    "status" in error.response &&
+    error.response.status === 401
+  )
+}
+
+const SIGN_IN_FOR_UPLOAD = "/login?redirectTo=%2Fupload"
+
 export default function LandingPage() {
   const router = useRouter()
   const [state, setState] = useState<PageState>("idle")
@@ -38,6 +53,21 @@ export default function LandingPage() {
 
   const handleFileAccepted = useCallback(
     async (file: File) => {
+      // Uploads are tied to an account. A visitor who is not signed in would
+      // only get a raw "Not authenticated" error back, so send them to sign in
+      // first and bring them to the upload page afterwards.
+      const supabase = createClient()
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
+      if (!session) {
+        toast("Sign in to analyze your file", {
+          description: "It's free. You'll go straight to upload after.",
+        })
+        router.push(SIGN_IN_FOR_UPLOAD)
+        return
+      }
+
       setState("uploading")
       try {
         const uploaded: UploadedFile = await uploadsApi.uploadFile(file)
@@ -60,6 +90,12 @@ export default function LandingPage() {
         router.push(`/analysis/${analysis.id}`)
       } catch (error) {
         console.error("Upload or analysis creation failed", error)
+        if (isAuthError(error)) {
+          toast("Your session ended. Please sign in again.")
+          setState("idle")
+          router.push(SIGN_IN_FOR_UPLOAD)
+          return
+        }
         toast.error("Upload failed", {
           description: getErrorMessage(error),
         })
