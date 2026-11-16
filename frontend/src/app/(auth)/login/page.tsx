@@ -1,5 +1,6 @@
 import type { Metadata } from "next"
 import { Suspense } from "react"
+import { AuthSwitchLink } from "@/components/auth/auth-switch-link"
 import { LoginForm } from "@/components/auth/login-form"
 
 export const metadata: Metadata = {
@@ -22,12 +23,9 @@ export default function LoginPage() {
       </Suspense>
       <p className="text-center text-sm text-zinc-500">
         Don&apos;t have an account?{" "}
-        <a
-          href="/register"
-          className="font-medium text-blue-600 hover:text-blue-500 dark:text-blue-400"
-        >
-          Sign up free
-        </a>
+        <Suspense fallback={null}>
+          <AuthSwitchLink to="/register">Sign up free</AuthSwitchLink>
+        </Suspense>
       </p>
     </div>
   )

@@ -4,7 +4,7 @@ import { useState } from "react"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { motion } from "framer-motion"
 import { Eye, EyeOff, Loader2 } from "lucide-react"
 import { toast } from "sonner"
@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Separator } from "@/components/ui/separator"
 import { createClient } from "@/lib/supabase/client"
+import { safeRedirect } from "@/lib/safe-redirect"
 
 const schema = z.object({
   full_name: z.string().min(2, "Name must be at least 2 characters"),
@@ -30,6 +31,9 @@ const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"
 
 export function RegisterForm() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const redirectTo = safeRedirect(searchParams.get("redirectTo"))
+  const callbackUrl = `${APP_URL}/auth/callback?redirectTo=${encodeURIComponent(redirectTo)}`
   const [showPassword, setShowPassword] = useState(false)
   const [isGoogleLoading, setIsGoogleLoading] = useState(false)
   const supabase = createClient()
@@ -43,20 +47,28 @@ export function RegisterForm() {
   })
 
   const onSubmit = async (values: RegisterFormValues) => {
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email: values.email,
       password: values.password,
       options: {
         data: { full_name: values.full_name },
-        emailRedirectTo: `${APP_URL}/auth/callback`,
+        emailRedirectTo: callbackUrl,
       },
     })
     if (error) {
       toast.error(error.message)
       return
     }
+    if (data.session) {
+      // Email confirmation is off, so the visitor is signed in already.
+      router.push(redirectTo)
+      router.refresh()
+      return
+    }
+    // Email confirmation is on. The link in the email returns through
+    // /auth/callback and lands on redirectTo.
     toast.success("Check your email to confirm your account")
-    router.push("/dashboard")
+    router.push(`/login?redirectTo=${encodeURIComponent(redirectTo)}`)
   }
 
   const handleGoogleSignUp = async () => {
@@ -64,7 +76,7 @@ export function RegisterForm() {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: `${APP_URL}/auth/callback`,
+        redirectTo: callbackUrl,
       },
     })
     if (error) {
