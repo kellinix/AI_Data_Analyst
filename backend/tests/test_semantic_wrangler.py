@@ -255,3 +255,19 @@ def test_sales_payment_method_label_overrides_raw_cash_type_title():
     shown = apply_display_metadata_to_charts([chart], display)[0]
     assert shown["title"] == "Sales Amount by Payment Method"
     assert shown["description"] == "Total sales amount for each payment method."
+
+
+def test_camel_case_source_headers_become_spaced_labels_without_renaming_columns():
+    from app.services.semantic_wrangler import _fallback_display_metadata
+
+    statistics = {"schema": [
+        {"name": "monthlycharges", "is_numeric": True, "is_date": False},
+        {"name": "seniorcitizen", "is_numeric": True, "is_date": False},
+        {"name": "tenure", "is_numeric": True, "is_date": False},
+    ]}
+    context = {"cleaning": {"report": {"renamed_columns": {
+        "MonthlyCharges": "monthlycharges", "SeniorCitizen": "seniorcitizen", "Tenure": "tenure",
+    }}}}
+    display = _fallback_display_metadata(statistics, [], context)
+    labels = {item["name"]: item["label"] for item in display["columns"]}
+    assert labels == {"monthlycharges": "Monthly Charges", "seniorcitizen": "Senior Citizen", "tenure": "Tenure"}

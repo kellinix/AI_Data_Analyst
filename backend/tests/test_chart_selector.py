@@ -358,3 +358,27 @@ def test_dense_metric_over_time_still_uses_a_smoothed_line():
     series = time_chart["echarts_option"]["series"][0]
     assert series["smooth"] is True
     assert "opacity" not in series.get("lineStyle", {})
+
+
+def test_outcome_rate_is_split_by_the_group_that_changes_it_most():
+    import duckdb
+
+    from app.analytics.chart_selector import _outcome_rate_bar_chart, refine_outcome_split
+
+    conn = duckdb.connect()
+    conn.execute("CREATE TABLE data (gender VARCHAR, contract VARCHAR, churn VARCHAR)")
+    rows = []
+    for gender in ("Male", "Female"):
+        rows += [(gender, "Monthly", "Yes")] * 40 + [(gender, "Monthly", "No")] * 60
+        rows += [(gender, "Yearly", "Yes")] * 3 + [(gender, "Yearly", "No")] * 97
+    conn.executemany("INSERT INTO data VALUES (?, ?, ?)", rows)
+    schema = [
+        {"name": "gender", "is_numeric": False, "is_date": False, "analysis_role": "flag"},
+        {"name": "contract", "is_numeric": False, "is_date": False, "analysis_role": "dimension"},
+        {"name": "churn", "is_numeric": False, "is_date": False, "analysis_role": "flag"},
+    ]
+    stats = {"gender": {"unique_count": 2}, "contract": {"unique_count": 2}, "churn": {"unique_count": 2}}
+    chart = _outcome_rate_bar_chart("gender", "churn")
+    refined = refine_outcome_split(conn, [chart], schema, stats, len(rows))
+    assert refined[0]["yAxis"] == "contract"
+    assert refined[0]["id"] == chart["id"]

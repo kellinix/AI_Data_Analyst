@@ -36,7 +36,7 @@ from app.analytics.analysis_evidence import (
     select_recommendations,
 )
 from app.analytics.anomaly_detection import detect_anomalies
-from app.analytics.chart_selector import _horizontal_bar_chart, select_charts
+from app.analytics.chart_selector import _horizontal_bar_chart, refine_outcome_split, select_charts
 from app.analytics.chart_specs import attach_visual_specs
 from app.analytics.football_context import (
     clarify_football_chart,
@@ -483,6 +483,9 @@ async def compute_analysis(
             if (statistics.get("categorical_stats", {}).get("clinic", {}).get("unique_count", 0) >= 2
                     and statistics.get("numeric_stats", {}).get("wait_minutes", {}).get("count", 0) > 0):
                 charts.append(_horizontal_bar_chart("clinic", "wait_minutes", aggregation="average"))
+        charts = refine_outcome_split(
+            conn, charts, statistics["schema"], statistics["categorical_stats"], statistics["row_count"]
+        )
         charts = _populate_charts(conn, charts)
         semantic_display = await SemanticWrangler().build_display_metadata(
             file_name=file_name,

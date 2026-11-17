@@ -541,5 +541,5 @@ def test_outcome_rate_chart_counts_yes_in_a_text_column():
         "_columns": {"x": "contract", "y": "churn", "orientation": "horizontal", "aggregation": "percent_rate"}}}
     assert populate_chart_option(conn, chart)
     option = chart["echarts_option"]
-    rates = dict(zip(option["yAxis"]["data"], option["series"][0]["data"]))
+    rates = dict(zip(option["yAxis"]["data"], option["series"][0]["data"], strict=True))
     assert rates == {"Monthly": pytest.approx(66.67, abs=0.01), "Yearly": 0}

@@ -18,6 +18,9 @@ from app.analytics.labels import derive_label, sentence_label
 from app.analytics.report_relevance import useful_charts
 from app.analytics.survey_context import survey_fields
 from app.analytics.text_matching import is_unreported_category
+from app.core.logging import get_logger
+
+logger = get_logger(__name__)
 
 # A numeric column null on more than this fraction of rows is sparse/
 # optional data (e.g. a field only some records ever populate), not a
@@ -333,6 +336,59 @@ def _is_chart_dimension(
     if unique_count < 2 or unique_count > (8 if role == "flag" else 500):
         return False
     return True
+
+
+def refine_outcome_split(
+    conn: Any,
+    charts: list[dict[str, Any]],
+    schema: list[dict[str, Any]],
+    categorical_stats: dict[str, Any],
+    row_count: int,
+) -> list[dict[str, Any]]:
+    """Split an outcome rate by the group that changes it most.
+
+    The outcome rate chart used the first ranked dimension, so a churn file
+    showed churn by gender (26% vs 27%) instead of by contract (43% vs 3%).
+    Small groups are ignored so one rare value cannot win on its own."""
+    from app.analytics.category_values import category_expression
+    from app.analytics.live_filter import outcome_rate_expression
+    from app.analytics.sql_utils import quote_identifier
+
+    candidates = [
+        c["name"] for c in schema
+        if _is_chart_dimension(c, categorical_stats)
+        and 2 <= categorical_stats.get(c["name"], {}).get("unique_count", 0) <= 15
+    ]
+    min_group = max(30, int(row_count * 0.02))
+    for index, chart in enumerate(charts):
+        if chart.get("type") != "bar" or chart.get("aggregation") != "percent_rate":
+            continue
+        outcome = chart.get("xAxis")
+        if not outcome or not is_outcome_column(_normalize(outcome)):
+            continue
+        best, best_spread = chart.get("yAxis"), -1.0
+        for column in candidates:
+            if column == outcome:
+                continue
+            group = category_expression(column)
+            try:
+                rates = [row[0] for row in conn.execute(f"""
+                    SELECT {outcome_rate_expression(quote_identifier(outcome))}
+                    FROM data
+                    WHERE {group} IS NOT NULL AND {quote_identifier(outcome)} IS NOT NULL
+                    GROUP BY {group}
+                    HAVING COUNT(*) >= {min_group}
+                """).fetchall() if row[0] is not None]
+            except Exception as exc:  # noqa: BLE001 - keep the default split
+                logger.debug("Outcome split query failed", column=column, exc=str(exc))
+                continue
+            if len(rates) >= 2 and max(rates) - min(rates) > best_spread:
+                best, best_spread = column, max(rates) - min(rates)
+        if best and best != chart.get("yAxis"):
+            replacement = _outcome_rate_bar_chart(best, outcome)
+            replacement["id"] = chart["id"]
+            charts[index] = replacement
+    return charts
 
 
 def _dimension_score(column: str, categorical_stats: dict[str, Any]) -> float:

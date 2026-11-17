@@ -275,7 +275,7 @@ class SemanticWrangler:
         upload_context: dict[str, Any] | None,
     ) -> dict[str, Any]:
         """Use one LLM pass to decipher terse schema names into display labels."""
-        fallback = _fallback_display_metadata(statistics, charts)
+        fallback = _fallback_display_metadata(statistics, charts, upload_context)
         if not settings.semantic_wrangling_enabled:
             return fallback
 
@@ -531,9 +531,24 @@ def _profile_dataframe(df: pl.DataFrame) -> dict[str, Any]:
     return {"row_count": df.height, "column_count": len(df.columns), "columns": columns}
 
 
+def _source_header_label(name: str, upload_context: Any) -> str:
+    """Label a column from its CamelCase source header when it had one.
+
+    Cleaning lowercases "MonthlyCharges" to "monthlycharges", which used to
+    show as "Monthlycharges". The column key stays as it is, because other
+    rules match on it; only the words people see are split."""
+    report = ((upload_context or {}).get("cleaning") or {}).get("report") or {} if isinstance(upload_context, dict) else {}
+    originals = {new: original for original, new in (report.get("renamed_columns") or {}).items()}
+    source = str(originals.get(name, name))
+    if not re.search(r"[a-z][A-Z]", source):
+        return ""
+    return derive_label(re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", source))
+
+
 def _fallback_display_metadata(
     statistics: dict[str, Any],
     charts: list[dict[str, Any]],
+    upload_context: Any = None,
 ) -> dict[str, Any]:
     from app.analytics.record_context import record_context
 
@@ -562,7 +577,8 @@ def _fallback_display_metadata(
                 else FOOTBALL_LABELS[str(column.get("name"))]
                 if football and column.get("name") in FOOTBALL_LABELS
                 else "Wait time for attended appointments (minutes)" if clinic_wait and column.get("name") == "wait_minutes"
-                else derive_label(str(column.get("name")))
+                else (None if football else _source_header_label(str(column.get("name")), upload_context))
+                or derive_label(str(column.get("name")))
                 or _humanize_identifier(str(column.get("name")))
             ),
             "description": None,
