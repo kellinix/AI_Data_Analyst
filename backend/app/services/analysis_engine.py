@@ -455,6 +455,7 @@ async def compute_analysis(
         kpis = detect_kpis(
             schema=statistics["schema"],
             numeric_stats=statistics["numeric_stats"],
+            categorical_stats=statistics["categorical_stats"],
         )
         if is_football(statistics["schema"]):
             kpis = football_kpis(statistics)

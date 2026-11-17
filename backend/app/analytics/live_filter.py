@@ -225,7 +225,13 @@ def _populate_bar(
     x_identifier, y_identifier = category_expression(x_col), _quote_identifier(y_col)
     aggregation = cols.get("aggregation", "sum")
     if aggregation == "percent_rate":
-        agg_expr = f"100.0 * AVG({y_identifier})"
+        # Numbers average as before; a Yes/No text outcome counts Yes as 1.
+        text = f"LOWER(TRIM(CAST({y_identifier} AS VARCHAR)))"
+        agg_expr = (
+            f"100.0 * AVG(COALESCE(TRY_CAST({y_identifier} AS DOUBLE), "
+            f"CASE WHEN {text} IN ('yes', 'y', 'true') THEN 1.0 "
+            f"WHEN {text} IN ('no', 'n', 'false') THEN 0.0 END))"
+        )
     elif aggregation == "average":
         agg_expr = f"AVG({y_identifier})"
     else:

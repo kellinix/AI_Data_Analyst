@@ -530,3 +530,16 @@ async def test_analysis_engine_populate_chart_data_retains_columns_spec():
     assert len(populated) == 1
     assert populated[0]["echarts_option"]["series"][0]["data"] != []
     assert "_columns" in populated[0]["echarts_option"]
+
+
+def test_outcome_rate_chart_counts_yes_in_a_text_column():
+    conn = duckdb.connect()
+    conn.execute("CREATE TABLE data (contract VARCHAR, churn VARCHAR)")
+    conn.execute("INSERT INTO data VALUES ('Monthly','Yes'),('Monthly','No'),('Monthly','Yes'),('Yearly','No'),('Yearly','No')")
+    chart = {"type": "bar", "echarts_option": {
+        "yAxis": {"type": "category", "data": []}, "series": [{"type": "bar", "data": []}],
+        "_columns": {"x": "contract", "y": "churn", "orientation": "horizontal", "aggregation": "percent_rate"}}}
+    assert populate_chart_option(conn, chart)
+    option = chart["echarts_option"]
+    rates = dict(zip(option["yAxis"]["data"], option["series"][0]["data"]))
+    assert rates == {"Monthly": pytest.approx(66.67, abs=0.01), "Yearly": 0}

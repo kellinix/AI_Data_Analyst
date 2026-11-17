@@ -26,7 +26,7 @@ class SemanticRule:
 
 
 RULES: tuple[SemanticRule, ...] = (
-    SemanticRule("currency", ("revenue", "sales", "profit", "price", "amount", "cost", "expense", "gmv", "arr", "mrr"), 0.92),
+    SemanticRule("currency", ("revenue", "sales", "profit", "price", "amount", "cost", "expense", "gmv", "arr", "mrr", "money"), 0.92),
     SemanticRule("percentage", ("percent", "percentage", "rate", "margin", "conversion", "churn", "retention"), 0.88),
     SemanticRule("country", ("country", "nation", "market"), 0.86),
     SemanticRule("city", ("city", "town", "metro"), 0.84),
@@ -131,6 +131,15 @@ def detect_column_semantics(
 
     for rule in RULES:
         if contains_keyword(normalized, rule.keywords):
+            # A Yes/No "Churn" or "Converted" column is an outcome flag. Its
+            # name matches the percentage vocabulary, but text cannot be a
+            # metric, so it used to become an unused dimension instead.
+            if (
+                rule.semantic_type == "percentage"
+                and not column.get("is_numeric")
+                and 1 <= categorical_stats.get(name, {}).get("unique_count", 0) <= 2
+            ):
+                return _profile("boolean", 0.8, "Two-value outcome column", "flag")
             return _profile(
                 rule.semantic_type,
                 rule.confidence,

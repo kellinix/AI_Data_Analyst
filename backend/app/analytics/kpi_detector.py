@@ -40,7 +40,7 @@ NON_KPI_NUMERIC_KEYWORDS = [
 # Binary flag columns whose name marks them as the outcome the dataset is
 # about (e.g. "target" in a disease dataset, "churned" in a customer list).
 OUTCOME_KEYWORDS = [
-    "target", "outcome", "label", "churned", "converted", "survived",
+    "target", "outcome", "label", "churn", "churned", "converted", "survived",
     "fraud", "clicked", "purchased", "responded", "approved", "won",
     "success", "disease", "readmitted", "defaulted", "hired",
 ]
@@ -49,6 +49,7 @@ OUTCOME_KEYWORDS = [
 def detect_kpis(
     schema: list[dict[str, Any]],
     numeric_stats: dict[str, Any],
+    categorical_stats: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """
     Return a list of detected KPIs with their values and metadata.
@@ -56,7 +57,7 @@ def detect_kpis(
     from app.analytics.survey_context import survey_fields
     if survey_fields(schema):
         return []
-    kpis = _outcome_rate_kpis(schema, numeric_stats)
+    kpis = _outcome_rate_kpis(schema, numeric_stats, categorical_stats or {})
     matched_cols: set[str] = {kpi["column"] for kpi in kpis}
 
     for col_info in schema:
@@ -226,21 +227,46 @@ def is_outcome_column(col: str) -> bool:
     return any(keyword in parts for keyword in OUTCOME_KEYWORDS)
 
 
+_POSITIVE_TEXT = {"yes", "y", "true"}
+_NEGATIVE_TEXT = {"no", "n", "false"}
+
+
+def text_outcome_share(top_values: list[dict[str, Any]]) -> tuple[float, int] | None:
+    """Share of "Yes" records in a Yes/No text column, with the record count.
+
+    Returns None unless every value is a plain yes/no word, so a two-value
+    column such as "Male"/"Female" is never read as an outcome."""
+    words = {str(item.get("value", "")).strip().lower(): item.get("count", 0) for item in top_values}
+    if not words or not set(words) <= _POSITIVE_TEXT | _NEGATIVE_TEXT:
+        return None
+    total = sum(words.values())
+    if not total:
+        return None
+    positive = sum(count for word, count in words.items() if word in _POSITIVE_TEXT)
+    return positive / total, total
+
+
 def _outcome_rate_kpis(
     schema: list[dict[str, Any]],
     numeric_stats: dict[str, Any],
+    categorical_stats: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Binary outcome columns (role "flag") are the headline of datasets like
     heart-disease or churn data — surface the share of positive records."""
     kpis = []
     for col_info in schema:
-        if not col_info["is_numeric"] or col_info.get("analysis_role") != "flag":
+        if col_info.get("analysis_role") != "flag":
             continue
         col = col_info["name"]
         col_lower = col.lower().replace(" ", "_")
         if not is_outcome_column(col_lower):
             continue
-        mean = numeric_stats.get(col, {}).get("mean")
+        if col_info["is_numeric"]:
+            mean = numeric_stats.get(col, {}).get("mean")
+            count = numeric_stats.get(col, {}).get("count", 0)
+        else:
+            share = text_outcome_share((categorical_stats or {}).get(col, {}).get("top_values", []))
+            mean, count = share if share else (None, 0)
         if mean is None:
             continue
         kpis.append({
@@ -251,7 +277,7 @@ def _outcome_rate_kpis(
             "is_percent": True,
             "is_currency": False,
             "mean": mean,
-            "count": numeric_stats.get(col, {}).get("count", 0),
+            "count": count,
         })
     return kpis
 

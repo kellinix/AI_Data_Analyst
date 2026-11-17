@@ -9,7 +9,11 @@ from typing import Any
 
 from app.analytics.admission_context import is_admission
 from app.analytics.football_context import is_football
-from app.analytics.kpi_detector import is_outcome_column, uses_average_aggregation
+from app.analytics.kpi_detector import (
+    is_outcome_column,
+    text_outcome_share,
+    uses_average_aggregation,
+)
 from app.analytics.labels import derive_label, sentence_label
 from app.analytics.report_relevance import useful_charts
 from app.analytics.survey_context import survey_fields
@@ -124,9 +128,12 @@ def select_charts(
     outcome_cols = [
         c["name"]
         for c in schema
-        if c["is_numeric"]
-        and c.get("analysis_role") == "flag"
+        if c.get("analysis_role") == "flag"
         and is_outcome_column(_normalize(c["name"]))
+        and (
+            c["is_numeric"]
+            or text_outcome_share(categorical_stats.get(c["name"], {}).get("top_values", [])) is not None
+        )
     ]
     if outcome_cols:
         outcome = outcome_cols[0]

@@ -222,3 +222,18 @@ def test_ignores_identifiers_coordinates_and_date_kpis():
     rating = next(kpi for kpi in kpis if kpi["column"] == "customer_satisfaction_rating")
     assert rating["value"] == 6.7
     assert rating["is_total"] is False
+
+
+def test_yes_no_churn_text_becomes_a_churn_rate_kpi():
+    schema = [{"name": "churn", "is_numeric": False, "is_date": False, "analysis_role": "flag"}]
+    categories = {"churn": {"unique_count": 2, "top_values": [{"value": "No", "count": 5174}, {"value": "Yes", "count": 1869}]}}
+    kpis = detect_kpis(schema, {}, categories)
+    assert kpis[0]["kpi_type"] == "outcome_rate"
+    assert kpis[0]["value"] == 26.5
+    assert kpis[0]["count"] == 7043
+
+
+def test_two_value_text_that_is_not_yes_no_is_not_an_outcome_rate():
+    schema = [{"name": "churn", "is_numeric": False, "is_date": False, "analysis_role": "flag"}]
+    categories = {"churn": {"unique_count": 2, "top_values": [{"value": "Male", "count": 5}, {"value": "Female", "count": 5}]}}
+    assert not any(kpi["kpi_type"] == "outcome_rate" for kpi in detect_kpis(schema, {}, categories))

@@ -200,3 +200,25 @@ def test_package_weight_is_treated_as_a_business_metric():
     enriched = enrich_schema_with_semantics(schema, numeric_stats, {})
 
     assert enriched[0]["analysis_role"] == "metric"
+
+
+def test_whole_number_money_column_is_a_currency_metric_not_a_code():
+    # Kaggle coffee sales: prices like 15, 25, 30 with few distinct values
+    # used to look like category codes, so the file showed no money total.
+    schema = [{"name": "money", "dtype": "BIGINT", "is_numeric": True, "is_date": False}]
+    stats = {"money": {"min": 15, "max": 35, "unique_count": 8, "count": 262}}
+    enriched = enrich_schema_with_semantics(schema, stats, {})[0]
+    assert enriched["semantic_type"] == "currency"
+    assert enriched["analysis_role"] == "metric"
+
+
+def test_yes_no_churn_text_column_is_an_outcome_flag():
+    schema = [{"name": "churn", "dtype": "VARCHAR", "is_numeric": False, "is_date": False}]
+    categories = {"churn": {"unique_count": 2, "top_values": [{"value": "No", "count": 5174}, {"value": "Yes", "count": 1869}]}}
+    assert enrich_schema_with_semantics(schema, {}, categories)[0]["analysis_role"] == "flag"
+
+
+def test_many_valued_churn_reason_text_stays_a_dimension():
+    schema = [{"name": "churn_reason", "dtype": "VARCHAR", "is_numeric": False, "is_date": False}]
+    categories = {"churn_reason": {"unique_count": 6, "top_values": []}}
+    assert enrich_schema_with_semantics(schema, {}, categories)[0]["analysis_role"] == "dimension"
