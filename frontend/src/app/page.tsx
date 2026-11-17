@@ -2,7 +2,7 @@
 
 import { motion, AnimatePresence } from "framer-motion"
 import { useRouter } from "next/navigation"
-import { useState, useCallback } from "react"
+import { useState, useCallback, useEffect, useRef } from "react"
 import { toast } from "sonner"
 import { UploadZone } from "@/components/upload/upload-zone"
 import { ProcessingAnimation } from "@/components/upload/processing-animation"
@@ -10,6 +10,11 @@ import { BrandLogo } from "@/components/layout/brand-logo"
 import { useCreateAnalysis } from "@/hooks/use-analyses"
 import { uploadsApi } from "@/lib/api/uploads"
 import { createClient } from "@/lib/supabase/client"
+import {
+  stashPendingUpload,
+  takePendingUpload,
+  clearPendingUpload,
+} from "@/lib/pending-upload"
 import type { UploadedFile } from "@/types"
 
 type PageState = "idle" | "uploading" | "processing" | "done"
@@ -55,14 +60,19 @@ export default function LandingPage() {
   const handleFileAccepted = useCallback(
     async (file: File) => {
       // Gate on a Supabase session before even hitting the backend: a visitor
-      // should be sent to sign up, not shown "authentication failed".
+      // should be sent to sign up, not shown "authentication failed". Stash
+      // the file so the landing page can replay the upload once they come
+      // back signed in.
       const supabase = createClient()
       const {
         data: { session },
       } = await supabase.auth.getSession()
       if (!session) {
+        const stashed = await stashPendingUpload(file)
         toast.info("Create a free account to analyse your file", {
-          description: "It takes a moment, then you can come back and upload.",
+          description: stashed
+            ? "We've kept your file. It will pick up right after you sign in."
+            : "It takes a moment, then you can come back and upload.",
         })
         router.push("/register")
         return
@@ -93,8 +103,11 @@ export default function LandingPage() {
         // Expired or rejected session: send the person to sign back in rather
         // than leaving them stuck on an error toast.
         if (getErrorStatus(error) === 401) {
+          // The file is already in hand; park it so sign-in picks up where
+          // the visitor left off.
+          await stashPendingUpload(file)
           toast.info("Please sign in to keep going", {
-            description: "Your session expired. Sign in and try again.",
+            description: "Your session expired. Sign in and we'll resume this upload.",
           })
           setState("idle")
           router.push("/login")
@@ -117,6 +130,41 @@ export default function LandingPage() {
     },
     [handleFileAccepted]
   )
+
+  // On mount, if the visitor dropped a file before signing up and has now
+  // returned signed in, replay the upload automatically. One attempt per
+  // mount: if the replay itself hits an auth error the handler restashes it
+  // and routes to /login, and a ref guards against the strict-mode double
+  // invocation re-firing the replay.
+  const replayAttemptedRef = useRef(false)
+  useEffect(() => {
+    if (replayAttemptedRef.current) return
+    replayAttemptedRef.current = true
+    let cancelled = false
+    ;(async () => {
+      try {
+        const supabase = createClient()
+        const {
+          data: { session },
+        } = await supabase.auth.getSession()
+        if (!session) return
+        const pending = await takePendingUpload()
+        if (cancelled || !pending) return
+        toast.success("Resuming your upload", {
+          description: pending.name,
+        })
+        await handleFileAccepted(pending)
+      } catch (err) {
+        console.error("Pending upload replay failed", err)
+        // If replay itself blew up before handleFileAccepted could stash it
+        // again, drop the stash so the next visit starts clean.
+        await clearPendingUpload()
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [handleFileAccepted])
 
   return (
     <div className="relative flex min-h-screen flex-col bg-white dark:bg-zinc-950 overflow-hidden">
