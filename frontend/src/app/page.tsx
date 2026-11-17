@@ -9,6 +9,7 @@ import { ProcessingAnimation } from "@/components/upload/processing-animation"
 import { BrandLogo } from "@/components/layout/brand-logo"
 import { useCreateAnalysis } from "@/hooks/use-analyses"
 import { uploadsApi } from "@/lib/api/uploads"
+import { createClient } from "@/lib/supabase/client"
 import type { UploadedFile } from "@/types"
 
 type PageState = "idle" | "uploading" | "processing" | "done"
@@ -30,6 +31,21 @@ function getErrorMessage(error: unknown): string {
   return "Please try again or check the backend logs."
 }
 
+function getErrorStatus(error: unknown): number | undefined {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "response" in error &&
+    typeof error.response === "object" &&
+    error.response !== null &&
+    "status" in error.response &&
+    typeof (error.response as { status: unknown }).status === "number"
+  ) {
+    return (error.response as { status: number }).status
+  }
+  return undefined
+}
+
 export default function LandingPage() {
   const router = useRouter()
   const [state, setState] = useState<PageState>("idle")
@@ -38,6 +54,20 @@ export default function LandingPage() {
 
   const handleFileAccepted = useCallback(
     async (file: File) => {
+      // Gate on a Supabase session before even hitting the backend: a visitor
+      // should be sent to sign up, not shown "authentication failed".
+      const supabase = createClient()
+      const {
+        data: { session },
+      } = await supabase.auth.getSession()
+      if (!session) {
+        toast.info("Create a free account to analyse your file", {
+          description: "It takes a moment, then you can come back and upload.",
+        })
+        router.push("/register")
+        return
+      }
+
       setState("uploading")
       try {
         const uploaded: UploadedFile = await uploadsApi.uploadFile(file)
@@ -60,6 +90,16 @@ export default function LandingPage() {
         router.push(`/analysis/${analysis.id}`)
       } catch (error) {
         console.error("Upload or analysis creation failed", error)
+        // Expired or rejected session: send the person to sign back in rather
+        // than leaving them stuck on an error toast.
+        if (getErrorStatus(error) === 401) {
+          toast.info("Please sign in to keep going", {
+            description: "Your session expired. Sign in and try again.",
+          })
+          setState("idle")
+          router.push("/login")
+          return
+        }
         toast.error("Upload failed", {
           description: getErrorMessage(error),
         })
