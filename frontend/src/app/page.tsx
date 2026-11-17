@@ -198,8 +198,69 @@ export default function LandingPage() {
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             transition={{ delay: 0.5 }}
-            className="relative z-10 pb-10 text-center"
+            className="relative z-10 flex flex-col items-center gap-6 pb-10 text-center"
           >
+            <div className="flex flex-col items-center gap-3">
+              <p className="text-xs font-medium uppercase tracking-wider text-zinc-500 dark:text-zinc-500">
+                Also on your phone
+              </p>
+              <div className="flex flex-wrap items-center justify-center gap-3">
+                <a
+                  href="https://apps.apple.com/app/id6829941087"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="Download Vesquiri on the App Store"
+                  className="flex items-center gap-2.5 rounded-xl bg-zinc-900 px-4 py-2.5 text-white transition-colors hover:bg-zinc-800 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-100"
+                >
+                  <svg
+                    className="h-6 w-6"
+                    viewBox="0 0 24 24"
+                    fill="currentColor"
+                    aria-hidden="true"
+                  >
+                    <path d="M17.5 12.5c0-2.3 1.9-3.4 2-3.5-1.1-1.6-2.8-1.8-3.4-1.8-1.4-.1-2.8.9-3.5.9-.7 0-1.9-.8-3.1-.8-1.6 0-3.1.9-3.9 2.4-1.7 2.9-.4 7.2 1.2 9.5.8 1.2 1.7 2.4 3 2.4 1.2-.1 1.7-.8 3.1-.8 1.4 0 1.9.8 3.2.8 1.3 0 2.2-1.2 3-2.3.9-1.3 1.3-2.6 1.3-2.7 0 0-2.4-.9-2.4-3.7zm-2.3-6.9c.6-.8 1.1-1.9 1-3-.9 0-2.1.6-2.7 1.4-.6.7-1.1 1.8-1 2.9 1 .1 2-.5 2.7-1.3z" />
+                  </svg>
+                  <div className="flex flex-col items-start leading-none">
+                    <span className="text-[10px] opacity-80">Download on the</span>
+                    <span className="text-sm font-semibold">App Store</span>
+                  </div>
+                </a>
+                <a
+                  href="https://play.google.com/store/apps/details?id=com.zephyr.analytics"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label="Get Vesquiri on Google Play"
+                  className="flex items-center gap-2.5 rounded-xl bg-zinc-900 px-4 py-2.5 text-white transition-colors hover:bg-zinc-800 dark:bg-white dark:text-zinc-900 dark:hover:bg-zinc-100"
+                >
+                  <svg
+                    className="h-6 w-6"
+                    viewBox="0 0 24 24"
+                    aria-hidden="true"
+                  >
+                    <path
+                      d="M3.6 2.3c-.4.4-.6 1-.6 1.8v15.8c0 .8.2 1.4.6 1.8l.1.1 8.9-8.9v-.2L3.7 2.2l-.1.1z"
+                      fill="#4285F4"
+                    />
+                    <path
+                      d="m15.5 15.9-3-3v-.2l3-3 .1.1 3.5 2c1 .6 1 1.5 0 2.1l-3.6 2z"
+                      fill="#FBBC04"
+                    />
+                    <path
+                      d="m15.6 15.8-3.1-3.1L3.6 21.7c.3.4.9.4 1.5.1l10.5-6z"
+                      fill="#EA4335"
+                    />
+                    <path
+                      d="M15.6 8.2 5.1 2.2c-.6-.3-1.2-.3-1.5.1l8.9 8.9 3.1-3z"
+                      fill="#34A853"
+                    />
+                  </svg>
+                  <div className="flex flex-col items-start leading-none">
+                    <span className="text-[10px] opacity-80">GET IT ON</span>
+                    <span className="text-sm font-semibold">Google Play</span>
+                  </div>
+                </a>
+              </div>
+            </div>
             <p className="text-xs text-zinc-400 dark:text-zinc-600">
               Upload your data, explore the results, and take your charts with you.
             </p>
